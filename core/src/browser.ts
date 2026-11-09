@@ -1,6 +1,6 @@
 // The browser entry: only modules with no Node-only API and no credential.
 export { BlocksStore, CORE_TASK_FIELDS } from './blocks/store.js';
-export { SdkBlocksData } from './blocks/data.js';
+export { BlocksForbiddenError, BlocksUnauthorizedError, SdkBlocksData } from './blocks/data.js';
 export type { TokenSource } from './blocks/token.js';
 export { PROTECTED_TASK_FIELDS } from './blocks/schema.js';
 export { assertMove, canMove, IllegalMoveError, STEP_STATUS, TERMINAL } from './status.js';

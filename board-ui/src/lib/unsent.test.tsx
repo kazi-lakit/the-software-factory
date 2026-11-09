@@ -1,5 +1,5 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearAllUnsent, clearUnsent, hasUnsent, keepUnsent, readUnsent, useUnsent } from "./unsent";
 
 function Field({ id, initial = "" }: { id: string; initial?: string }) {
@@ -18,6 +18,8 @@ function Field({ id, initial = "" }: { id: string; initial?: string }) {
 afterEach(() => {
   cleanup();
   clearAllUnsent();
+  vi.restoreAllMocks();
+  sessionStorage.clear();
 });
 
 describe("unsent text", () => {
@@ -57,5 +59,43 @@ describe("unsent text", () => {
     expect(hasUnsent("edit:T-1:title")).toBe(true);
     fireEvent.change(field, { target: { value: "Old title" } });
     expect(hasUnsent("edit:T-1:title")).toBe(false);
+  });
+
+  it("survives_a_page_reload_through_session_storage", async () => {
+    keepUnsent("gate:T-1:spec", "split the API part");
+    expect(sessionStorage.getItem("factory-board:unsent:gate:T-1:spec")).toBe("split the API part");
+    // The hosted sign-in reloads the page: a fresh module has an empty memory and reads sessionStorage.
+    vi.resetModules();
+    const reloaded = await import("./unsent");
+    expect(reloaded.readUnsent("gate:T-1:spec")).toBe("split the API part");
+    expect(reloaded.hasUnsent("gate:T-1:spec")).toBe(true);
+  });
+
+  it("removes_the_stored_text_once_sent", () => {
+    keepUnsent("answer:T-1", "use dev");
+    clearUnsent("answer:T-1");
+    expect(sessionStorage.getItem("factory-board:unsent:answer:T-1")).toBeNull();
+  });
+
+  it("clears_every_unsent_key_and_leaves_other_keys", () => {
+    sessionStorage.setItem("blocks-app:oidc-return-to", "/tasks/T-1");
+    keepUnsent("answer:T-1", "a");
+    keepUnsent("new-task:title", "b");
+    clearAllUnsent();
+    expect(sessionStorage.getItem("factory-board:unsent:answer:T-1")).toBeNull();
+    expect(sessionStorage.getItem("factory-board:unsent:new-task:title")).toBeNull();
+    expect(readUnsent("answer:T-1")).toBeUndefined();
+    expect(sessionStorage.getItem("blocks-app:oidc-return-to")).toBe("/tasks/T-1");
+  });
+
+  it("falls_back_to_memory_when_storage_is_unavailable", () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("QuotaExceededError"); });
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("SecurityError"); });
+    keepUnsent("answer:T-2", "kept in memory");
+    expect(readUnsent("answer:T-2")).toBe("kept in memory");
+    expect(hasUnsent("answer:T-2")).toBe(true);
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => { throw new Error("SecurityError"); });
+    clearUnsent("answer:T-2");
+    expect(readUnsent("answer:T-2")).toBeUndefined();
   });
 });

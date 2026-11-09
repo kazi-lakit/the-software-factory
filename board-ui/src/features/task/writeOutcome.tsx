@@ -1,6 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
-import { ForbiddenError, OwnerActionError, StaleDocError, VersionConflictError, type DocKind } from "@factory/core";
+import {
+  BlocksForbiddenError, BlocksUnauthorizedError, ForbiddenError, OwnerActionError, StaleDocError, VersionConflictError, type DocKind
+} from "@factory/core";
 import { BOARD_KEY } from "../board/useBoard";
 
 /** Owner actions take a clock; the page uses real time. */
@@ -30,13 +32,13 @@ export function describeWriteError(error: unknown): WriteProblem {
     };
   }
   if (error instanceof OwnerActionError) return { kind: "message", message: error.message };
-  // A refused read surfaces as the data layer's own error; neither is exported to the browser entry by class.
-  if (error instanceof ForbiddenError || (error instanceof Error && error.name === "BlocksForbiddenError")) {
+  // A refused read surfaces as the data layer's own error.
+  if (error instanceof ForbiddenError || error instanceof BlocksForbiddenError) {
     return { kind: "message", message: FORBIDDEN_MESSAGE };
   }
   // A 401 after a rejected renewal: the auth module has already ended the session and the guard sends the
   // owner to sign in; the unsent text stays in memory (lib/unsent.ts).
-  if (error instanceof Error && error.name === "BlocksUnauthorizedError") return { kind: "message", message: SESSION_MESSAGE };
+  if (error instanceof BlocksUnauthorizedError) return { kind: "message", message: SESSION_MESSAGE };
   const detail = error instanceof Error && error.message ? `: ${error.message}` : ".";
   return { kind: "message", message: `The change was not saved${detail}` };
 }

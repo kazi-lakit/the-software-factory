@@ -129,6 +129,14 @@ describe("AppShell", () => {
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("/login"));
   });
 
+  it("drops_unsent_text_on_sign_out", async () => {
+    sessionStorage.setItem("factory-board:unsent:answer:T-1", "draft");
+    const { onNavigate } = renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("/login"));
+    expect(sessionStorage.getItem("factory-board:unsent:answer:T-1")).toBeNull();
+  });
+
   it("signs_out_and_goes_to_login", async () => {
     const { onNavigate } = renderShell();
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));

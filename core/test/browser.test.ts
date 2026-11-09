@@ -15,4 +15,11 @@ describe('browser entry', () => {
     expect(inputs.some((i) => i.endsWith('src/blocks/store.ts'))).toBe(true);
     expect(inputs.some((i) => i.endsWith('src/owner.ts'))).toBe(true);
   });
+
+  it('exports the Blocks data errors so the Board can tell them apart', async () => {
+    const entry = await import('../src/browser.js');
+    const data = await import('../src/blocks/data.js');
+    expect(entry.BlocksForbiddenError).toBe(data.BlocksForbiddenError);
+    expect(entry.BlocksUnauthorizedError).toBe(data.BlocksUnauthorizedError);
+  });
 });
