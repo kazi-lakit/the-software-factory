@@ -51,7 +51,6 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     const g = cmd.optsWithGlobals() as { mode: string; store: string };
     const mode = choice<Mode>('--mode', g.mode, MODES);
     const kind = choice<'file' | 'blocks'>('--store', g.store, STORES);
-    if (kind === 'blocks') throw new CliExit('Blocks store is not built yet (plan 2)', 2);
     return makeEngine({ root: findRoot(), mode, store: kind, log: io.err });
   };
 

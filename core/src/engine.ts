@@ -10,6 +10,7 @@ import { diffEvents } from './history.js';
 import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
 import type { RepoConfig } from './repoConfig.js';
 import { SecretMissingError } from './secrets.js';
+import { DocTooLargeError, MAX_DOC_BYTES } from './blocks/store.js';
 import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
 import { VersionConflictError, type BoardStore, type StoredSettings } from './store.js';
 import type { AgentStep, DocKind, Gate, Mode, RepoId, Settings, Status, Step, Task } from './types.js';
@@ -61,7 +62,7 @@ export class StageError extends Error {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Errors that the same call would hit again: retrying only delays them. */
-const FINAL_ERRORS = [VersionConflictError, SecretMissingError, ProtectedBranchError, PrBaseMismatchError];
+const FINAL_ERRORS = [VersionConflictError, SecretMissingError, ProtectedBranchError, PrBaseMismatchError, DocTooLargeError];
 
 /** Retries `fn` with doubling waits (baseMs, 2·baseMs, …) between tries. FINAL_ERRORS are rethrown at once. */
 export async function withRetry<T>(fn: () => Promise<T>, opts: { tries: number; baseMs: number }): Promise<T> {
@@ -147,14 +148,20 @@ export class Engine {
   async complete(taskId: string, step: AgentStep, raw: string | undefined): Promise<Task> {
     const { store, mode } = this.deps;
     const task = await this.claimedAt(taskId, step);
-    const result = parseAgentResult(raw, step);
+    let result = parseAgentResult(raw, step);
     const run = await retry(() => store.openRun(taskId, step));
     if (!run) throw new Error(`no open ${step} run for ${taskId}`);
     const actor = `${AGENT_FOR[step]} · ${mode} · run ${run.runId}`;
 
     if (result.status === 'done' && result.doc !== undefined && step !== 'build') {
       const doc = result.doc;
-      await retry(() => store.addDoc(taskId, step, doc, actor));
+      try {
+        await retry(() => store.addDoc(taskId, step, doc, actor));
+      } catch (e) {
+        if (!(e instanceof DocTooLargeError)) throw e;
+        // Deterministic: the doc is not written; the machine decides on a failed result.
+        result = { status: 'failed', summary: `invalid agent result: doc larger than ${MAX_DOC_BYTES} bytes` };
+      }
     }
     await retry(() =>
       store.finishRun(run.runId, { result: result.status, turns: result.turns ?? null, costUsd: result.costUsd ?? null }),

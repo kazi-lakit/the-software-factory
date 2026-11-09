@@ -7,6 +7,8 @@ import { Engine } from '../src/engine.js';
 import type { GitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
 import type { RepoConfig } from '../src/repoConfig.js';
+import { BlocksStore } from '../src/blocks/store.js';
+import { FakeBlocksData } from '../src/blocks/fakeData.js';
 import { MemoryStore } from '../src/store.js';
 import type { RepoId, Task } from '../src/types.js';
 
@@ -86,13 +88,21 @@ describe('factory cli', () => {
     expect(err.join('\n')).toMatch(/no current plan doc/);
   });
 
-  test('--store blocks exits 2', async () => {
-    const { err, go } = setup();
-    expect(await go('--store', 'blocks', 'status')).toBe(2);
-    expect(err).toEqual(['Blocks store is not built yet (plan 2)']);
+  test('status --store blocks runs on an injected BlocksStore', async () => {
+    const { out, wired } = setup();
+    const store = new BlocksStore(new FakeBlocksData('factory-core'), 'core');
+    const engine = new Engine({
+      store, git, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,
+      exec: async () => ({ code: 0, output: '' }), now: () => new Date(), mode: 'session', claimant: 'me',
+    });
+    const go = (...argv: string[]) =>
+      run(argv, { out: (s) => out.push(s), err: () => {} }, async (o) => { wired.push(o); return { engine, store }; });
+    expect(await go('--store', 'blocks', 'status')).toBe(0);
+    expect(wired[0]).toMatchObject({ store: 'blocks' });
+    expect(out.length).toBeGreaterThan(0);
   });
 
-  test('dev commands with --store blocks exit 1 before the blocks exit-2 path', async () => {
+  test('dev commands with --store blocks exit 1 before any store is built', async () => {
     const { err, go, wired } = setup();
     expect(await go('--store', 'blocks', 'dev', 'add', '--repo', 'data', '--title', 'X')).toBe(1);
     expect(await go('--store', 'blocks', 'dev', 'cancel', 'T-1')).toBe(1);

@@ -1,6 +1,10 @@
 import { existsSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { ClientCredentialsToken } from './blocks/token.js';
+import { loadBlocksCredential } from './blocks/credential.js';
+import { SdkBlocksData } from './blocks/data.js';
+import { BlocksStore } from './blocks/store.js';
 import { shellExec } from './checks.js';
 import { Engine } from './engine.js';
 import { LocalGitRepos } from './git.js';
@@ -48,8 +52,39 @@ class LazyGitHub implements GitHub {
   }
 }
 
+/** Builds the Blocks store on the first call (one credential read, a failure is not cached), so file-store commands never touch the Keychain. */
+class LazyBlocksStore implements BoardStore {
+  private inner: Promise<BoardStore> | undefined;
+  private get store(): Promise<BoardStore> {
+    this.inner ??= loadBlocksCredential().then(
+      (cred) =>
+        new BlocksStore(
+          new SdkBlocksData({ apiUrl: cred.apiUrl, projectKey: cred.projectKey, token: new ClientCredentialsToken(cred) }),
+          'core',
+        ),
+    );
+    this.inner.catch(() => { this.inner = undefined; });
+    return this.inner;
+  }
+  listTasks() { return this.store.then((s) => s.listTasks()); }
+  getTask(id: string) { return this.store.then((s) => s.getTask(id)); }
+  createTask(t: Parameters<BoardStore['createTask']>[0]) { return this.store.then((s) => s.createTask(t)); }
+  updateTask(id: string, v: number, patch: Parameters<BoardStore['updateTask']>[2]) { return this.store.then((s) => s.updateTask(id, v, patch)); }
+  addDoc(taskId: string, kind: Parameters<BoardStore['addDoc']>[1], body: string, author: string) { return this.store.then((s) => s.addDoc(taskId, kind, body, author)); }
+  currentDoc(taskId: string, kind: Parameters<BoardStore['currentDoc']>[1]) { return this.store.then((s) => s.currentDoc(taskId, kind)); }
+  addApproval(a: Parameters<BoardStore['addApproval']>[0]) { return this.store.then((s) => s.addApproval(a)); }
+  listApprovals(taskId: string) { return this.store.then((s) => s.listApprovals(taskId)); }
+  getSettings() { return this.store.then((s) => s.getSettings()); }
+  setSettings(v: Parameters<BoardStore['setSettings']>[0]) { return this.store.then((s) => s.setSettings(v)); }
+  startRun(r: Parameters<BoardStore['startRun']>[0]) { return this.store.then((s) => s.startRun(r)); }
+  openRun(taskId: string, step: Parameters<BoardStore['openRun']>[1]) { return this.store.then((s) => s.openRun(taskId, step)); }
+  finishRun(runId: string, p: Parameters<BoardStore['finishRun']>[1]) { return this.store.then((s) => s.finishRun(runId, p)); }
+  addEvents(e: Parameters<BoardStore['addEvents']>[0]) { return this.store.then((s) => s.addEvents(e)); }
+  listEvents(taskId?: string) { return this.store.then((s) => s.listEvents(taskId)); }
+}
+
 export async function wire(o: WireOptions): Promise<{ engine: Engine; store: BoardStore }> {
-  const store = new FileStore(join(o.root, '.factory', 'board.json'));
+  const store: BoardStore = o.store === 'blocks' ? new LazyBlocksStore() : new FileStore(join(o.root, '.factory', 'board.json'));
   const engine = new Engine({
     store,
     git: new LocalGitRepos(o.root),

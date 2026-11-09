@@ -9,7 +9,7 @@ import { FakeGitHub } from '../src/github.js';
 import { IllegalInputError } from '../src/machine.js';
 import type { RepoConfig } from '../src/repoConfig.js';
 import { SecretMissingError } from '../src/secrets.js';
-import { BlocksStore } from '../src/blocks/store.js';
+import { BlocksStore, DocTooLargeError, MAX_DOC_BYTES } from '../src/blocks/store.js';
 import { FakeBlocksData } from '../src/blocks/fakeData.js';
 import { MemoryStore, VersionConflictError, type BoardStore } from '../src/store.js';
 import type { RepoId, Task } from '../src/types.js';
@@ -285,6 +285,24 @@ describe('feedback', () => {
 });
 
 describe('on BlocksStore', () => {
+  test('a spec doc larger than MAX_DOC_BYTES blocks the task and is not written', async () => {
+    const { store, engine } = setup({
+      store: (now) => new BlocksStore(new FakeBlocksData('any', { now }), 'owner', { now }),
+    });
+    await put(store, { status: 'ready' });
+    await engine.next();
+    const t = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'x'.repeat(MAX_DOC_BYTES + 1) }));
+    expect(t.status).toBe('blocked');
+    expect(t.blockedReason).toMatch(/^invalid agent result: doc larger than/);
+    expect(await store.currentDoc('T-1', 'spec')).toBeUndefined();
+  });
+
+  test('withRetry does not retry a DocTooLargeError', async () => {
+    const fn = vi.fn().mockRejectedValue(new DocTooLargeError(MAX_DOC_BYTES + 1));
+    await expect(withRetry(fn, { tries: 3, baseMs: 1 })).rejects.toBeInstanceOf(DocTooLargeError);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
   test('an identical spec rewritten after a changes request waits at spec_review (no loop)', async () => {
     const { store, engine, clock } = setup({
       store: (now) => new BlocksStore(new FakeBlocksData('any', { now }), 'owner', { now }),
