@@ -3,12 +3,13 @@ import { assertPushAllowed, branchName, ProtectedBranchError } from './branchGua
 import { formatReport, runChecks, type Exec } from './checks.js';
 import { claim, claimExpired, release, renew } from './claims.js';
 import { AGENT_FOR } from './defaults.js';
-import { resolveGates, resolveSettings, shouldMerge, validApproval } from './gates.js';
+import { GATE_DOC, resolveGates, resolveSettings, shouldMerge, validApproval } from './gates.js';
 import type { GitRepos } from './git.js';
 import { PrBaseMismatchError, type GitHub } from './github.js';
 import { diffEvents } from './history.js';
 import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
 import type { RepoConfig } from './repoConfig.js';
+import { SecretMissingError } from './secrets.js';
 import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
 import { VersionConflictError, type BoardStore, type StoredSettings } from './store.js';
 import type { AgentStep, DocKind, Gate, Mode, RepoId, Settings, Status, Step, Task } from './types.js';
@@ -22,6 +23,8 @@ export interface EngineDeps {
   now: () => Date;
   mode: Mode;
   claimant: string;
+  /** Operational notes such as tasks sync skipped (the CLI writes them to stderr). Default: dropped. */
+  log?: (msg: string) => void;
 }
 
 export interface Ticket {
@@ -36,6 +39,9 @@ export interface EngineStatus {
   paused: boolean;
   active: { taskId: string; step: Step | null; claimBy: string | null; claimUntil: string | null }[];
   counts: Partial<Record<Status, number>>;
+  tasks: Pick<Task, 'taskId' | 'title' | 'repo' | 'status' | 'stage' | 'blockedReason' | 'question' | 'prUrl'>[];
+  /** Global settings. */
+  settings: Settings;
 }
 
 export class ClaimError extends Error {
@@ -55,7 +61,7 @@ export class StageError extends Error {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Errors that the same call would hit again: retrying only delays them. */
-const FINAL_ERRORS = [VersionConflictError, ProtectedBranchError, PrBaseMismatchError];
+const FINAL_ERRORS = [VersionConflictError, SecretMissingError, ProtectedBranchError, PrBaseMismatchError];
 
 /** Retries `fn` with doubling waits (baseMs, 2·baseMs, …) between tries. FINAL_ERRORS are rethrown at once. */
 export async function withRetry<T>(fn: () => Promise<T>, opts: { tries: number; baseMs: number }): Promise<T> {
@@ -72,8 +78,6 @@ export async function withRetry<T>(fn: () => Promise<T>, opts: { tries: number; 
 const RETRY = { tries: 3, baseMs: 500 };
 const retry = <T>(fn: () => Promise<T>) => withRetry(fn, RETRY);
 
-/** Doc kind whose current version an approval at each gate must match (R1). */
-const GATE_DOC: Record<Gate, DocKind> = { spec: 'spec', plan: 'plan', pr: 'review' };
 const AGENT_STEPS: ReadonlySet<Step> = new Set<Step>(['spec', 'plan', 'build', 'verify', 'review']);
 const WORKING: ReadonlySet<Status> = new Set<Status>(['spec', 'plan', 'build', 'verify', 'review']);
 const taskNum = (id: string) => Number(id.slice(id.indexOf('-') + 1)) || 0;
@@ -99,6 +103,7 @@ export class Engine {
       } catch (e) {
         // Illegal inputs and moves are bugs and surface. Version conflicts and outages that outlast the retries skip this task for this pass.
         if (e instanceof IllegalInputError || e instanceof IllegalMoveError) throw e;
+        this.deps.log?.(`sync: skipped ${task.taskId}: ${firstLine(e)}`);
       }
     }
   }
@@ -243,7 +248,10 @@ export class Engine {
     const active = tasks
       .filter((t) => !claimExpired(t, now()))
       .map((t) => ({ taskId: t.taskId, step: t.stage, claimBy: t.claimBy, claimUntil: t.claimUntil }));
-    return { paused: stored.global.paused, active, counts };
+    const list = tasks.map(({ taskId, title, repo, status, stage, blockedReason, question, prUrl }) => ({
+      taskId, title, repo, status, stage, blockedReason, question, prUrl,
+    }));
+    return { paused: stored.global.paused, active, counts, tasks: list, settings: stored.global };
   }
 
   /** The only way a task changes status: checks the move, writes with the task's version, clears the claim, logs events. */
@@ -367,7 +375,7 @@ export class Engine {
 
   /** Best effort: records a setup failure on the task's history; errors are ignored. */
   private async noteSetupError(taskId: string, e: unknown): Promise<void> {
-    const message = (e instanceof Error ? e.message : String(e)).split('\n')[0] ?? '';
+    const message = firstLine(e);
     try {
       await retry(() =>
         this.deps.store.addEvents([
@@ -423,6 +431,10 @@ export class Engine {
 function requireBranch(task: Task): string {
   if (!task.branch) throw new Error(`${task.taskId} has no branch`);
   return task.branch;
+}
+
+function firstLine(e: unknown): string {
+  return (e instanceof Error ? e.message : String(e)).split('\n')[0] ?? '';
 }
 
 function costReason(cost: number, s: Settings): string {

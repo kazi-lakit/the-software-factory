@@ -1,5 +1,8 @@
 import { isProtected } from './branchGuard.js';
-import type { Approval, Gate, RepoSettings, Settings } from './types.js';
+import type { Approval, DocKind, Gate, RepoSettings, Settings } from './types.js';
+
+/** Doc kind whose current version an approval at each gate must match (R1). */
+export const GATE_DOC: Readonly<Record<Gate, DocKind>> = { spec: 'spec', plan: 'plan', pr: 'review' };
 
 /** Repo settings override global ones; gates merge per key. */
 export function resolveSettings(global: Settings, repo?: RepoSettings): Settings {

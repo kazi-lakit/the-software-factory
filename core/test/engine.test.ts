@@ -8,6 +8,7 @@ import type { GitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
 import { IllegalInputError } from '../src/machine.js';
 import type { RepoConfig } from '../src/repoConfig.js';
+import { SecretMissingError } from '../src/secrets.js';
 import { MemoryStore, VersionConflictError } from '../src/store.js';
 import type { RepoId, Task } from '../src/types.js';
 
@@ -48,7 +49,7 @@ class FakeGit implements GitRepos {
   }
 }
 
-function setup(opts: { failing?: string[]; git?: FakeGit; onExec?: () => Promise<void> } = {}) {
+function setup(opts: { failing?: string[]; git?: FakeGit; onExec?: () => Promise<void>; log?: (msg: string) => void } = {}) {
   const store = new MemoryStore();
   const git = opts.git ?? new FakeGit();
   const github = new FakeGitHub();
@@ -66,6 +67,7 @@ function setup(opts: { failing?: string[]; git?: FakeGit; onExec?: () => Promise
     now: () => clock.t,
     mode: 'session',
     claimant: 'me',
+    ...(opts.log ? { log: opts.log } : {}),
   };
   return { store, git, github, clock, engine: new Engine(deps) };
 }
@@ -749,17 +751,38 @@ describe('sync', () => {
 });
 
 describe('status', () => {
-  test('lists active claims and counts per status', async () => {
+  test('lists active claims, counts per status, every task and the global settings', async () => {
     const { store, engine, clock } = setup();
     await put(store, { status: 'build', stage: 'build', branch: 'b', ...claimedBy('other', clock) });
     await put(store, { status: 'build', stage: 'build', branch: 'b', claimBy: 'old', claimUntil: '2026-01-01T00:00:00Z' });
-    await put(store, { status: 'ready' });
+    await put(store, { status: 'blocked', stage: 'verify', branch: 'b', question: 'which API?', blockedReason: null, prUrl: 'u' });
     const s = await engine.status();
     expect(s).toEqual({
       paused: false,
       active: [{ taskId: 'T-1', step: 'build', claimBy: 'other', claimUntil: claimedBy('other', clock).claimUntil }],
-      counts: { build: 2, ready: 1 },
+      counts: { build: 2, blocked: 1 },
+      tasks: [
+        { taskId: 'T-1', title: 'Add widget', repo: 'data', status: 'build', stage: 'build', blockedReason: null, question: null, prUrl: null },
+        { taskId: 'T-2', title: 'Add widget', repo: 'data', status: 'build', stage: 'build', blockedReason: null, question: null, prUrl: null },
+        { taskId: 'T-3', title: 'Add widget', repo: 'data', status: 'blocked', stage: 'verify', blockedReason: null, question: 'which API?', prUrl: 'u' },
+      ],
+      settings: DEFAULT_SETTINGS,
     });
+  });
+});
+
+describe('sync log', () => {
+  test('a task skipped by sync is logged with its first error line', async () => {
+    vi.useFakeTimers();
+    const logs: string[] = [];
+    const { store, engine, github } = setup({ log: (m) => logs.push(m) });
+    const pr = await github.openPr({ remote: REMOTE, head: 'factory/T-1-x', base: 'dev', title: 't', body: 'b' });
+    await put(store, { status: 'pr_open', branch: 'factory/T-1-x', prUrl: pr.url });
+    vi.spyOn(github, 'prState').mockRejectedValue(new Error('GitHub down\nstack'));
+    const p = engine.sync();
+    await vi.runAllTimersAsync();
+    await p;
+    expect(logs).toEqual(['sync: skipped T-1: GitHub down']);
   });
 });
 
@@ -779,6 +802,12 @@ describe('withRetry', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(fn).toHaveBeenCalledTimes(3);
     await settled;
+  });
+
+  test('never retries a SecretMissingError', async () => {
+    const fn = vi.fn().mockRejectedValue(new SecretMissingError('github-pat not found in Keychain'));
+    await expect(withRetry(fn, { tries: 3, baseMs: 500 })).rejects.toBeInstanceOf(SecretMissingError);
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 
   test('never retries a VersionConflictError', async () => {

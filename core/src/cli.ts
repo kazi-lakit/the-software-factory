@@ -3,11 +3,12 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { Command, CommanderError } from 'commander';
 import type { Engine } from './engine.js';
+import { GATE_DOC } from './gates.js';
 import { diffEvents } from './history.js';
 import { REPO_IDS } from './repoConfig.js';
 import { assertMove } from './status.js';
 import type { BoardStore } from './store.js';
-import type { AgentStep, DocKind, Gate, Mode, RepoId } from './types.js';
+import type { AgentStep, Gate, Mode, RepoId } from './types.js';
 import { findRoot, wire, type WireOptions } from './wire.js';
 
 export type { WireOptions } from './wire.js';
@@ -27,8 +28,6 @@ class CliExit extends Error {
   }
 }
 
-/** Doc kind whose current version an approval at each gate refers to (R1). */
-const GATE_DOC: Record<Gate, DocKind> = { spec: 'spec', plan: 'plan', pr: 'review' };
 const STEPS = ['spec', 'plan', 'build', 'verify', 'review'];
 const MODES = ['sdk', 'loop', 'session'];
 const STORES = ['file', 'blocks'];
@@ -53,7 +52,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     const mode = choice<Mode>('--mode', g.mode, MODES);
     const kind = choice<'file' | 'blocks'>('--store', g.store, STORES);
     if (kind === 'blocks') throw new CliExit('Blocks store is not built yet (plan 2)', 2);
-    return makeEngine({ root: findRoot(), mode, store: kind });
+    return makeEngine({ root: findRoot(), mode, store: kind, log: io.err });
   };
 
   const printJson = (v: unknown) => io.out(JSON.stringify(v, null, 2));
@@ -119,10 +118,17 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       io.out(`paused: ${s.paused}`);
       for (const [status, n] of Object.entries(s.counts)) io.out(`${status}: ${n}`);
       for (const a of s.active) io.out(`active: ${a.taskId} ${a.step ?? '-'} by ${a.claimBy ?? '-'} until ${a.claimUntil ?? '-'}`);
+      for (const t of s.tasks.filter((x) => x.status === 'blocked')) {
+        const reason = t.blockedReason ? ` (${t.blockedReason})` : '';
+        io.out(`blocked: ${t.taskId} at ${t.stage ?? '-'}${reason}, question: ${t.question ?? '-'}`);
+      }
     });
 
   const dev = program.command('dev').description('stand-ins for the Board page (file store only)');
-  const openDev = async (cmd: Command): Promise<BoardStore> => (await open(cmd)).store;
+  const openDev = async (cmd: Command): Promise<BoardStore> => {
+    if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') throw new CliExit('dev commands need --store file', 1);
+    return (await open(cmd)).store;
+  };
   const at = () => new Date().toISOString();
 
   dev

@@ -14,6 +14,8 @@ export interface WireOptions {
   root: string;
   mode: Mode;
   store: 'file' | 'blocks';
+  /** Where the engine's operational notes go. */
+  log?: (msg: string) => void;
 }
 
 /** `FACTORY_ROOT`, else the nearest parent folder of the cwd that contains `repos/`. */
@@ -57,6 +59,7 @@ export async function wire(o: WireOptions): Promise<{ engine: Engine; store: Boa
     now: () => new Date(),
     mode: o.mode,
     claimant: process.env.FACTORY_CLAIMANT || `${o.mode}:${hostname()}`,
+    ...(o.log ? { log: o.log } : {}),
   });
   return { engine, store };
 }

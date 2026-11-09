@@ -36,11 +36,15 @@ function setup() {
     store, git, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,
     exec, now: () => new Date(), mode: 'session', claimant: 'me',
   });
-  const makeEngine = async (_o: WireOptions) => ({ engine, store });
+  const wired: WireOptions[] = [];
+  const makeEngine = async (o: WireOptions) => {
+    wired.push(o);
+    return { engine, store };
+  };
   const out: string[] = [];
   const err: string[] = [];
   const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine);
-  return { store, out, err, go };
+  return { store, out, err, go, wired };
 }
 
 const put = async (store: MemoryStore, patch: Partial<Task>) => {
@@ -86,6 +90,30 @@ describe('factory cli', () => {
     const { err, go } = setup();
     expect(await go('--store', 'blocks', 'status')).toBe(2);
     expect(err).toEqual(['Blocks store is not built yet (plan 2)']);
+  });
+
+  test('dev commands with --store blocks exit 1 before the blocks exit-2 path', async () => {
+    const { err, go, wired } = setup();
+    expect(await go('--store', 'blocks', 'dev', 'add', '--repo', 'data', '--title', 'X')).toBe(1);
+    expect(await go('--store', 'blocks', 'dev', 'cancel', 'T-1')).toBe(1);
+    expect(err).toEqual(['error: dev commands need --store file', 'error: dev commands need --store file']);
+    expect(wired).toHaveLength(0);
+  });
+
+  test('the engine log goes to stderr', async () => {
+    const { err, go, wired } = setup();
+    await go('status');
+    wired[0]!.log!('sync: skipped T-1: GitHub down');
+    expect(err).toEqual(['sync: skipped T-1: GitHub down']);
+  });
+
+  test('status prints blocked tasks with their questions', async () => {
+    const { store, out, go } = setup();
+    await put(store, { status: 'blocked', stage: 'verify', question: 'AC3: which API?' });
+    await put(store, { status: 'blocked', stage: 'build', blockedReason: 'returned to build 3 times', question: 'tests fail' });
+    await go('status');
+    expect(out).toContain('blocked: T-1 at verify, question: AC3: which API?');
+    expect(out).toContain('blocked: T-2 at build (returned to build 3 times), question: tests fail');
   });
 
   test('ship against a branch dev exits 1 with one line', async () => {
@@ -144,7 +172,10 @@ describe('factory cli', () => {
     const { store, out, go } = setup();
     await put(store, { status: 'ready' });
     expect(await go('status', '--json')).toBe(0);
-    expect(JSON.parse(out[0]!).counts).toEqual({ ready: 1 });
+    const json = JSON.parse(out[0]!);
+    expect(json.counts).toEqual({ ready: 1 });
+    expect(json.tasks).toMatchObject([{ taskId: 'T-1', status: 'ready' }]);
+    expect(json.settings.gates).toEqual({ spec: true, plan: false, pr: true });
     await go('status');
     expect(out.slice(1).join('\n')).toMatch(/ready: 1/);
   });

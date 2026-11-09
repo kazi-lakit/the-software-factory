@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
-import { resolveGates, resolveSettings, shouldMerge, validApproval } from '../src/gates.js';
+import { GATE_DOC, resolveGates, resolveSettings, shouldMerge, validApproval } from '../src/gates.js';
 import { isProtected } from '../src/branchGuard.js';
 
 test('most specific gate wins', () => {
@@ -32,4 +32,8 @@ test('isProtected strips refs/heads/ and origin/', () => {
   expect(isProtected('stg')).toBe(true);
   expect(isProtected('main2')).toBe(false);
   expect(isProtected('feature/main')).toBe(false);
+});
+
+test('GATE_DOC: the doc kind each gate approves (R1)', () => {
+  expect(GATE_DOC).toEqual({ spec: 'spec', plan: 'plan', pr: 'review' });
 });
