@@ -19,6 +19,13 @@ export class FakeBlocksData implements BlocksData {
 
   failNextReply(op: 'insert' | 'update'): void { this.failNext[op] = true; }
 
+  /** Test setup: stores a row as given (system keys allowed), with no access or unique checks. */
+  seed(schema: SchemaName, row: Row): void {
+    const stored: Row = Object.fromEntries(FIELDS[schema].map(f => [f.name, null]));
+    Object.assign(stored, { ItemId: `I-${++this.counter}`, CreatedDate: this.now().toISOString(), CreatedBy: 'seed' }, row);
+    this.table(schema).push(stored);
+  }
+
   rows(schema: SchemaName): Row[] { return (this.tables.get(schema) ?? []).map(r => ({ ...r })); }
 
   private allowed(schema: SchemaName, op: Operation): boolean {

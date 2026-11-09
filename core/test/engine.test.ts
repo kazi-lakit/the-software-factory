@@ -302,6 +302,26 @@ describe('on BlocksStore', () => {
     expect(await engine.next()).toBeNull();
     expect((await store.getTask('T-1')).status).toBe('spec_review');
   });
+
+  test('the core identity on role factory-core drives a task from ready through spec to plan', async () => {
+    let data!: FakeBlocksData;
+    const { store, engine } = setup({
+      store: (now) => new BlocksStore((data = new FakeBlocksData('factory-core', { now })), 'core', { now }),
+    });
+    // The owner's rows, seeded directly: factory-core may not insert tasks or approvals.
+    data.seed('FactoryTask', {
+      taskId: 'T-1', title: 'Add widget', description: 'd', repo: 'data', baseBranch: 'dev', status: 'ready',
+      gateOverrides: '{}', costUsd: '0', attempt: 0, version: 1,
+    });
+    expect(await engine.next()).toMatchObject({ step: 'spec' });
+    const t = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: '# Spec', costUsd: 0.5 }));
+    expect(t).toMatchObject({ status: 'spec_review', costUsd: 0.5, claimBy: null });
+    expect(await store.currentDoc('T-1', 'spec')).toMatchObject({ version: 1, body: '# Spec' });
+    expect(await store.listEvents('T-1')).toContainEqual(expect.objectContaining({ field: 'status', to: 'spec_review' }));
+    data.seed('FactoryApproval', { approvalId: 'a-1', taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'approve', comment: '', at: '2026-11-09T10:00:00.000Z' });
+    expect(await engine.next()).toMatchObject({ step: 'plan' });
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'plan', stage: 'plan' });
+  });
 });
 
 describe('complete', () => {

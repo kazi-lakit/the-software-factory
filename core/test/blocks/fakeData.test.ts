@@ -18,6 +18,12 @@ describe('FakeBlocksData', () => {
     await f.insert('FactoryTask', { taskId: 'a' });
     expect(f.rows('FactoryTask')[0]!.CreatedDate).toBe('2026-01-02T03:04:05.000Z');
   });
+  it('seed stores a row as given, without access checks, filling missing fields with null', async () => {
+    const f = new FakeBlocksData('factory-core');
+    f.seed('FactoryTask', { taskId: 'T-1', CreatedDate: '2026-11-09T10:00:00' });
+    expect(f.rows('FactoryTask')[0]).toMatchObject({ taskId: 'T-1', title: null, CreatedDate: '2026-11-09T10:00:00', ItemId: 'I-1' });
+    expect(await f.list('FactoryTask', {})).toHaveLength(1);
+  });
   it('duplicate unique value returns duplicate and stores nothing', async () => {
     const f = new FakeBlocksData('factory-owner');
     await f.insert('FactoryTask', { taskId: 'a' });

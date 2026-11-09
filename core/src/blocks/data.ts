@@ -26,6 +26,14 @@ export class BlocksForbiddenError extends Error {
   }
 }
 
+/** HTTP 401 again after the token was refreshed once. */
+export class BlocksUnauthorizedError extends Error {
+  constructor() {
+    super('blocks: unauthorized after token refresh');
+    this.name = 'BlocksUnauthorizedError';
+  }
+}
+
 const MAX_PAGES = 100;
 const PAGE_SIZE = 100;
 const DUPLICATE = /A record with the same value for '[^']+' already exists/;
@@ -72,7 +80,7 @@ export class SdkBlocksData implements BlocksData {
           throw new Error(`blocks: ${operationName} transport error`);
         }
         if (error.status === 401) {
-          if (retry) throw new Error('blocks: unauthorized after token refresh');
+          if (retry) throw new BlocksUnauthorizedError();
           this.p.token.invalidate();
           continue;
         }
@@ -80,7 +88,7 @@ export class SdkBlocksData implements BlocksData {
         throw new Error(`blocks: ${operationName} failed (HTTP ${error.status})`);
       }
     }
-    throw new Error('blocks: unauthorized after token refresh');
+    throw new BlocksUnauthorizedError();
   }
 
   async list(schema: SchemaName, filter: Filter, fields?: string[]): Promise<Row[]> {

@@ -4,7 +4,7 @@ import { NotFoundError, VersionConflictError, type BoardStore, type StoredSettin
 import type {
   Approval, Doc, DocKind, FactoryEvent, Gate, Mode, RepoId, RepoSettings, Run, Settings, Step, Task,
 } from '../types.js';
-import { BlocksForbiddenError, type BlocksData, type Filter, type Row } from './data.js';
+import { BlocksForbiddenError, BlocksUnauthorizedError, type BlocksData, type Filter, type Row } from './data.js';
 import type { SchemaName } from './schema.js';
 import { classifyUpdate, settleConditionalUpdate, type RereadResult, type WriteOutcome } from './update.js';
 
@@ -39,6 +39,24 @@ export const DOC_RETRY_WINDOW_MS = 120_000;
 /** createTask and addDoc re-read and retry a duplicate key this many times. */
 const DUPLICATE_RETRIES = 3;
 
+/** A JSON object, or undefined for null, malformed JSON or any non-object: one bad Board row must not stop a read. */
+function parseObject(v: Value | undefined): Record<string, unknown> | undefined {
+  if (v === null || v === undefined) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(String(v));
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Blocks may send CreatedDate without a zone; it is UTC then, never local time. */
+const ZONED = /(?:Z|[+-]\d{2}:?\d{2})$/i;
+const parseUtc = (v: Value | undefined): number => {
+  const s = text(v);
+  return Date.parse(ZONED.test(s) ? s : `${s}Z`);
+};
+
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 const str = (v: Value | undefined): string | null => (v === null || v === undefined ? null : String(v));
 const text = (v: Value | undefined): string => String(v ?? '');
@@ -66,7 +84,7 @@ function decodeTask(r: Row): Task {
     blockedReason: str(r.blockedReason),
     question: str(r.question),
     answer: str(r.answer),
-    gateOverrides: r.gateOverrides === null || r.gateOverrides === undefined ? {} : (JSON.parse(String(r.gateOverrides)) as Task['gateOverrides']),
+    gateOverrides: (parseObject(r.gateOverrides) ?? {}) as Task['gateOverrides'],
     claimBy: str(r.claimBy),
     claimUntil: str(r.claimUntil),
     costUsd: num(r.costUsd),
@@ -210,7 +228,7 @@ export class BlocksStore implements BoardStore {
 
   /** A CreatedDate in the future (clock skew) counts as recent. */
   private isRecent(createdDate: Value | undefined): boolean {
-    const created = Date.parse(text(createdDate));
+    const created = parseUtc(createdDate);
     return Number.isFinite(created) && this.now().getTime() - created <= DOC_RETRY_WINDOW_MS;
   }
 
@@ -224,7 +242,7 @@ export class BlocksStore implements BoardStore {
 
   async addApproval(a: Omit<Approval, 'at'>): Promise<Approval> {
     this.ownerOnly('addApproval');
-    const approval: Approval = { taskId: a.taskId, gate: a.gate, docVersion: a.docVersion, decision: a.decision, comment: a.comment, at: new Date().toISOString() };
+    const approval: Approval = { taskId: a.taskId, gate: a.gate, docVersion: a.docVersion, decision: a.decision, comment: a.comment, at: this.now().toISOString() };
     const r = await this.data.insert('FactoryApproval', { approvalId: randomUUID(), ...approval });
     if (r.kind === 'forbidden') throw new BlocksForbiddenError('insertFactoryApproval');
     if (r.kind === 'duplicate') throw new Error('addApproval: approval id already taken');
@@ -240,9 +258,9 @@ export class BlocksStore implements BoardStore {
     const global: Settings = { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates } };
     const repos: StoredSettings['repos'] = {};
     for (const r of rows) {
-      const value = JSON.parse(text(r.json) || 'null') as Partial<Settings> | RepoSettings | null;
-      // A null json is a repo scope that setSettings removed (rows are never deleted).
-      if (value === null) continue;
+      // A null json is a repo scope that setSettings removed (rows are never deleted); a malformed one is skipped.
+      const value = parseObject(r.json) as Partial<Settings> | RepoSettings | undefined;
+      if (value === undefined) continue;
       if (r.scope === 'global') Object.assign(global, value, { gates: { ...global.gates, ...value.gates } });
       else repos[text(r.scope) as RepoId] = value as RepoSettings;
     }
@@ -278,7 +296,7 @@ export class BlocksStore implements BoardStore {
   async startRun(r: { taskId: string; step: Step; mode: Mode; agent: string }): Promise<Run> {
     const run: Run = {
       runId: `R-${randomUUID()}`, taskId: r.taskId, step: r.step, mode: r.mode, agent: r.agent,
-      startedAt: new Date().toISOString(), endedAt: null, result: null, turns: null, costUsd: null,
+      startedAt: this.now().toISOString(), endedAt: null, result: null, turns: null, costUsd: null,
     };
     const res = await this.data.insert('FactoryRun', { ...run, version: 1 });
     if (res.kind === 'forbidden') throw new BlocksForbiddenError('insertFactoryRun');
@@ -297,7 +315,7 @@ export class BlocksStore implements BoardStore {
     if (!row) throw new NotFoundError(`run ${runId}`);
     const expected = num(row.version);
     const outcome = await this.settle('FactoryRun', { runId }, expected, {
-      result: p.result, turns: p.turns, costUsd: decimalText(p.costUsd), endedAt: new Date().toISOString(),
+      result: p.result, turns: p.turns, costUsd: decimalText(p.costUsd), endedAt: this.now().toISOString(),
     });
     if (outcome.kind !== 'applied') throw this.settleError(outcome, `run ${runId}`, runId, expected);
   }
@@ -337,7 +355,7 @@ export class BlocksStore implements BoardStore {
           if (rows.length === 1) seenVersion = Number(rows[0]!.version);
           return { rows: rows.map((r) => ({ version: Number(r.version), writeId: str(r.writeId) })) };
         } catch (error) {
-          const denied = error instanceof BlocksForbiddenError || (error instanceof Error && error.message === 'blocks: unauthorized after token refresh');
+          const denied = error instanceof BlocksForbiddenError || error instanceof BlocksUnauthorizedError;
           return { error: denied ? 'denied' : 'failed' };
         }
       },

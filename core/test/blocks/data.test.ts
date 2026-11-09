@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { BlocksForbiddenError, SdkBlocksData } from '../../src/blocks/data.js';
+import { BlocksForbiddenError, BlocksUnauthorizedError, SdkBlocksData } from '../../src/blocks/data.js';
 import { FIELDS } from '../../src/blocks/schema.js';
 
 const projectKey = 'PK-test';
@@ -72,6 +72,7 @@ describe('SdkBlocksData', () => {
   it('a second 401 throws', async () => {
     const t = adapt([{ status: 401, body: {} }, { status: 401, body: {} }]);
     await expect(t.data.list('FactoryTask', {})).rejects.toThrow('blocks: unauthorized after token refresh');
+    await expect(adapt([{ status: 401, body: {} }, { status: 401, body: {} }]).data.list('FactoryTask', {})).rejects.toBeInstanceOf(BlocksUnauthorizedError);
     expect(t.seen).toHaveLength(2);
   });
   it('403 is forbidden for insert and update, and BlocksForbiddenError for list', async () => {

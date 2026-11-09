@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BlocksForbiddenError, type BlocksData } from '../../src/blocks/data.js';
+import { BlocksForbiddenError, BlocksUnauthorizedError, type BlocksData } from '../../src/blocks/data.js';
 import { FakeBlocksData } from '../../src/blocks/fakeData.js';
 import {
   BlocksStore, CORE_TASK_FIELDS, DocTooLargeError, MAX_DOC_BYTES, OwnerOnlyError,
@@ -132,6 +132,54 @@ describe('BlocksStore', () => {
     expect((await s.currentDoc('T-1', 'spec'))?.version).toBe(2);
   });
 
+  describe('addDoc reads CreatedDate as UTC unless it names a zone', () => {
+    // On a machine not on UTC, reading the zone-less form as local time moves it outside or inside the window.
+    const at = (iso: string) => {
+      const clock = { t: new Date(iso) };
+      const data = new FakeBlocksData('any');
+      return { clock, data, s: new BlocksStore(data, 'owner', { now: () => clock.t }) };
+    };
+    const seedDoc = (data: FakeBlocksData, CreatedDate: string) =>
+      data.seed('FactoryDoc', { docKey: 'T-1:spec:1', taskId: 'T-1', kind: 'spec', version: 1, body: 'same', bodySha256: '0967115f2813a3541eaef77de9d9d5773f1c0c04314b0bbfe4ff3b3b1c55b5d5', author: 'me', CreatedDate });
+    for (const created of ['2026-11-09T10:00:00', '2026-11-09T10:00:00.000', '2026-11-09T10:00:00Z', '2026-11-09T16:00:00+06:00', '2026-11-09T16:00:00+0600']) {
+      it(`${created}: within 120 s is a retry, after is v+1`, async () => {
+        const a = at('2026-11-09T10:01:59Z');
+        seedDoc(a.data, created);
+        expect((await a.s.addDoc('T-1', 'spec', 'same', 'me')).version).toBe(1);
+        const b = at('2026-11-09T10:02:01Z');
+        seedDoc(b.data, created);
+        expect((await b.s.addDoc('T-1', 'spec', 'same', 'me')).version).toBe(2);
+      });
+    }
+  });
+
+  it('one malformed Board row does not stop listTasks or getSettings', async () => {
+    const data = new FakeBlocksData('any');
+    const s = new BlocksStore(data, 'owner');
+    await s.createTask({ title: 'a', description: '', repo: 'data' });
+    await s.createTask({ title: 'b', description: '', repo: 'data' });
+    await s.createTask({ title: 'c', description: '', repo: 'data' });
+    for (const [taskId, gateOverrides] of [['T-1', '{not json'], ['T-2', '[1]'], ['T-3', '"x"']] as const) {
+      expect(await data.update('FactoryTask', { taskId }, { gateOverrides })).toEqual({ kind: 'applied' });
+    }
+    expect((await s.listTasks()).map((t) => t.gateOverrides)).toEqual([{}, {}, {}]);
+    data.seed('FactorySettings', { scope: 'global', json: '{bad', version: 1 });
+    data.seed('FactorySettings', { scope: 'os', json: '7', version: 1 });
+    data.seed('FactorySettings', { scope: 'data', json: '{"maxParallel":1}', version: 1 });
+    expect(await s.getSettings()).toEqual({ global: DEFAULT_SETTINGS, repos: { data: { maxParallel: 1 } } });
+  });
+
+  it('timestamps come from the injected clock', async () => {
+    const t = new Date('2026-01-02T03:04:05.000Z');
+    const data = new FakeBlocksData('any');
+    const s = new BlocksStore(data, 'owner', { now: () => t });
+    expect((await s.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'approve', comment: '' })).at).toBe(t.toISOString());
+    const run = await s.startRun({ taskId: 'T-1', step: 'spec', mode: 'sdk', agent: 'x' });
+    expect(run.startedAt).toBe(t.toISOString());
+    await s.finishRun(run.runId, { result: 'done', turns: null, costUsd: null });
+    expect(data.rows('FactoryRun')[0]!.endedAt).toBe(t.toISOString());
+  });
+
   it('lost reply on updateTask is settled by the re-read', async () => {
     const data = new FakeBlocksData('any');
     const s = new BlocksStore(data, 'owner');
@@ -193,8 +241,12 @@ describe('BlocksStore', () => {
       await expect(s.updateTask('T-1', 1, { status: 'ready' })).rejects.toBeInstanceOf(NotFoundError);
     });
     it('not applied + unauthorized-after-refresh re-read → NotFoundError', async () => {
-      const s = new BlocksStore(stub({ update: { kind: 'not-applied' }, list: async () => { throw new Error('blocks: unauthorized after token refresh'); } }), 'core');
+      const s = new BlocksStore(stub({ update: { kind: 'not-applied' }, list: async () => { throw new BlocksUnauthorizedError(); } }), 'core');
       await expect(s.updateTask('T-1', 1, { status: 'ready' })).rejects.toBeInstanceOf(NotFoundError);
+    });
+    it('a plain Error with the unauthorized text is not denied (no message matching)', async () => {
+      const s = new BlocksStore(stub({ update: { kind: 'not-applied' }, list: async () => { throw new Error('blocks: unauthorized after token refresh'); } }), 'core');
+      await expect(s.updateTask('T-1', 1, { status: 'ready' })).rejects.toThrow('task T-1 update outcome unknown');
     });
     it('not applied + failed re-read → outcome unknown', async () => {
       const s = new BlocksStore(stub({ update: { kind: 'not-applied' }, list: async () => { throw new Error('blocks: getFactoryTasks failed (HTTP 500)'); } }), 'core');
