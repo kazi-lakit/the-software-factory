@@ -1,0 +1,46 @@
+{
+  "fields": [
+    {
+      "name": "docKey",
+      "type": "String",
+      "isArray": false,
+      "description": "Unique key: taskId:kind:version."
+    },
+    {
+      "name": "taskId",
+      "type": "String",
+      "isArray": false,
+      "description": "Task the document belongs to."
+    },
+    {
+      "name": "kind",
+      "type": "String",
+      "isArray": false,
+      "description": "Document kind."
+    },
+    {
+      "name": "version",
+      "type": "Int",
+      "isArray": false,
+      "description": "Document version."
+    },
+    {
+      "name": "body",
+      "type": "String",
+      "isArray": false,
+      "description": "Document body."
+    },
+    {
+      "name": "bodySha256",
+      "type": "String",
+      "isArray": false,
+      "description": "SHA-256 of the body."
+    },
+    {
+      "name": "author",
+      "type": "String",
+      "isArray": false,
+      "description": "Author of the document."
+    }
+  ]
+}

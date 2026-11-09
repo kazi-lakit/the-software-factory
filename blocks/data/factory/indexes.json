@@ -1,0 +1,51 @@
+[
+  {
+    "schemaName": "FactoryTask",
+    "fields": [
+      "taskId"
+    ],
+    "name": "factory_task_taskid_unique"
+  },
+  {
+    "schemaName": "FactoryDoc",
+    "fields": [
+      "docKey"
+    ],
+    "name": "factory_doc_dockey_unique"
+  },
+  {
+    "schemaName": "FactoryApproval",
+    "fields": [
+      "approvalId"
+    ],
+    "name": "factory_approval_approvalid_unique"
+  },
+  {
+    "schemaName": "FactorySettings",
+    "fields": [
+      "scope"
+    ],
+    "name": "factory_settings_scope_unique"
+  },
+  {
+    "schemaName": "FactoryRun",
+    "fields": [
+      "runId"
+    ],
+    "name": "factory_run_runid_unique"
+  },
+  {
+    "schemaName": "FactoryEvent",
+    "fields": [
+      "eventId"
+    ],
+    "name": "factory_event_eventid_unique"
+  },
+  {
+    "schemaName": "FactorySpike",
+    "fields": [
+      "spikeKey"
+    ],
+    "name": "factory_spike_spikekey_unique"
+  }
+]

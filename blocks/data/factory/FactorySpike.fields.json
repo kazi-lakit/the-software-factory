@@ -1,0 +1,22 @@
+{
+  "fields": [
+    {
+      "name": "spikeKey",
+      "type": "String",
+      "isArray": false,
+      "description": "Unique key of the spike row."
+    },
+    {
+      "name": "body",
+      "type": "String",
+      "isArray": false,
+      "description": "Spike payload."
+    },
+    {
+      "name": "bodySha256",
+      "type": "String",
+      "isArray": false,
+      "description": "SHA-256 of the body."
+    }
+  ]
+}

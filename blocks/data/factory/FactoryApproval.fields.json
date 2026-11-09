@@ -1,0 +1,46 @@
+{
+  "fields": [
+    {
+      "name": "approvalId",
+      "type": "String",
+      "isArray": false,
+      "description": "Unique id of the approval."
+    },
+    {
+      "name": "taskId",
+      "type": "String",
+      "isArray": false,
+      "description": "Task the approval belongs to."
+    },
+    {
+      "name": "gate",
+      "type": "String",
+      "isArray": false,
+      "description": "Gate the approval covers."
+    },
+    {
+      "name": "docVersion",
+      "type": "Int",
+      "isArray": false,
+      "description": "Document version approved."
+    },
+    {
+      "name": "decision",
+      "type": "String",
+      "isArray": false,
+      "description": "Approval decision."
+    },
+    {
+      "name": "comment",
+      "type": "String",
+      "isArray": false,
+      "description": "Reviewer comment."
+    },
+    {
+      "name": "at",
+      "type": "String",
+      "isArray": false,
+      "description": "ISO time of the decision."
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "fields": [
+    {
+      "name": "scope",
+      "type": "String",
+      "isArray": false,
+      "description": "Unique scope: global or a repo id."
+    },
+    {
+      "name": "json",
+      "type": "String",
+      "isArray": false,
+      "description": "JSON text of the Settings or RepoSettings object."
+    },
+    {
+      "name": "version",
+      "type": "Int",
+      "isArray": false,
+      "description": "Row version; bumped on every update."
+    },
+    {
+      "name": "writeId",
+      "type": "String",
+      "isArray": false,
+      "description": "Id of the write that produced this version."
+    }
+  ]
+}

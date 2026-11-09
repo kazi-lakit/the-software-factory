@@ -1,0 +1,58 @@
+{
+  "fields": [
+    {
+      "name": "eventId",
+      "type": "String",
+      "isArray": false,
+      "description": "Unique id: SHA-256 of the event JSON."
+    },
+    {
+      "name": "taskId",
+      "type": "String",
+      "isArray": false,
+      "description": "Task the event belongs to."
+    },
+    {
+      "name": "actor",
+      "type": "String",
+      "isArray": false,
+      "description": "Who caused the event."
+    },
+    {
+      "name": "action",
+      "type": "String",
+      "isArray": false,
+      "description": "What happened."
+    },
+    {
+      "name": "field",
+      "type": "String",
+      "isArray": false,
+      "description": "Field that changed."
+    },
+    {
+      "name": "from",
+      "type": "String",
+      "isArray": false,
+      "description": "Previous value."
+    },
+    {
+      "name": "to",
+      "type": "String",
+      "isArray": false,
+      "description": "New value."
+    },
+    {
+      "name": "reason",
+      "type": "String",
+      "isArray": false,
+      "description": "Why it changed."
+    },
+    {
+      "name": "at",
+      "type": "String",
+      "isArray": false,
+      "description": "ISO time of the event."
+    }
+  ]
+}

@@ -1,0 +1,76 @@
+{
+  "fields": [
+    {
+      "name": "runId",
+      "type": "String",
+      "isArray": false,
+      "description": "Unique id of the run."
+    },
+    {
+      "name": "taskId",
+      "type": "String",
+      "isArray": false,
+      "description": "Task the run belongs to."
+    },
+    {
+      "name": "step",
+      "type": "String",
+      "isArray": false,
+      "description": "Pipeline step the run executed."
+    },
+    {
+      "name": "mode",
+      "type": "String",
+      "isArray": false,
+      "description": "Run mode."
+    },
+    {
+      "name": "agent",
+      "type": "String",
+      "isArray": false,
+      "description": "Agent that ran the step."
+    },
+    {
+      "name": "startedAt",
+      "type": "String",
+      "isArray": false,
+      "description": "ISO start time."
+    },
+    {
+      "name": "endedAt",
+      "type": "String",
+      "isArray": false,
+      "description": "ISO end time."
+    },
+    {
+      "name": "result",
+      "type": "String",
+      "isArray": false,
+      "description": "Run result."
+    },
+    {
+      "name": "turns",
+      "type": "Int",
+      "isArray": false,
+      "description": "Number of agent turns."
+    },
+    {
+      "name": "costUsd",
+      "type": "String",
+      "isArray": false,
+      "description": "Run cost in USD, as decimal text."
+    },
+    {
+      "name": "version",
+      "type": "Int",
+      "isArray": false,
+      "description": "Row version; bumped on every update."
+    },
+    {
+      "name": "writeId",
+      "type": "String",
+      "isArray": false,
+      "description": "Id of the write that produced this version."
+    }
+  ]
+}

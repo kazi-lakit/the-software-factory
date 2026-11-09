@@ -1,0 +1,118 @@
+{
+  "fields": [
+    {
+      "name": "taskId",
+      "type": "String",
+      "isArray": false,
+      "description": "Unique id of the task."
+    },
+    {
+      "name": "title",
+      "type": "String",
+      "isArray": false,
+      "description": "Task title."
+    },
+    {
+      "name": "description",
+      "type": "String",
+      "isArray": false,
+      "description": "Task description."
+    },
+    {
+      "name": "repo",
+      "type": "String",
+      "isArray": false,
+      "description": "Repo id the task targets."
+    },
+    {
+      "name": "baseBranch",
+      "type": "String",
+      "isArray": false,
+      "description": "Branch the task branches from."
+    },
+    {
+      "name": "status",
+      "type": "String",
+      "isArray": false,
+      "description": "Task status."
+    },
+    {
+      "name": "stage",
+      "type": "String",
+      "isArray": false,
+      "description": "Current pipeline stage."
+    },
+    {
+      "name": "branch",
+      "type": "String",
+      "isArray": false,
+      "description": "Task branch name."
+    },
+    {
+      "name": "prUrl",
+      "type": "String",
+      "isArray": false,
+      "description": "Pull request URL."
+    },
+    {
+      "name": "blockedReason",
+      "type": "String",
+      "isArray": false,
+      "description": "Why the task is blocked."
+    },
+    {
+      "name": "question",
+      "type": "String",
+      "isArray": false,
+      "description": "Open question for the owner."
+    },
+    {
+      "name": "answer",
+      "type": "String",
+      "isArray": false,
+      "description": "Owner answer to the question."
+    },
+    {
+      "name": "gateOverrides",
+      "type": "String",
+      "isArray": false,
+      "description": "JSON text of the gate overrides."
+    },
+    {
+      "name": "claimBy",
+      "type": "String",
+      "isArray": false,
+      "description": "Worker that holds the claim."
+    },
+    {
+      "name": "claimUntil",
+      "type": "String",
+      "isArray": false,
+      "description": "ISO time the claim expires."
+    },
+    {
+      "name": "costUsd",
+      "type": "String",
+      "isArray": false,
+      "description": "Total cost in USD, as decimal text."
+    },
+    {
+      "name": "attempt",
+      "type": "Int",
+      "isArray": false,
+      "description": "Attempt counter."
+    },
+    {
+      "name": "version",
+      "type": "Int",
+      "isArray": false,
+      "description": "Row version; bumped on every update."
+    },
+    {
+      "name": "writeId",
+      "type": "String",
+      "isArray": false,
+      "description": "Id of the write that produced this version."
+    }
+  ]
+}
