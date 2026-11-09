@@ -27,6 +27,28 @@ function counting(inner: BlocksData): BlocksData & { calls: number; updates: num
 
 const event = { taskId: 'T-1', actor: 'core', action: 'move' as const, field: 'status', from: 'inbox', to: 'ready', reason: 'r', at: '2026-11-09T00:00:00.000Z' };
 
+describe('BlocksStore hashes (golden values from the node:crypto implementation)', () => {
+  it('bodySha256 of an ASCII and multi-byte body', async () => {
+    const inserted: Record<string, any>[] = [];
+    const data = new FakeBlocksData('any');
+    const insert = data.insert.bind(data);
+    data.insert = (async (schema: any, values: any, ...rest: any[]) => { inserted.push({ schema, ...values }); return (insert as any)(schema, values, ...rest); }) as any;
+    const s = new BlocksStore(data, 'owner');
+    const t = await s.createTask({ title: 't', description: '', repo: 'data' });
+    await s.addDoc(t.taskId, 'spec', 'Héllo wörld — 日本語 😀 ascii', 'you');
+    expect(inserted.find((r) => r.schema === 'FactoryDoc')!.bodySha256).toBe('9d07485b03cc138c5db8ac35a827fc4f8103fe28f51d669d96d98468b5764d9b');
+  });
+
+  it('eventId of a fixed event', async () => {
+    const inserted: Record<string, any>[] = [];
+    const data = new FakeBlocksData('any');
+    const insert = data.insert.bind(data);
+    data.insert = (async (schema: any, values: any, ...rest: any[]) => { inserted.push({ schema, ...values }); return (insert as any)(schema, values, ...rest); }) as any;
+    await new BlocksStore(data, 'owner').addEvents([event]);
+    expect(inserted.find((r) => r.schema === 'FactoryEvent')!.eventId).toBe('a788f3848b0058c3ca1487971ad0d9e1d3404e8ab4335722e28e3c0f75c642dc');
+  });
+});
+
 describe('BlocksStore', () => {
   it('exports the core task fields and the proven doc size', () => {
     expect(CORE_TASK_FIELDS).toEqual(['status', 'stage', 'branch', 'prUrl', 'attempt', 'blockedReason', 'question', 'answer', 'claimBy', 'claimUntil', 'costUsd']);

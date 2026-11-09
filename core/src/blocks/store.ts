@@ -1,10 +1,11 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { sha256 as nobleSha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from '../limits.js';
 import { DEFAULT_SETTINGS } from '../defaults.js';
 import {
   CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval,
   VersionConflictError, type BoardStore, type NewApproval, type StoredSettings,
-} from '../store.js';
+} from '../boardStore.js';
 import type {
   Approval, Doc, DocKind, FactoryEvent, Gate, Mode, RepoId, RepoSettings, Run, Settings, Step, Task,
 } from '../types.js';
@@ -71,7 +72,10 @@ function encodeUpdate(schema: SchemaName, input: Record<string, Value>): Record<
   return out;
 }
 
-const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
+const utf8 = new TextEncoder();
+const sha256 = (s: string) => bytesToHex(nobleSha256(utf8.encode(s)));
+/** Wrapped so `this` stays bound to crypto (a bare reference throws Illegal invocation in browsers). */
+const randomUUID = (): string => globalThis.crypto.randomUUID();
 const str = (v: Value | undefined): string | null => (v === null || v === undefined ? null : String(v));
 /** A clearable field: '' is how a clear is stored. */
 const opt = (v: Value | undefined): string | null => (v === '' ? null : str(v));
@@ -257,7 +261,7 @@ export class BlocksStore implements BoardStore {
   }
 
   async addDoc(taskId: string, kind: DocKind, body: string, author: string): Promise<Doc> {
-    const bytes = Buffer.byteLength(body, 'utf8');
+    const bytes = utf8.encode(body).length;
     if (bytes > MAX_DOC_BYTES) throw new DocTooLargeError(bytes);
     const bodySha256 = sha256(body);
     for (let attempt = 0; attempt <= DUPLICATE_RETRIES; attempt++) {

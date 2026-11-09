@@ -69,6 +69,21 @@ describe('SdkBlocksData', () => {
     expect(token.invalidate).toHaveBeenCalledTimes(1);
     expect(t.seen.map(s => s.auth)).toEqual(['Bearer old', 'Bearer new']);
   });
+  it('401 awaits an async invalidate() before the retry sends', async () => {
+    const order: string[] = [];
+    let current = 'token-1';
+    const token = {
+      get: vi.fn(async () => current),
+      invalidate: vi.fn(async () => { await new Promise((r) => setTimeout(r, 5)); current = 'token-2'; order.push('invalidated'); }),
+    };
+    const p = platform([{ status: 401, body: {} }, page(tasks('a'), 1)]);
+    const inner = p.fetcher;
+    const fetcher: typeof fetch = async (u, i) => { order.push(`send:${new Headers(i?.headers).get('authorization')}`); return inner(u, i); };
+    const data = new SdkBlocksData({ apiUrl, projectKey, token, fetch: fetcher });
+    await data.list('FactoryTask', {});
+    expect(order).toEqual(['send:Bearer token-1', 'invalidated', 'send:Bearer token-2']);
+  });
+
   it('a second 401 throws', async () => {
     const t = adapt([{ status: 401, body: {} }, { status: 401, body: {} }]);
     await expect(t.data.list('FactoryTask', {})).rejects.toThrow('blocks: unauthorized after token refresh');

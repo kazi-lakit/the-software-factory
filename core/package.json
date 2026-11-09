@@ -20,11 +20,13 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "esbuild": "^0.28.2",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0"
   },
   "dependencies": {
+    "@noble/hashes": "^2.4.0",
     "@octokit/rest": "^22.0.1",
     "@seliseblocks/client": "0.3.0",
     "commander": "^15.1.0",

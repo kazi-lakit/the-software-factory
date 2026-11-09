@@ -1,4 +1,4 @@
-import { isProtected } from './branchGuard.js';
+import { isProtected } from './branches.js';
 import type { Approval, DocKind, Gate, RepoSettings, Settings } from './types.js';
 
 /** Doc kind whose current version an approval at each gate must match (R1). */

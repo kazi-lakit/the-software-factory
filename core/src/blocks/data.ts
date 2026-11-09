@@ -91,7 +91,7 @@ export class SdkBlocksData implements BlocksData {
         }
         if (error.status === 401) {
           if (retry) throw new BlocksUnauthorizedError();
-          this.p.token.invalidate();
+          await this.p.token.invalidate();
           continue;
         }
         if (error.status === 403) return { kind: 'forbidden' };

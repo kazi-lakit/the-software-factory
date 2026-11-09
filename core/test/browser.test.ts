@@ -1,0 +1,17 @@
+import { build } from 'esbuild';
+import { describe, expect, it } from 'vitest';
+
+const FORBIDDEN = /(credential|secrets|wire|cli|git|github|checks)\.ts$|src\/store\.ts$/;
+
+describe('browser entry', () => {
+  it('bundles for the browser with no Node-only or credential module', async () => {
+    const result = await build({
+      entryPoints: ['src/browser.ts'], bundle: true, platform: 'browser', format: 'esm', write: false, metafile: true, logLevel: 'silent',
+    });
+    const inputs = Object.keys(result.metafile.inputs);
+    expect(inputs.filter((i) => FORBIDDEN.test(i))).toEqual([]);
+    const nodeImports = Object.values(result.metafile.inputs).flatMap((i) => i.imports.map((m) => m.path)).filter((p) => p.startsWith('node:'));
+    expect(nodeImports).toEqual([]);
+    expect(inputs.some((i) => i.endsWith('src/blocks/store.ts'))).toBe(true);
+  });
+});

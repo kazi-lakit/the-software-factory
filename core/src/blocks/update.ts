@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 
 // Compare-and-set settle logic for Blocks Data conditional updates. Ported from ACR
 // packages/core/src/blocks-update.ts. No Blocks imports: the caller classifies each raw answer.
@@ -57,7 +56,7 @@ export async function settleConditionalUpdate(p: {
   /** Lost writes of an earlier settle of the same row and version (its `pendingWriteIds`): they may have landed since. */
   priorWriteIds?: string[];
 }): Promise<SettleResult> {
-  const newWriteId = p.newWriteId ?? randomUUID;
+  const newWriteId = p.newWriteId ?? (() => globalThis.crypto.randomUUID());
   const sent: string[] = [...(p.priorWriteIds ?? [])];
   const unknown: string[] = [...sent];
   const reconcile = (): SettleResult => ({ kind: 'reconcile', pendingWriteIds: [...unknown] });

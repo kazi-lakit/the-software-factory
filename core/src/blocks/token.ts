@@ -5,7 +5,7 @@ import type { BlocksCredential } from './credential.js';
 export interface TokenSource {
   get(): Promise<string>;
   /** Drops the cached token so the next get() fetches a fresh one. */
-  invalidate(): void;
+  invalidate(): void | Promise<void>;
 }
 
 export type Mint = (cred: BlocksCredential) => Promise<{ accessToken: string; expiresIn: number }>;
