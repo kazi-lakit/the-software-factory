@@ -58,11 +58,13 @@ const canon = (v: unknown): string =>
 const randomUUID = (): string => globalThis.crypto.randomUUID();
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-function checkGates(v: unknown, what: string): void {
+/** `inherit`: a gate may be null (a repo scope going back to the global switch). */
+function checkGates(v: unknown, what: string, inherit = false): void {
   if (!isObject(v)) invalid(`${what} must be an object of gate switches`);
   for (const [gate, on] of Object.entries(v as object)) {
     if (!(GATES as readonly string[]).includes(gate)) invalid(`${what}: unknown gate ${gate}`);
-    if (on !== undefined && typeof on !== 'boolean') invalid(`${what}.${gate} must be true or false`);
+    if (on === undefined || (inherit && on === null)) continue;
+    if (typeof on !== 'boolean') invalid(`${what}.${gate} must be true or false`);
   }
 }
 
@@ -119,8 +121,8 @@ export async function createTask(
 async function move(store: BoardStore, now: () => Date, taskId: string, to: Status, reason: string): Promise<Task> {
   const task = await store.getTask(taskId);
   assertMove(task.status, to, 'you');
-  // The claim is the engine's: a cancelled task keeps it until the engine releases it or it lapses.
-  return ownerUpdate(store, now, task, { status: to }, reason);
+  // Cancel is terminal: it frees the claim, so the slot is free and the old claimant's next call fails with ClaimError.
+  return ownerUpdate(store, now, task, to === 'cancelled' ? { status: to, claimBy: null, claimUntil: null } : { status: to }, reason);
 }
 
 export function markReady(store: BoardStore, now: () => Date, taskId: string): Promise<Task> {
@@ -188,40 +190,74 @@ export async function editTask(store: BoardStore, now: () => Date, taskId: strin
   return ownerUpdate(store, now, task, clean, 'edited');
 }
 
+/** A repo scope's patch: null (for a key, or for one gate) means inherit the global value. */
+export type RepoSettingsPatch = { [K in Exclude<keyof Settings, 'gates'>]?: Settings[K] | null } & {
+  gates?: Partial<Record<Gate, boolean | null>> | null;
+};
+
+/** The event text for a repo key that went back to the global value. */
+export const INHERIT = 'inherit';
+
 /**
- * Merges `patch` over the global settings or over one repo's overrides (a key left out, or undefined, is kept) and
- * writes one event per changed key. Returns the stored settings.
+ * Merges `patch` over the global settings or over one repo's overrides and writes one event per changed key.
+ * A key left out (or undefined) is kept. In a repo scope, null removes the key (or the gate) so the global value
+ * applies again; a gates object left empty is dropped. Returns the stored settings.
  */
 export async function saveSettings(
-  store: BoardStore, now: () => Date, scope: SettingsScope, patch: RepoSettings | Settings,
+  store: BoardStore, now: () => Date, scope: SettingsScope, patch: RepoSettingsPatch | RepoSettings | Settings,
 ): Promise<StoredSettings> {
   if (scope !== 'global' && !isRepoId(scope)) invalid(`scope must be global or one of ${REPO_IDS.join(', ')}`);
   if (!isObject(patch)) invalid('settings must be an object');
   for (const [key, value] of Object.entries(patch)) {
     if (!(SETTING_KEYS as readonly string[]).includes(key)) invalid(`unknown setting ${key}`);
     if (value === undefined) continue;
+    if (value === null) {
+      if (scope === 'global') invalid(`${key} cannot inherit: global settings have no parent`);
+      continue;
+    }
     if (key === 'paused' && typeof value !== 'boolean') invalid('paused must be true or false');
-    if (key === 'gates') checkGates(value, 'gates');
+    if (key === 'gates') checkGates(value, 'gates', scope !== 'global');
     if (key in SETTING_RANGES) {
       const r = SETTING_RANGES[key as keyof typeof SETTING_RANGES];
       const ok = typeof value === 'number' && Number.isFinite(value) && value >= r.min && value <= r.max && (!r.integer || Number.isInteger(value));
       if (!ok) invalid(`${key} must be ${r.integer ? 'a whole number' : 'a number'} from ${r.min} to ${r.max}`);
     }
   }
-  const { gates, ...rest } = defined(patch as RepoSettings);
   const stored = await store.getSettings();
   const current: RepoSettings = scope === 'global' ? stored.global : (stored.repos[scope] ?? {});
-  const next: RepoSettings = { ...current, ...rest, ...(gates ? { gates: { ...current.gates, ...defined(gates) } } : {}) };
+  const next = mergeSettings(current, patch as RepoSettingsPatch);
   const changed = SETTING_KEYS.filter((k) => canon(current[k]) !== canon(next[k]));
   if (changed.length === 0) return stored;
   const at = now().toISOString();
   const json = (v: unknown) => (v === undefined ? null : JSON.stringify(v));
   const events: FactoryEvent[] = changed.map((k) => ({
-    taskId: '-', actor: OWNER_ACTOR, action: 'set', field: `settings.${scope}.${k}`, from: json(current[k]), to: json(next[k]), reason: 'settings saved', at,
+    taskId: '-', actor: OWNER_ACTOR, action: 'set', field: `settings.${scope}.${k}`,
+    from: json(current[k]), to: next[k] === undefined ? INHERIT : json(next[k]), reason: 'settings saved', at,
   }));
   const updated: StoredSettings =
     scope === 'global' ? { global: next as Settings, repos: stored.repos } : { global: stored.global, repos: { ...stored.repos, [scope]: next } };
   await store.setSettings(updated);
   await writeEvents(store, events);
   return updated;
+}
+
+/** A checked patch over `current`: undefined keeps, null removes, gates merge per gate. */
+function mergeSettings(current: RepoSettings, patch: RepoSettingsPatch): RepoSettings {
+  const next: Record<string, unknown> = { ...current };
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === undefined || key === 'gates') continue;
+    if (value === null) delete next[key];
+    else next[key] = value;
+  }
+  if (patch.gates === null) delete next.gates;
+  else if (patch.gates !== undefined) {
+    const gates: Record<string, boolean> = { ...current.gates };
+    for (const [gate, on] of Object.entries(patch.gates)) {
+      if (on === null) delete gates[gate];
+      else if (on !== undefined) gates[gate] = on;
+    }
+    if (Object.keys(gates).length > 0) next.gates = gates;
+    else delete next.gates;
+  }
+  return next as RepoSettings;
 }

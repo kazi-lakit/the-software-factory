@@ -2,7 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { BlocksStore } from '../src/blocks/store.js';
 import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
-import { Engine } from '../src/engine.js';
+import { ClaimError, Engine } from '../src/engine.js';
 import { FakeGitHub } from '../src/github.js';
 import {
   answerTask, cancelTask, createTask, decideGate, editTask, markReady, OwnerActionError, saveSettings, StaleDocError,
@@ -103,12 +103,29 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
   });
 
   describe('cancelTask', () => {
-    test('cancels a working task and leaves its claim to the engine', async () => {
-      const { owner, put, ownerEvents } = setup();
-      await put({ status: 'build', stage: 'build', claimBy: 'w', claimUntil: '2026-11-10T09:10:00.000Z' });
+    test('cancels a claimed task and frees the claim; the old claimant then gets a ClaimError', async () => {
+      const { owner, core, put, ownerEvents } = setup();
+      await put({ status: 'build', stage: 'build', branch: 'b', claimBy: 'w', claimUntil: '2026-11-10T09:10:00.000Z' });
+      await core.startRun({ taskId: 'T-1', step: 'build', mode: 'session', agent: 'implementer' });
       const t = await cancelTask(owner, now, 'T-1');
-      expect(t).toMatchObject({ status: 'cancelled', stage: 'build', claimBy: 'w' });
-      expect(await ownerEvents()).toEqual([you({ action: 'move', field: 'status', from: 'build', to: 'cancelled', reason: 'cancelled' })]);
+      expect(t).toMatchObject({ status: 'cancelled', stage: 'build', claimBy: null, claimUntil: null });
+      expect(await owner.getTask('T-1')).toMatchObject({ status: 'cancelled', claimBy: null, claimUntil: null });
+      expect(await ownerEvents()).toEqual([
+        you({ action: 'move', field: 'status', from: 'build', to: 'cancelled', reason: 'cancelled' }),
+        you({ field: 'claimBy', from: 'w', to: null, reason: 'cancelled' }),
+      ]);
+      const engine = new Engine({
+        store: core, git: {} as never, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,
+        exec: async () => ({ code: 0, output: '' }), now, mode: 'session', claimant: 'w',
+      });
+      await expect(engine.complete('T-1', 'build', JSON.stringify({ status: 'done', summary: 's' }))).rejects.toBeInstanceOf(ClaimError);
+      expect((await owner.getTask('T-1')).status).toBe('cancelled');
+    });
+
+    test('cancels an unclaimed inbox task', async () => {
+      const { owner, put } = setup();
+      await put();
+      expect(await cancelTask(owner, now, 'T-1')).toMatchObject({ status: 'cancelled', claimBy: null });
     });
 
     test.each(['cancelled', 'done'] as const)('refuses a %s task', async (status) => {
@@ -312,6 +329,33 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       ]);
     });
 
+    test('null in a repo scope inherits the global value: the key or gate is removed and the event says inherit', async () => {
+      const { owner } = setup();
+      await saveSettings(owner, now, 'data', { maxParallel: 3, paused: true, gates: { pr: false, spec: true } });
+      await saveSettings(owner, now, 'os', { maxParallel: 4 });
+      const at = (await owner.listEvents('-')).length;
+      await saveSettings(owner, now, 'data', { maxParallel: null, maxTurnsPerStage: null, gates: { pr: null } });
+      expect((await owner.getSettings()).repos).toEqual({ data: { paused: true, gates: { spec: true } }, os: { maxParallel: 4 } });
+      await saveSettings(owner, now, 'data', { gates: { spec: null } });
+      expect((await owner.getSettings()).repos).toEqual({ data: { paused: true }, os: { maxParallel: 4 } });
+      await saveSettings(owner, now, 'data', { paused: null });
+      expect((await owner.getSettings()).repos).toEqual({ data: {}, os: { maxParallel: 4 } });
+      expect((await owner.listEvents('-')).slice(at).map((e) => [e.field, e.from, e.to])).toEqual([
+        ['settings.data.maxParallel', '3', 'inherit'],
+        ['settings.data.gates', '{"pr":false,"spec":true}', '{"spec":true}'],
+        ['settings.data.gates', '{"spec":true}', 'inherit'],
+        ['settings.data.paused', 'true', 'inherit'],
+      ]);
+    });
+
+    test('gates: null in a repo scope drops all its gate overrides', async () => {
+      const { owner } = setup();
+      await saveSettings(owner, now, 'data', { gates: { plan: true } });
+      await saveSettings(owner, now, 'data', { gates: null });
+      expect((await owner.getSettings()).repos).toEqual({ data: {} });
+      expect((await owner.listEvents('-')).at(-1)).toMatchObject({ field: 'settings.data.gates', from: '{"plan":true}', to: 'inherit' });
+    });
+
     test('a patch that changes nothing writes no event', async () => {
       const { owner } = setup();
       await saveSettings(owner, now, 'global', { maxParallel: DEFAULT_SETTINGS.maxParallel, gates: { spec: true } });
@@ -333,6 +377,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       ['global', { maxCostPerTaskUsd: -1 }], ['global', { maxCostPerTaskUsd: 1000.01 }], ['data', { maxCostPerTaskUsd: Number.NaN }],
       ['global', { maxParallel: '3' }], ['global', { paused: 'yes' }], ['data', { gates: { spec: 1 } }], ['global', { gates: { deploy: true } }],
       ['global', { colour: 'red' }], ['nope', { maxParallel: 2 }],
+      ['global', { maxParallel: null }], ['global', { gates: null }], ['global', { gates: { pr: null } }], ['data', { gates: { pr: 'off' } }],
     ])('refuses scope %s with %o', async (scope, patch) => {
       const { owner } = setup();
       await expect(saveSettings(owner, now, scope as RepoId, patch as never)).rejects.toMatchObject({ code: 'invalid' });
