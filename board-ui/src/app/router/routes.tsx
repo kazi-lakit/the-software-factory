@@ -5,6 +5,8 @@ import { RedirectIfAuthenticated, RequireAuth, RequireOwner } from "./guards";
 import { ErrorPage } from "../../features/auth/ErrorPage";
 import { NotFoundPage } from "../../features/auth/NotFoundPage";
 import { BoardView } from "../../features/board/BoardView";
+import { HistoryView } from "../../features/history/HistoryView";
+import { SettingsView } from "../../features/settings/SettingsView";
 import { TaskView } from "../../features/task/TaskView";
 import { ProfilePage } from "../../features/profile/ProfilePage";
 import { CallbackPage } from "../../pages/Callback";
@@ -12,23 +14,12 @@ import { LoginPage } from "../../pages/Login";
 
 type PageProps = { onNavigate: (path: string) => void };
 
-// Placeholders until the History and Settings views land.
-function placeholder(title: string) {
-  return function PlaceholderView() {
-    return (
-      <section>
-        <h2>{title}</h2>
-      </section>
-    );
-  };
-}
-
 const protectedRoutes: Record<string, ComponentType<PageProps>> = {
   "/": BoardView,
   "/error": ErrorPage,
-  "/history": placeholder("History"),
+  "/history": HistoryView,
   "/profile": ProfilePage,
-  "/settings": placeholder("Settings")
+  "/settings": SettingsView
 };
 
 export function AppRouter() {

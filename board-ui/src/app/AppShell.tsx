@@ -26,6 +26,10 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
   const settings = useSettings();
   const user = userDisplayName(me.data?.data);
   const paused = settings.data?.global.paused === true;
+  // Without settings the shell cannot say whether the factory runs; it says so rather than show nothing.
+  const pauseUnknown = !settings.data && settings.isError;
+  const pauseText = paused ? "Factory paused" : pauseUnknown ? "Pause state unknown" : "";
+  const pauseClass = paused ? "sf-paused" : pauseUnknown ? "sf-paused-unknown" : "sf-paused-off";
 
   // A plain click stays in the app; a modified or middle click opens the link the browser's way.
   function follow(event: MouseEvent<HTMLAnchorElement>, href: string) {
@@ -66,7 +70,7 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
         </nav>
         <div className="sf-topbar-end">
           {/* Always present, so a screen reader hears the change when the factory pauses. */}
-          <span className={paused ? "sf-paused" : "sf-paused-off"} role="status">{paused ? "Factory paused" : ""}</span>
+          <span className={pauseClass} role="status">{pauseText}</span>
           {user ? <span className="sf-user" title={user}>{user}</span> : null}
           <button type="button" className="sf-button" onClick={() => void signOut()}>Sign out</button>
         </div>

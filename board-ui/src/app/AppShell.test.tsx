@@ -110,6 +110,13 @@ describe("AppShell", () => {
     expect(screen.getByRole("link", { name: "History" })).not.toHaveAttribute("aria-current");
   });
 
+  it("says_the_pause_state_is_unknown_when_the_settings_cannot_load", async () => {
+    getSettings.mockRejectedValue(new Error("blocks: unavailable"));
+    renderShell();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Pause state unknown"));
+    expect(screen.queryByText("Factory paused")).not.toBeInTheDocument();
+  });
+
   it("keeps_a_live_region_for_the_pause_state_while_running", async () => {
     renderShell();
     await waitFor(() => expect(getSettings).toHaveBeenCalled());

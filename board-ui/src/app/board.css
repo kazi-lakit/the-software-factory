@@ -664,6 +664,170 @@ textarea.sf-input {
   margin: 0 0 12px;
 }
 
+/* Settings could not be read: the shell says the pause state is unknown. */
+.sf-paused-unknown {
+  border: 1px dashed var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-muted);
+  font-size: var(--sf-size-small);
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.sf-nowrap {
+  white-space: nowrap;
+}
+
+.sf-hint {
+  color: var(--sf-muted);
+  font-size: var(--sf-size-small);
+  margin: 0;
+}
+
+/* History */
+.sf-filters {
+  gap: 8px 16px;
+}
+
+.sf-history-table td {
+  vertical-align: top;
+}
+
+.sf-paging {
+  align-items: center;
+  margin-top: 8px;
+}
+
+/* Settings */
+.sf-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-width: 960px;
+}
+
+.sf-settings .sf-toolbar {
+  margin-bottom: 0;
+}
+
+.sf-settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sf-settings-section h3 {
+  margin: 0;
+}
+
+.sf-fieldset {
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+
+.sf-fieldset legend {
+  color: var(--sf-muted);
+  font-size: var(--sf-size-small);
+  margin-bottom: 4px;
+  padding: 0;
+}
+
+.sf-field-label {
+  color: var(--sf-muted);
+  font-size: var(--sf-size-small);
+}
+
+.sf-limit {
+  flex: 0 1 200px;
+}
+
+.sf-switch-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.sf-switch-row .sf-hint {
+  padding-left: 38px;
+}
+
+/* A checkbox drawn as a switch: the text colour when on, never the accent (that is for what needs you). */
+.sf-switch {
+  align-items: center;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 10px;
+}
+
+.sf-switch input {
+  appearance: none;
+  background: var(--sf-surface-sunk);
+  border: 1px solid var(--sf-border);
+  border-radius: 999px;
+  cursor: pointer;
+  flex: none;
+  height: 16px;
+  margin: 0;
+  position: relative;
+  width: 28px;
+}
+
+.sf-switch input::before {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: 50%;
+  content: "";
+  height: 12px;
+  left: 1px;
+  position: absolute;
+  top: 1px;
+  transition: transform 120ms ease;
+  width: 12px;
+}
+
+.sf-switch input:checked {
+  background: var(--sf-text);
+  border-color: var(--sf-text);
+}
+
+.sf-switch input:checked::before {
+  transform: translateX(12px);
+}
+
+.sf-switch input:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sf-switch input::before {
+    transition: none;
+  }
+}
+
+.sf-repo-table td,
+.sf-repo-table th[scope="row"] {
+  vertical-align: middle;
+}
+
+.sf-limit-input {
+  width: 11ch;
+}
+
+.sf-row-save {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.sf-repo-table tbody tr.sf-row-problem:hover {
+  background: transparent;
+}
+
 /* Below the 1024px desktop width the columns stack. */
 @media (max-width: 1023px) {
   .sf-columns {
