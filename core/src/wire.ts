@@ -35,6 +35,9 @@ class LazyGitHub implements GitHub {
   async openPr(p: Parameters<GitHub['openPr']>[0]) {
     return (await this.gh).openPr(p);
   }
+  async findOpenPr(p: Parameters<GitHub['findOpenPr']>[0]) {
+    return (await this.gh).findOpenPr(p);
+  }
   async prState(url: string) {
     return (await this.gh).prState(url);
   }

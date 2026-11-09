@@ -123,6 +123,23 @@ describe('factory cli', () => {
     expect(out.length).toBeGreaterThan(0);
   });
 
+  test('renew extends the held claim and prints the new claimUntil', async () => {
+    const { store, out, go } = setup();
+    await put(store, { status: 'build', stage: 'build', branch: 'b', claimBy: 'me', claimUntil: new Date(Date.now() + 1000).toISOString() });
+    expect(await go('renew', 'T-1')).toBe(0);
+    const t = await store.getTask('T-1');
+    expect(Date.parse(t.claimUntil!)).toBeGreaterThan(Date.now() + 500_000);
+    expect(out).toEqual([`T-1 claimed until ${t.claimUntil}`]);
+  });
+
+  test('renew of a claim not held exits 1 with one line', async () => {
+    const { store, err, go } = setup();
+    await put(store, { status: 'build', stage: 'build', branch: 'b', claimBy: 'other', claimUntil: new Date(Date.now() + 1000).toISOString() });
+    expect(await go('renew', 'T-1')).toBe(1);
+    expect(err).toEqual(['error: T-1 is not claimed by me']);
+    expect((await store.getTask('T-1')).claimBy).toBe('other');
+  });
+
   test('status --json and plain', async () => {
     const { store, out, go } = setup();
     await put(store, { status: 'ready' });

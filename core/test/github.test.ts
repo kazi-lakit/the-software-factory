@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from 'vitest';
 import { ProtectedBranchError } from '../src/branchGuard.js';
-import { FakeGitHub, OctokitGitHub, parseRemote } from '../src/github.js';
+import { FakeGitHub, OctokitGitHub, parseRemote, PrBaseMismatchError } from '../src/github.js';
 
 describe('parseRemote', () => {
   test.each([
@@ -46,15 +46,53 @@ describe('OctokitGitHub', () => {
     expect(await gh.prState('https://github.com/o/r/pull/3')).toBe(expected);
   });
 
-  test('mergePr on an unprotected base uses the merge method', async () => {
-    const fetchStub = vi.fn(async (_u: unknown, _i?: RequestInit) => json({ merged: true }));
+  const urlOf = (u: Request | string | URL) => (typeof u === 'string' ? u : u instanceof URL ? u.href : u.url);
+  const pull = (baseRef: string) => ({ base: { ref: baseRef }, head: { sha: 'abc123' }, state: 'open', merged: false });
+
+  test('mergePr reads the PR first and merges its head sha with the merge method', async () => {
+    const fetchStub = vi.fn(async (u: Request | string | URL, _i?: RequestInit) =>
+      urlOf(u).endsWith('/merge') ? json({ merged: true }) : json(pull('feature/x')),
+    );
     const gh = new OctokitGitHub('t', { fetch: fetchStub as unknown as typeof fetch });
     await gh.mergePr('https://github.com/o/r/pull/3', 'feature/x');
-    const [url, init] = fetchStub.mock.calls[0] as [Request | string, RequestInit | undefined];
-    const u = typeof url === 'string' ? url : (url as Request).url;
-    expect(u).toContain('/repos/o/r/pulls/3/merge');
+    expect(fetchStub).toHaveBeenCalledTimes(2);
+    expect(urlOf(fetchStub.mock.calls[0]![0])).toMatch(/\/repos\/o\/r\/pulls\/3$/);
+    const [url, init] = fetchStub.mock.calls[1] as [Request | string, RequestInit | undefined];
+    expect(urlOf(url)).toContain('/repos/o/r/pulls/3/merge');
     const body = init?.body ?? (await (url as Request).text());
-    expect(JSON.parse(String(body))).toMatchObject({ merge_method: 'merge' });
+    expect(JSON.parse(String(body))).toMatchObject({ merge_method: 'merge', sha: 'abc123' });
+  });
+
+  test('mergePr refuses a PR whose real base is protected, whatever base the caller passes', async () => {
+    const fetchStub = vi.fn(async () => json(pull('dev')));
+    const gh = new OctokitGitHub('t', { fetch: fetchStub as unknown as typeof fetch });
+    await expect(gh.mergePr('https://github.com/o/r/pull/3', 'feature/x')).rejects.toBeInstanceOf(ProtectedBranchError);
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+  });
+
+  test('mergePr refuses a PR whose base differs from the expected one', async () => {
+    const fetchStub = vi.fn(async () => json(pull('feature/y')));
+    const gh = new OctokitGitHub('t', { fetch: fetchStub as unknown as typeof fetch });
+    const p = gh.mergePr('https://github.com/o/r/pull/3', 'feature/x');
+    await expect(p).rejects.toBeInstanceOf(PrBaseMismatchError);
+    await expect(p).rejects.not.toBeInstanceOf(ProtectedBranchError);
+    expect(fetchStub).toHaveBeenCalledTimes(1);
+  });
+
+  test('findOpenPr lists open PRs by owner:head and base', async () => {
+    const fetchStub = vi.fn(async (_u: Request | string | URL) => json([{ html_url: 'https://github.com/o/r/pull/9', number: 9 }]));
+    const gh = new OctokitGitHub('t', { fetch: fetchStub as unknown as typeof fetch });
+    const res = await gh.findOpenPr({ remote: 'git@github.com:o/r.git', head: 'factory/T-1-x', base: 'dev' });
+    expect(res).toEqual({ url: 'https://github.com/o/r/pull/9', number: 9 });
+    const u = new URL(urlOf(fetchStub.mock.calls[0]![0]));
+    expect(u.pathname).toBe('/repos/o/r/pulls');
+    expect(Object.fromEntries(u.searchParams)).toMatchObject({ head: 'o:factory/T-1-x', base: 'dev', state: 'open' });
+  });
+
+  test('findOpenPr returns null when none is open', async () => {
+    const fetchStub = vi.fn(async () => json([]));
+    const gh = new OctokitGitHub('t', { fetch: fetchStub as unknown as typeof fetch });
+    expect(await gh.findOpenPr({ remote: 'git@github.com:o/r.git', head: 'h', base: 'dev' })).toBeNull();
   });
 });
 
@@ -87,5 +125,27 @@ describe('FakeGitHub', () => {
     const a = await gh.openPr({ remote: 'git@github.com:o/r.git', head: 'h', base: 'dev', title: 't', body: 'b' });
     await expect(gh.mergePr(a.url, 'dev')).rejects.toBeInstanceOf(ProtectedBranchError);
     expect(await gh.prState(a.url)).toBe('open');
+  });
+
+  test('mergePr checks the stored base, not the one the caller passes', async () => {
+    const gh = new FakeGitHub();
+    const intoDev = await gh.openPr({ remote: 'git@github.com:o/r.git', head: 'h', base: 'dev', title: 't', body: 'b' });
+    await expect(gh.mergePr(intoDev.url, 'feature/x')).rejects.toBeInstanceOf(ProtectedBranchError);
+    const intoY = await gh.openPr({ remote: 'git@github.com:o/r.git', head: 'h', base: 'feature/y', title: 't', body: 'b' });
+    await expect(gh.mergePr(intoY.url, 'feature/x')).rejects.toBeInstanceOf(PrBaseMismatchError);
+    expect(await gh.prState(intoDev.url)).toBe('open');
+    expect(await gh.prState(intoY.url)).toBe('open');
+  });
+
+  test('findOpenPr finds an open PR by repo, head and base', async () => {
+    const gh = new FakeGitHub();
+    const p = { remote: 'git@github.com:o/r.git', head: 'h', base: 'dev', title: 't', body: 'b' };
+    expect(await gh.findOpenPr(p)).toBeNull();
+    const a = await gh.openPr(p);
+    expect(await gh.findOpenPr(p)).toEqual(a);
+    expect(await gh.findOpenPr({ ...p, base: 'stg' })).toBeNull();
+    expect(await gh.findOpenPr({ ...p, remote: 'git@github.com:o/other.git' })).toBeNull();
+    gh.setState(a.url, 'closed');
+    expect(await gh.findOpenPr(p)).toBeNull();
   });
 });

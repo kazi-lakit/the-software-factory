@@ -6,7 +6,7 @@ export const PROTECTED_BRANCHES = ['dev', 'stg', 'main'] as const;
 export const HOOK_PATH = fileURLToPath(new URL('../hooks/pre-push', import.meta.url));
 
 export class ProtectedBranchError extends Error {
-  constructor(branch: string) {
+  constructor(public readonly branch: string) {
     super(`push to ${branch} refused (protected branch)`);
     this.name = 'ProtectedBranchError';
   }

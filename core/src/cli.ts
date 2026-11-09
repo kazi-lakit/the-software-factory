@@ -100,6 +100,15 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     });
 
   program
+    .command('renew <task>')
+    .description('extend your claim on a task by 10 minutes')
+    .action(async (task: string, _o: object, cmd: Command) => {
+      const { engine } = await open(cmd);
+      const renewed = await engine.renew(task);
+      io.out(`${renewed.taskId} claimed until ${renewed.claimUntil}`);
+    });
+
+  program
     .command('status')
     .description('counts per status and active claims')
     .option('--json', 'print JSON')

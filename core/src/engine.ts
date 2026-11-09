@@ -1,11 +1,11 @@
 import { parseAgentResult } from './agentResult.js';
-import { assertPushAllowed, branchName } from './branchGuard.js';
+import { assertPushAllowed, branchName, ProtectedBranchError } from './branchGuard.js';
 import { formatReport, runChecks, type Exec } from './checks.js';
-import { claim, claimExpired, release } from './claims.js';
+import { claim, claimExpired, release, renew } from './claims.js';
 import { AGENT_FOR } from './defaults.js';
 import { resolveGates, resolveSettings, shouldMerge, validApproval } from './gates.js';
 import type { GitRepos } from './git.js';
-import type { GitHub } from './github.js';
+import { PrBaseMismatchError, type GitHub } from './github.js';
 import { diffEvents } from './history.js';
 import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
 import type { RepoConfig } from './repoConfig.js';
@@ -54,13 +54,16 @@ export class StageError extends Error {
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** Retries `fn` with doubling waits (baseMs, 2·baseMs, …) between tries. A VersionConflictError is rethrown at once. */
+/** Errors that the same call would hit again: retrying only delays them. */
+const FINAL_ERRORS = [VersionConflictError, ProtectedBranchError, PrBaseMismatchError];
+
+/** Retries `fn` with doubling waits (baseMs, 2·baseMs, …) between tries. FINAL_ERRORS are rethrown at once. */
 export async function withRetry<T>(fn: () => Promise<T>, opts: { tries: number; baseMs: number }): Promise<T> {
   for (let i = 0; ; i++) {
     try {
       return await fn();
     } catch (e) {
-      if (e instanceof VersionConflictError || i + 1 >= opts.tries) throw e;
+      if (FINAL_ERRORS.some((E) => e instanceof E) || i + 1 >= opts.tries) throw e;
       await sleep(opts.baseMs * 2 ** i);
     }
   }
@@ -162,10 +165,12 @@ export class Engine {
 
   async check(taskId: string): Promise<Task> {
     const { store, exec } = this.deps;
-    const task = await this.claimedAt(taskId, 'check');
-    const cfg = this.repo(task);
-    const worktree = await this.worktreeFor(task, requireBranch(task));
+    const claimed = await this.claimedAt(taskId, 'check');
+    const cfg = this.repo(claimed);
+    const worktree = await this.worktreeFor(claimed, requireBranch(claimed));
     const report = await runChecks(cfg, worktree, exec);
+    // The checks take a while and the claim may have been renewed meanwhile: decide on the fresh task.
+    const task = await this.claimedAt(taskId, 'check');
     const settings = this.settingsFor(await retry(() => store.getSettings()), task);
     await retry(() => store.addDoc(taskId, 'verify', formatReport(report), 'core · checks'));
     const summary = report.steps
@@ -177,42 +182,54 @@ export class Engine {
 
   async ship(taskId: string): Promise<Task> {
     const { store, github } = this.deps;
-    const task = await this.claimedAt(taskId, 'ship');
-    const cfg = this.repo(task);
-    const branch = requireBranch(task);
+    const claimed = await this.claimedAt(taskId, 'ship');
+    const cfg = this.repo(claimed);
+    const branch = requireBranch(claimed);
     assertPushAllowed(branch);
-    const settings = this.settingsFor(await retry(() => store.getSettings()), task);
-    const shipped = (prUrl: string, merged: boolean) =>
-      this.apply(task, this.decideFor(task, { kind: 'shipped', prUrl, merged }, settings), this.coreActor);
+    const settings = this.settingsFor(await retry(() => store.getSettings()), claimed);
+    const block = (task: Task, reason: string) =>
+      this.apply(task, this.decideFor(task, { kind: 'limit', reason }, settings), this.coreActor);
 
-    // A task returned from pr_open already has a PR: reuse it while open, finish if it merged meanwhile.
-    const existing = task.prUrl;
+    // A task returned from pr_open already has a PR: reuse it while open. If it merged meanwhile, the commits
+    // made for the requested changes are not in it, so the task waits for the user instead of counting as done.
+    const existing = claimed.prUrl;
     const state = existing ? await retry(() => github.prState(existing)) : undefined;
-    if (existing && state === 'merged') return shipped(existing, true);
+    if (existing && state === 'merged') return block(claimed, 'previous PR was merged; new commits are not shipped');
 
-    const worktree = await this.worktreeFor(task, branch);
+    const worktree = await this.worktreeFor(claimed, branch);
     await this.deps.git.push(worktree, branch);
 
-    let url: string;
-    if (existing && state === 'open') {
-      url = existing;
-    } else {
-      const spec = (await retry(() => store.currentDoc(taskId, 'spec')))?.body ?? '';
-      const pr = await retry(() =>
-        github.openPr({
-          remote: cfg.remote,
-          head: branch,
-          base: task.baseBranch,
-          title: `[${taskId}] ${task.title}`,
-          body: `Factory task ${taskId}\n\n${spec.slice(0, 3000)}`,
-        }),
-      );
-      url = pr.url;
-    }
+    // An earlier ship may have opened the PR and failed before recording it: find it before opening a new one.
+    const pr =
+      existing && state === 'open'
+        ? { url: existing }
+        : ((await retry(() => github.findOpenPr({ remote: cfg.remote, head: branch, base: claimed.baseBranch }))) ??
+          (await retry(() => this.openPr(claimed, cfg, branch))));
+
+    // Push and PR take a while and the claim may have been renewed: record the PR on the fresh task first.
+    let task = await this.claimedAt(taskId, 'ship');
+    if (task.prUrl !== pr.url) task = await this.record(task, { prUrl: pr.url }, 'PR opened');
 
     const merged = shouldMerge(task.baseBranch, resolveGates(settings, task.gateOverrides).pr);
-    if (merged) await retry(() => github.mergePr(url, task.baseBranch));
-    return shipped(url, merged);
+    if (merged) {
+      try {
+        await retry(() => github.mergePr(pr.url, task.baseBranch));
+      } catch (e) {
+        if (e instanceof PrBaseMismatchError) return block(task, e.message);
+        if (e instanceof ProtectedBranchError) return block(task, `${pr.url} targets ${e.branch}, a protected branch; not merged`);
+        throw e;
+      }
+    }
+    return this.apply(task, this.decideFor(task, { kind: 'shipped', prUrl: pr.url, merged }, settings), this.coreActor);
+  }
+
+  /** Extends this claimant's claim on the task by CLAIM_MS from now; throws ClaimError when the claim is not held. */
+  async renew(taskId: string): Promise<Task> {
+    const { store, claimant, now } = this.deps;
+    const task = await retry(() => store.getTask(taskId));
+    const renewed = await retry(() => renew(store, task, claimant, now()));
+    if (!renewed) throw new ClaimError(taskId, claimant);
+    return renewed;
   }
 
   async status(): Promise<EngineStatus> {
@@ -244,6 +261,25 @@ export class Engine {
     );
     await retry(() => store.addEvents(diffEvents(task, updated, actor, reason, now().toISOString())));
     return updated;
+  }
+
+  /** A version-checked field write that keeps status and claim, with its events. */
+  private async record(task: Task, patch: Partial<Task>, reason: string): Promise<Task> {
+    const { store, now } = this.deps;
+    const updated = await retry(() => store.updateTask(task.taskId, task.version, patch));
+    await retry(() => store.addEvents(diffEvents(task, updated, this.coreActor, reason, now().toISOString())));
+    return updated;
+  }
+
+  private async openPr(task: Task, cfg: RepoConfig, branch: string): Promise<{ url: string }> {
+    const spec = (await retry(() => this.deps.store.currentDoc(task.taskId, 'spec')))?.body ?? '';
+    return this.deps.github.openPr({
+      remote: cfg.remote,
+      head: branch,
+      base: task.baseBranch,
+      title: `[${task.taskId}] ${task.title}`,
+      body: `Factory task ${task.taskId}\n\n${spec.slice(0, 3000)}`,
+    });
   }
 
   /** Approval, PR and answer moves for one task; returns the moved task, or undefined if nothing moved. */

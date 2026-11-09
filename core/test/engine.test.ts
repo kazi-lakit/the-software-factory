@@ -48,12 +48,15 @@ class FakeGit implements GitRepos {
   }
 }
 
-function setup(opts: { failing?: string[]; git?: FakeGit } = {}) {
+function setup(opts: { failing?: string[]; git?: FakeGit; onExec?: () => Promise<void> } = {}) {
   const store = new MemoryStore();
   const git = opts.git ?? new FakeGit();
   const github = new FakeGitHub();
   const clock = { t: new Date('2026-11-09T10:00:00Z') };
-  const exec: Exec = async (cmd) => ({ code: opts.failing?.includes(cmd) ? 1 : 0, output: 'out' });
+  const exec: Exec = async (cmd) => {
+    await opts.onExec?.();
+    return { code: opts.failing?.includes(cmd) ? 1 : 0, output: 'out' };
+  };
   const deps: EngineDeps = {
     store,
     git,
@@ -331,6 +334,35 @@ describe('check', () => {
     expect(t).toMatchObject({ status: 'build', stage: 'build', attempt: 1, answer: 'server.build, server.test' });
   });
 
+  test('a claim renewed during the checks does not break the final write', async () => {
+    const hook = { onExec: async () => {} };
+    const { store, engine } = setup({ onExec: () => hook.onExec() });
+    await put(store, { status: 'verify', stage: 'check', branch: 'factory/T-1-x' });
+    await engine.next();
+    let renewals = 0;
+    hook.onExec = async () => {
+      await engine.renew('T-1');
+      renewals++;
+    };
+    const t = await engine.check('T-1');
+    expect(renewals).toBeGreaterThan(0);
+    expect(t).toMatchObject({ status: 'verify', stage: 'verify', claimBy: null });
+  });
+
+  test('a claim taken over during the checks: no report and no move', async () => {
+    const hook = { onExec: async () => {} };
+    const { store, engine, clock } = setup({ onExec: () => hook.onExec() });
+    await put(store, { status: 'verify', stage: 'check', branch: 'factory/T-1-x' });
+    await engine.next();
+    hook.onExec = async () => {
+      const t = await store.getTask('T-1');
+      if (t.claimBy === 'me') await store.updateTask('T-1', t.version, claimedBy('other', clock));
+    };
+    await expect(engine.check('T-1')).rejects.toBeInstanceOf(ClaimError);
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'verify', stage: 'check', claimBy: 'other' });
+    expect(await store.currentDoc('T-1', 'verify')).toBeUndefined();
+  });
+
   test('requires the claim and stage check', async () => {
     const { store, engine, clock } = setup();
     await put(store, { status: 'verify', stage: 'check', branch: 'b' });
@@ -408,14 +440,16 @@ describe('ship', () => {
     expect(git.pushes).toHaveLength(2);
   });
 
-  test('shipping a task whose PR was already merged completes it without a push', async () => {
+  test('a PR merged while changes were requested blocks the task without a push', async () => {
     const { store, engine, github, git } = await atShip('dev', true);
     const pr = await github.openPr({ remote: REMOTE, head: 'factory/T-1-add-widget', base: 'dev', title: 't', body: 'b' });
     github.setState(pr.url, 'merged');
     const t = await store.getTask('T-1');
     await store.updateTask('T-1', t.version, { prUrl: pr.url });
-    const done = await engine.ship('T-1');
-    expect(done).toMatchObject({ status: 'done', prUrl: pr.url });
+    const blocked = await engine.ship('T-1');
+    expect(blocked).toMatchObject({
+      status: 'blocked', stage: 'ship', prUrl: pr.url, blockedReason: 'previous PR was merged; new commits are not shipped',
+    });
     expect(git.pushes).toHaveLength(0);
   });
 
@@ -429,6 +463,104 @@ describe('ship', () => {
     expect(shipped.status).toBe('pr_open');
     expect(shipped.prUrl).not.toBe(pr.url);
     expect(github.prs.size).toBe(2);
+  });
+
+  test('a reused PR into dev is not merged after the task base changed to feature/x; the task blocks', async () => {
+    const { store, engine, github } = setup();
+    await store.setSettings({ global: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: false } }, repos: {} });
+    const pr = await github.openPr({ remote: REMOTE, head: 'factory/T-1-x', base: 'dev', title: 't', body: 'b' });
+    await put(store, { status: 'review', stage: 'ship', branch: 'factory/T-1-x', prUrl: pr.url }, 'feature/x');
+    await engine.next();
+    const t = await engine.ship('T-1');
+    expect(t).toMatchObject({ status: 'blocked', stage: 'ship' });
+    expect(t.blockedReason).toMatch(/targets dev.*not merged/);
+    expect(github.prs.get(pr.url)!.state).toBe('open');
+  });
+
+  test('a PR into another unprotected base is not merged either', async () => {
+    const { store, engine, github } = setup();
+    await store.setSettings({ global: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: false } }, repos: {} });
+    const pr = await github.openPr({ remote: REMOTE, head: 'factory/T-1-x', base: 'feature/y', title: 't', body: 'b' });
+    await put(store, { status: 'review', stage: 'ship', branch: 'factory/T-1-x', prUrl: pr.url }, 'feature/x');
+    await engine.next();
+    const t = await engine.ship('T-1');
+    expect(t).toMatchObject({ status: 'blocked', stage: 'ship', blockedReason: `${pr.url} targets feature/y, not feature/x; not merged` });
+    expect(github.prs.get(pr.url)!.state).toBe('open');
+  });
+
+  /** Fails every task write whose patch matches `when` while `down.on` is true. */
+  function storeOutage(store: MemoryStore, when: (patch: Partial<Task>) => boolean) {
+    const down = { on: true };
+    const update = store.updateTask.bind(store);
+    vi.spyOn(store, 'updateTask').mockImplementation(async (id, v, patch) => {
+      if (down.on && when(patch)) throw new Error('blocks down');
+      return update(id, v, patch);
+    });
+    return down;
+  }
+
+  async function failsAfterRetries<T>(p: Promise<T>, message: string) {
+    const settled = expect(p).rejects.toThrow(message);
+    await vi.runAllTimersAsync();
+    await settled;
+  }
+
+  test('the store fails after the PR opens: the PR url is kept and the next ship reuses the PR', async () => {
+    vi.useFakeTimers();
+    const { store, engine, github } = await atShip('dev', true);
+    const down = storeOutage(store, (patch) => 'status' in patch);
+    await failsAfterRetries(engine.ship('T-1'), 'blocks down');
+    const url = 'https://github.com/SELISEdigitalplatforms/blocks-data/pull/1';
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'review', stage: 'ship', prUrl: url });
+    down.on = false;
+    expect(await engine.ship('T-1')).toMatchObject({ status: 'pr_open', prUrl: url });
+    expect(github.prs.size).toBe(1);
+  });
+
+  test('the store fails before the PR url is saved: the next ship finds the open PR', async () => {
+    vi.useFakeTimers();
+    const { store, engine, github } = await atShip('dev', true);
+    const down = storeOutage(store, () => true);
+    await failsAfterRetries(engine.ship('T-1'), 'blocks down');
+    expect((await store.getTask('T-1')).prUrl).toBeNull();
+    down.on = false;
+    const openPr = vi.spyOn(github, 'openPr');
+    const t = await engine.ship('T-1');
+    expect(t).toMatchObject({ status: 'pr_open', prUrl: 'https://github.com/SELISEdigitalplatforms/blocks-data/pull/1' });
+    expect(openPr).not.toHaveBeenCalled();
+    expect(github.prs.size).toBe(1);
+  });
+
+  test('the merge fails after the PR opens: the next ship merges that same PR', async () => {
+    vi.useFakeTimers();
+    const { store, engine, github } = await atShip('feature/x', false);
+    const merge = vi.spyOn(github, 'mergePr').mockRejectedValue(new Error('GitHub down'));
+    await failsAfterRetries(engine.ship('T-1'), 'GitHub down');
+    const url = 'https://github.com/SELISEdigitalplatforms/blocks-data/pull/1';
+    expect((await store.getTask('T-1')).prUrl).toBe(url);
+    merge.mockRestore();
+    expect(await engine.ship('T-1')).toMatchObject({ status: 'done', prUrl: url });
+    expect(github.prs.size).toBe(1);
+    expect(github.prs.get(url)!.state).toBe('merged');
+  });
+
+  test('a claim renewed during the push does not break the final write', async () => {
+    const { engine, git } = await atShip('dev', true);
+    vi.spyOn(git, 'push').mockImplementation(async () => {
+      await engine.renew('T-1');
+    });
+    expect((await engine.ship('T-1')).status).toBe('pr_open');
+  });
+
+  test('a claim taken over during the push: nothing is written, the next ship finds the PR', async () => {
+    const { store, engine, git, github, clock } = await atShip('dev', true);
+    vi.spyOn(git, 'push').mockImplementation(async () => {
+      const t = await store.getTask('T-1');
+      await store.updateTask('T-1', t.version, claimedBy('other', clock));
+    });
+    await expect(engine.ship('T-1')).rejects.toBeInstanceOf(ClaimError);
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'review', stage: 'ship', prUrl: null, claimBy: 'other' });
+    expect(github.prs.size).toBe(1);
   });
 
   test('requires the claim and stage ship', async () => {

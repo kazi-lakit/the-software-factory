@@ -5,8 +5,25 @@ export type PrState = 'open' | 'merged' | 'closed';
 
 export interface GitHub {
   openPr(p: { remote: string; head: string; base: string; title: string; body: string }): Promise<{ url: string; number: number }>;
+  /** The open PR from `head` into `base` in the remote's repo, or null. */
+  findOpenPr(p: { remote: string; head: string; base: string }): Promise<{ url: string; number: number } | null>;
   prState(url: string): Promise<PrState>;
+  /** Merges only when the PR's real base is `base` and not protected; throws ProtectedBranchError or PrBaseMismatchError otherwise. */
   mergePr(url: string, base: string): Promise<void>;
+}
+
+/** The PR targets another base than the one the caller expects; it is never merged. */
+export class PrBaseMismatchError extends Error {
+  constructor(url: string, actual: string, expected: string) {
+    super(`${url} targets ${actual}, not ${expected}; not merged`);
+    this.name = 'PrBaseMismatchError';
+  }
+}
+
+/** Refuses a merge unless the PR's stored base is unprotected and equals the expected base. */
+function assertMergeBase(url: string, actual: string, expected: string): void {
+  if (isProtected(actual)) throw new ProtectedBranchError(actual);
+  if (actual !== expected) throw new PrBaseMismatchError(url, actual, expected);
 }
 
 /** Parses `git@github.com:O/R(.git)` and `https://github.com/O/R(.git)`. */
@@ -35,6 +52,13 @@ export class OctokitGitHub implements GitHub {
     return { url: res.data.html_url, number: res.data.number };
   }
 
+  async findOpenPr(p: { remote: string; head: string; base: string }): Promise<{ url: string; number: number } | null> {
+    const { owner, repo } = parseRemote(p.remote);
+    const { data } = await this.octokit.rest.pulls.list({ owner, repo, head: `${owner}:${p.head}`, base: p.base, state: 'open' });
+    const pr = data[0];
+    return pr ? { url: pr.html_url, number: pr.number } : null;
+  }
+
   async prState(url: string): Promise<PrState> {
     const { owner, repo, number } = parsePrUrl(url);
     const { data } = await this.octokit.rest.pulls.get({ owner, repo, pull_number: number });
@@ -45,7 +69,9 @@ export class OctokitGitHub implements GitHub {
   async mergePr(url: string, base: string): Promise<void> {
     if (isProtected(base)) throw new ProtectedBranchError(base);
     const { owner, repo, number } = parsePrUrl(url);
-    await this.octokit.rest.pulls.merge({ owner, repo, pull_number: number, merge_method: 'merge' });
+    const { data } = await this.octokit.rest.pulls.get({ owner, repo, pull_number: number });
+    assertMergeBase(url, data.base.ref, base);
+    await this.octokit.rest.pulls.merge({ owner, repo, pull_number: number, merge_method: 'merge', sha: data.head.sha });
   }
 }
 
@@ -54,17 +80,21 @@ export class FakeGitHub implements GitHub {
   private next = 1;
 
   async openPr(p: { remote: string; head: string; base: string; title: string; body: string }): Promise<{ url: string; number: number }> {
-    const { owner, repo } = parseRemote(p.remote);
-    const prefix = `https://github.com/${owner}/${repo}/pull/`;
-    for (const [u, pr] of this.prs) {
-      if (u.startsWith(prefix) && pr.head === p.head && pr.base === p.base && pr.state === 'open') {
-        throw new Error(`A pull request already exists for ${p.head} into ${p.base}`);
-      }
-    }
+    if (await this.findOpenPr(p)) throw new Error(`A pull request already exists for ${p.head} into ${p.base}`);
     const number = this.next++;
-    const url = `${prefix}${number}`;
+    const url = `${this.prefix(p.remote)}${number}`;
     this.prs.set(url, { base: p.base, head: p.head, state: 'open' });
     return { url, number };
+  }
+
+  async findOpenPr(p: { remote: string; head: string; base: string }): Promise<{ url: string; number: number } | null> {
+    const prefix = this.prefix(p.remote);
+    for (const [url, pr] of this.prs) {
+      if (url.startsWith(prefix) && pr.head === p.head && pr.base === p.base && pr.state === 'open') {
+        return { url, number: Number(url.slice(prefix.length)) };
+      }
+    }
+    return null;
   }
 
   async prState(url: string): Promise<PrState> {
@@ -73,11 +103,18 @@ export class FakeGitHub implements GitHub {
 
   async mergePr(url: string, base: string): Promise<void> {
     if (isProtected(base)) throw new ProtectedBranchError(base);
-    this.pr(url).state = 'merged';
+    const pr = this.pr(url);
+    assertMergeBase(url, pr.base, base);
+    pr.state = 'merged';
   }
 
   setState(url: string, state: PrState): void {
     this.pr(url).state = state;
+  }
+
+  private prefix(remote: string): string {
+    const { owner, repo } = parseRemote(remote);
+    return `https://github.com/${owner}/${repo}/pull/`;
   }
 
   private pr(url: string) {

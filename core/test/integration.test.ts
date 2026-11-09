@@ -19,6 +19,9 @@ class PathRemoteGitHub extends FakeGitHub {
   override openPr(p: Parameters<FakeGitHub['openPr']>[0]) {
     return super.openPr({ ...p, remote: 'git@github.com:SELISEdigitalplatforms/blocks-data.git' });
   }
+  override findOpenPr(p: Parameters<FakeGitHub['findOpenPr']>[0]) {
+    return super.findOpenPr({ ...p, remote: 'git@github.com:SELISEdigitalplatforms/blocks-data.git' });
+  }
 }
 
 let tmp: string;
