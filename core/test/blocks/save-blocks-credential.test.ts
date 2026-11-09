@@ -49,7 +49,8 @@ describe('runSave', () => {
     expect(calls[0].args).toEqual(['-i']);
     expect(Buffer.from(calls[0].stdin.split(' -X ')[1].split('\n')[0], 'hex').toString()).toContain('TOPSECRET');
     expect(calls[0].stdin).not.toContain('TOPSECRET');
-    expect(calls[0].stdin.endsWith('\nquit\n')).toBe(true);
+    expect(calls[0].stdin).toMatch(/^add-generic-password -U -s the-software-factory -a blocks-credential -X [0-9a-f]+\n$/);
+    expect(calls[0].stdin).not.toContain('quit');
     expect(JSON.stringify(calls[0].args)).not.toContain('TOPSECRET');
     expect(out.stdout).not.toContain('TOPSECRET');
   });

@@ -66,7 +66,7 @@ export async function runSave(opts: { raw: string; argv: string[]; spawn?: Spawn
   if (!apiUrl || !httpsUrl(apiUrl)) return fail('error: --api-url must be an https URL');
   let cred: BlocksCredential;
   try { cred = buildCredential(JSON.parse(opts.raw), projectKey, apiUrl); } catch { return fail('error: could not save blocks-credential'); }
-  const { code } = await (opts.spawn ?? realSpawn)('security', ['-i'], `${keychainCommand(cred)}\nquit\n`);
+  const { code } = await (opts.spawn ?? realSpawn)('security', ['-i'], `${keychainCommand(cred)}\n`);
   if (code !== 0) return fail('error: could not save blocks-credential');
   // Read back and compare exactly; neither value is ever printed.
   try {
