@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "1f5f555c-8b39-4d5c-b40c-edb4fb11fbb6",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/Users/kazilakit/scratchpad/selise/the-software-factory/.archify/workflow-task-flow-20261109/candidate.json",
+  "output": "/Users/kazilakit/scratchpad/selise/the-software-factory/.archify/workflow-task-flow-20261109/task-flow.html",
+  "specification": {
+    "sha256": "51f7b9159a4eb9d4eac387cd18932b9cd8a3c717c96a8224d02438185436d982",
+    "bytes": 6964
+  },
+  "artifact": {
+    "sha256": "3a66354ed83a7c8d24f1c1da7ffa49e35c0d627727b2e8b10f923b0a272be9bc",
+    "bytes": 766908
+  }
+}

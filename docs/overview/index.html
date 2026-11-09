@@ -1,0 +1,258 @@
+<title>The Software Factory</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;700;800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column, an assembly-line strip of stations up top, wide diagram frames below */
+:root {
+  --paper: #f4f5f2;
+  --panel: #ffffff;
+  --ink: #1d2328;
+  --muted: #5b646c;
+  --rule: #d9ddd6;
+  --line: #2f6f73;      /* agents / flow */
+  --gate: #b5650d;      /* human gates */
+  --guard: #a3324a;     /* guards and stops */
+  --core: #3c5a99;      /* factory core */
+  --tint-gate: #fbefe0;
+  --tint-guard: #f8e6ea;
+  --tint-line: #e3f0ef;
+  --tint-core: #e6ebf6;
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #14181b; --panel: #1b2024; --ink: #e6e9e4; --muted: #9aa3a9; --rule: #2d3439;
+    --line: #6cc2bf; --gate: #f0a24a; --guard: #f08aa0; --core: #92aef0;
+    --tint-gate: #33261a; --tint-guard: #36202a; --tint-line: #1a2f2f; --tint-core: #1f2738;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #14181b; --panel: #1b2024; --ink: #e6e9e4; --muted: #9aa3a9; --rule: #2d3439;
+  --line: #6cc2bf; --gate: #f0a24a; --guard: #f08aa0; --core: #92aef0;
+  --tint-gate: #33261a; --tint-guard: #36202a; --tint-line: #1a2f2f; --tint-core: #1f2738;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--paper); color: var(--ink);
+  font: 16px/1.6 var(--body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+main { max-width: 1120px; margin: 0 auto; padding-block: 40px 72px; display: grid; gap: 56px; }
+h1, h2, h3 { font-family: var(--display); line-height: 1.15; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); font-weight: 800; letter-spacing: -0.02em; }
+h2 { font-size: 1.6rem; font-weight: 700; }
+h3 { font-size: 1.05rem; font-weight: 700; }
+p { margin: 0; max-width: 68ch; }
+code, .mono { font-family: var(--mono); font-size: 0.88em; }
+.eyebrow { font: 500 0.72rem/1 var(--mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+section { display: grid; gap: 18px; min-width: 0; }
+.lede { font-size: 1.12rem; color: var(--muted); }
+.status { display: inline-flex; gap: 8px; align-items: center; font: 500 0.8rem/1 var(--mono); color: var(--gate); background: var(--tint-gate); padding: 7px 10px; border-radius: 4px; width: fit-content; }
+.status::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--gate); }
+
+/* Assembly line */
+.line { display: grid; grid-template-columns: repeat(9, minmax(0, 1fr)); gap: 14px 0; border-top: 2px solid var(--ink); border-bottom: 1px solid var(--rule); padding-block: 14px; }
+.station { min-width: 0; padding: 4px 10px; border-left: 1px dashed var(--rule); display: grid; gap: 4px; align-content: start; }
+.station:first-child { border-left: 0; padding-left: 0; }
+.station .n { font: 500 0.7rem/1 var(--mono); color: var(--muted); }
+.station b { font-family: var(--display); font-size: 1rem; }
+.station span { font-size: 0.82rem; color: var(--muted); line-height: 1.35; }
+.station.gate b { color: var(--gate); }
+.station.gate .n::after { content: "  ◆ gate"; color: var(--gate); }
+.station.core b { color: var(--core); }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+.fact { background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; display: grid; gap: 4px; }
+.fact .k { font: 500 0.72rem/1.2 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.fact .v { font-weight: 600; }
+
+/* Diagrams */
+.figure { display: grid; gap: 10px; min-width: 0; }
+.frame { width: 100%; height: 820px; border: 1px solid var(--rule); border-radius: 8px; background: #11161a; display: block; }
+.figcap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; align-items: baseline; }
+.figcap p { color: var(--muted); font-size: 0.95rem; }
+.open { font: 500 0.85rem/1 var(--mono); color: var(--line); text-decoration: none; border-bottom: 1px solid currentColor; padding-bottom: 2px; white-space: nowrap; }
+.open:hover, .open:focus-visible { color: var(--ink); }
+a:focus-visible { outline: 2px solid var(--line); outline-offset: 3px; }
+
+/* Tables */
+.table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--panel); }
+table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 0.93rem; }
+th, td { text-align: left; vertical-align: top; padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+th { font: 600 0.75rem/1.2 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--paper); }
+tr:last-child td { border-bottom: 0; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+.chip { display: inline-block; font: 500 0.75rem/1 var(--mono); padding: 4px 7px; border-radius: 3px; }
+.chip.you { background: var(--tint-gate); color: var(--gate); }
+.chip.core { background: var(--tint-core); color: var(--core); }
+.chip.no { background: var(--tint-guard); color: var(--guard); }
+
+.cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+.layer { display: grid; grid-template-columns: 28px 1fr; gap: 4px 12px; align-items: start; }
+.layer .i { font: 500 0.8rem/1.6 var(--mono); color: var(--guard); }
+.layer p { font-size: 0.95rem; }
+ol.build { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; counter-reset: s; }
+ol.build li { counter-increment: s; display: grid; grid-template-columns: 40px 1fr; gap: 12px; background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 12px 14px; }
+ol.build li::before { content: counter(s, decimal-leading-zero); font: 500 0.85rem/1.6 var(--mono); color: var(--muted); }
+ol.build li p { font-size: 0.93rem; color: var(--muted); }
+pre { margin: 0; font: 0.85rem/1.55 var(--mono); background: var(--panel); border: 1px solid var(--rule); border-radius: 6px; padding: 16px; overflow-x: auto; }
+.note { border-left: 3px solid var(--gate); padding: 4px 0 4px 14px; color: var(--muted); font-size: 0.95rem; }
+@media (max-width: 640px) {
+  .frame { height: 560px; }
+  .line { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .station:nth-child(3n+1) { border-left: 0; padding-left: 0; }
+}
+</style>
+
+<main>
+  <header style="display:grid;gap:16px">
+    <div class="eyebrow">Selise · Blocks · design overview</div>
+    <h1>The Software Factory</h1>
+    <p class="lede">Agents take a task from the Board, write its spec and plan, build it with tests, check it, review it and open a pull request in the right Blocks repo. You decide at two points: when the spec is written and when the PR is open.</p>
+    <span class="status">Design agreed in chat · nothing built yet</span>
+  </header>
+
+  <section aria-labelledby="line-h">
+    <div class="eyebrow" id="line-h">The line, station by station</div>
+    <div class="line">
+      <div class="station"><span class="n">00</span><b>Ready</b><span>You write a task on the Board</span></div>
+      <div class="station core"><span class="n">01</span><b>Claim</b><span>Core takes it, makes a worktree</span></div>
+      <div class="station"><span class="n">02</span><b>Spec</b><span>spec-writer</span></div>
+      <div class="station gate"><span class="n">03</span><b>Spec review</b><span>You approve or ask changes</span></div>
+      <div class="station"><span class="n">04</span><b>Plan</b><span>planner</span></div>
+      <div class="station"><span class="n">05</span><b>Build</b><span>implementer, TDD</span></div>
+      <div class="station core"><span class="n">06</span><b>Verify</b><span>Core runs tests, agent checks spec</span></div>
+      <div class="station"><span class="n">07</span><b>Review</b><span>reviewer, fresh context</span></div>
+      <div class="station gate"><span class="n">08</span><b>PR open</b><span>You merge into dev, stg or main</span></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="facts-h">
+    <h2 id="facts-h">Ground rules</h2>
+    <div class="facts">
+      <div class="fact"><span class="k">Protected branches</span><span class="v">Agents never merge into dev, stg or main. They only open PRs there.</span></div>
+      <div class="fact"><span class="k">Gates</span><span class="v">Spec and PR gates on by default, plan gate off. You can switch them any time.</span></div>
+      <div class="fact"><span class="k">Board</span><span class="v">Its own Blocks project in Blocks Data. Not GitHub, not ACR.</span></div>
+      <div class="fact"><span class="k">GitHub identity</span><span class="v">kazi-lakit, through a fine-grained PAT kept in the macOS Keychain.</span></div>
+      <div class="fact"><span class="k">First repos</span><span class="v">Blocks OS, IAM, Monitor, Logic, Data, Localization and Release.</span></div>
+      <div class="fact"><span class="k">Start</span><span class="v">You start it. It stops when you stop it.</span></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="map-h">
+    <h2 id="map-h">System map</h2>
+    <p>Everything runs on your Mac except Board data, which lives in Blocks, and the PRs, which go to GitHub. All three ways of running the factory go through one factory core, and only the core writes to the Board or GitHub.</p>
+    <div class="figure">
+      <iframe class="frame" src="diagrams/system-map.html" title="System map diagram" loading="lazy"></iframe>
+      <div class="figcap"><p>Agents work only inside their task worktree. Hooks block pushes and secret files.</p><a class="open" href="diagrams/system-map.html" target="_blank" rel="noopener">Open full size ↗</a></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="flow-h">
+    <h2 id="flow-h">One task, end to end</h2>
+    <p>A task starts with you and ends with you. In between, the core claims it and the stage agents work on it one at a time. Failed tests and reviewer change requests send it back to the implementer, and after the third failed try it stops at Blocked with a question for you.</p>
+    <div class="figure">
+      <iframe class="frame" src="diagrams/task-flow.html" title="Task workflow diagram" loading="lazy"></iframe>
+      <div class="figcap"><p>The core pushes and opens the PR. With the PR gate off and a non-protected base, the core merges instead.</p><a class="open" href="diagrams/task-flow.html" target="_blank" rel="noopener">Open full size ↗</a></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="status-h">
+    <h2 id="status-h">Board columns</h2>
+    <p>These are the statuses a task moves through on the Board. Only the factory core moves a task, and every move adds a history row.</p>
+    <div class="figure">
+      <iframe class="frame" src="diagrams/task-status.html" title="Task status diagram" loading="lazy"></iframe>
+      <div class="figcap"><p>Gate settings change the path: with the spec gate off, Spec goes straight to Plan.</p><a class="open" href="diagrams/task-status.html" target="_blank" rel="noopener">Open full size ↗</a></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="run-h">
+    <h2 id="run-h">Inside one stage run</h2>
+    <p>This is the Build stage under the SDK runner. The runner asks the core for work, starts the agent with only the worktree and tools it needs, then hands the result back to the core, which records it.</p>
+    <div class="figure">
+      <iframe class="frame" src="diagrams/stage-run.html" title="Stage run sequence diagram" loading="lazy"></iframe>
+      <div class="figcap"><p>The other two modes call the same core commands, so the rules and the history are the same.</p><a class="open" href="diagrams/stage-run.html" target="_blank" rel="noopener">Open full size ↗</a></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="modes-h">
+    <h2 id="modes-h">Three ways to run it</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Mode</th><th>You start it with</th><th>Who drives</th><th>Best for</th></tr></thead>
+        <tbody>
+          <tr><td>SDK runner</td><td><code>factory run</code> in a terminal</td><td>Code calls the Agent SDK for each stage</td><td>Long unattended runs, 2 tasks at once</td></tr>
+          <tr><td>Claude loop</td><td><code>/loop /factory</code> in a Claude Code session</td><td>Claude repeats <code>/factory</code> on a timer</td><td>Unattended runs you can watch and talk to</td></tr>
+          <tr><td>In session</td><td><code>/factory</code> or <code>/factory T-12</code></td><td>Claude runs one step, stages as subagents</td><td>One task by hand, trying a new repo, debugging</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">In every mode the <code>factory</code> CLI refuses a skipped stage, a closed gate or a direct change to dev, stg or main. A confused session can get stuck, but it can't break a rule.</p>
+  </section>
+
+  <section aria-labelledby="data-h">
+    <h2 id="data-h">Board data and who can write it</h2>
+    <p>Six tables in the factory's own Blocks project. Blocks access rules enforce the important limits, so a bug in the core can't get past them.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Table</th><th>One row per</th><th>You</th><th>Factory credential</th></tr></thead>
+        <tbody>
+          <tr><td>FactoryTask</td><td>task: repo, base branch, status, branch, PR, cost</td><td><span class="chip you">create, edit, cancel</span></td><td><span class="chip core">status, claim, result fields</span></td></tr>
+          <tr><td>FactoryDoc</td><td>spec, plan, review or verify report version</td><td><span class="chip you">read</span></td><td><span class="chip core">add new versions</span></td></tr>
+          <tr><td>FactoryApproval</td><td>your gate decision, tied to a doc version</td><td><span class="chip you">add</span></td><td><span class="chip no">read only</span></td></tr>
+          <tr><td>FactorySettings</td><td>scope: global or one repo</td><td><span class="chip you">edit</span></td><td><span class="chip no">read only</span></td></tr>
+          <tr><td>FactoryRun</td><td>stage run: mode, agent, turns, cost</td><td><span class="chip you">read</span></td><td><span class="chip core">add, finish</span></td></tr>
+          <tr><td>FactoryEvent</td><td>Board change: who, what, from, to, why</td><td><span class="chip no">add only</span></td><td><span class="chip no">add only</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">An approval names the spec version you read. If the spec changes afterwards, the approval no longer counts and the task waits for you again.</p>
+  </section>
+
+  <section aria-labelledby="safety-h">
+    <h2 id="safety-h">Layers of safety</h2>
+    <div class="cols">
+      <div class="layer"><span class="i">L1</span><div><h3>Agents hold no keys</h3><p>No Blocks credential and no PAT. Only the core has them, so only the core can push, open PRs or change the Board.</p></div></div>
+      <div class="layer"><span class="i">L2</span><div><h3>Hooks</h3><p>Block <code>git push</code>, Keychain and secret-file reads, and edits outside the task worktree.</p></div></div>
+      <div class="layer"><span class="i">L3</span><div><h3>Branch guard</h3><p>Written into the core and repeated in a git <code>pre-push</code> hook: nothing reaches dev, stg or main except through a PR.</p></div></div>
+      <div class="layer"><span class="i">L4</span><div><h3>Blocks access rules</h3><p>Approvals and settings are yours alone. History can only be added to.</p></div></div>
+      <div class="layer"><span class="i">L5</span><div><h3>Limits and stop</h3><p>Turn and cost caps per stage and task, at most 2 tasks at once, and a pause switch on the Board.</p></div></div>
+      <div class="layer"><span class="i">L6</span><div><h3>Separate clones</h3><p>The factory clones each repo for itself, so your own checkouts and uncommitted work are never touched.</p></div></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="repo-h">
+    <h2 id="repo-h">Where things live</h2>
+    <p>Everything is in <code>~/scratchpad/selise/the-software-factory</code>. Nothing is added to the Blocks repos; agents only create branches and PRs there.</p>
+<pre>the-software-factory/
+  board-ui/        Board page (React + Vite, Blocks hosted login)
+  core/            stages, gates, history, git and PR rules + the factory CLI
+  runner/          SDK runner (factory run)
+  plugin/          loaded only for factory sessions
+    agents/          spec-writer, planner, implementer, verifier, reviewer
+    skills/          one per stage, plus /factory
+    hooks/           branch guard, secret guard, run log
+  repos/           os, iam, monitor, logic, data, localization, release
+  .clones/         the factory's own clones + task worktrees
+  docs/            specs, plans and this overview</pre>
+    <p>Every repo has the same shape: a .NET server with xUnit tests, a Vite client with type-check, lint and vitest, and Playwright e2e. Phase 1 Verify runs the server build and tests and the client checks. E2E against the PR preview environment comes in phase 2.</p>
+  </section>
+
+  <section aria-labelledby="build-h">
+    <h2 id="build-h">Build order</h2>
+    <ol class="build">
+      <li><div><h3>Blocks project and Board tables</h3><p>You create the project and run the deploys. A short spike first checks how much text a Blocks Data field holds.</p></div></li>
+      <li><div><h3>factory core and CLI</h3><p>Stage order, gates, history, claims, worktrees, push and PR rules, with tests.</p></div></li>
+      <li><div><h3>Board page</h3><p>Board, task, history and settings views on localhost.</p></div></li>
+      <li><div><h3>Plugin: stage agents, skills and hooks</h3><p>Includes the <code>/factory</code> command, so modes 2 and 3 work from here on.</p></div></li>
+      <li><div><h3>SDK runner</h3><p><code>factory run</code>, two tasks in parallel, crash recovery.</p></div></li>
+      <li><div><h3>First repo, then the other six</h3><p>Start with Blocks Data, then OS, IAM, Monitor, Logic, Localization and Release.</p></div></li>
+    </ol>
+  </section>
+</main>

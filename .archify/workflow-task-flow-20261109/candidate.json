@@ -1,0 +1,336 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Software Factory: One Task, End to End",
+    "quality_profile": "showcase",
+    "output": ".archify/workflow-task-flow-20261109/task-flow.html",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "backend": {
+          "label": "Factory core (code)"
+        },
+        "messagebus": {
+          "label": "Stage agent (Claude)"
+        },
+        "security": {
+          "label": "Gate, guard or stop"
+        },
+        "cloud": {
+          "label": "GitHub"
+        },
+        "external": {
+          "label": "You"
+        }
+      }
+    }
+  },
+  "lanes": [
+    {
+      "id": "you",
+      "label": "You (Board page)"
+    },
+    {
+      "id": "github",
+      "label": "GitHub (kazi-lakit PAT)"
+    },
+    {
+      "id": "factory",
+      "label": "Factory: core code + stage agents"
+    },
+    {
+      "id": "stop",
+      "label": "Stops",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "p_spec",
+      "label": "Claim + spec",
+      "fromCol": 0,
+      "toCol": 2
+    },
+    {
+      "id": "p_build",
+      "label": "Build + check",
+      "fromCol": 3,
+      "toCol": 4,
+      "variant": "emphasis"
+    },
+    {
+      "id": "p_ship",
+      "label": "Review + ship",
+      "fromCol": 5,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "write_task",
+    "claim",
+    "spec",
+    "spec_gate",
+    "plan",
+    "build",
+    "verify",
+    "review",
+    "pr",
+    "you_merge"
+  ],
+  "nodes": [
+    {
+      "id": "write_task",
+      "lane": "you",
+      "col": 0,
+      "type": "external",
+      "icon": "person",
+      "label": "Write task",
+      "sublabel": "mark Ready",
+      "width": 118
+    },
+    {
+      "id": "spec_gate",
+      "lane": "you",
+      "col": 2,
+      "type": "security",
+      "label": "Spec gate",
+      "sublabel": "approve or ask changes",
+      "tag": "on by default",
+      "width": 118
+    },
+    {
+      "id": "you_merge",
+      "lane": "you",
+      "col": 5,
+      "type": "security",
+      "label": "You merge",
+      "sublabel": "into dev / stg / main",
+      "tag": "PR gate",
+      "width": 118
+    },
+    {
+      "id": "auto_merge",
+      "lane": "github",
+      "col": 4,
+      "type": "cloud",
+      "label": "Push + merge",
+      "sublabel": "other bases",
+      "width": 118
+    },
+    {
+      "id": "pr",
+      "lane": "github",
+      "col": 5,
+      "type": "cloud",
+      "label": "Push + open PR",
+      "sublabel": "by core",
+      "width": 118
+    },
+    {
+      "id": "claim",
+      "lane": "factory",
+      "col": 0,
+      "type": "backend",
+      "label": "Claim task",
+      "sublabel": "lease, clone, worktree",
+      "width": 118
+    },
+    {
+      "id": "spec",
+      "lane": "factory",
+      "col": 1,
+      "type": "messagebus",
+      "label": "spec-writer",
+      "sublabel": "writes spec vN",
+      "width": 118
+    },
+    {
+      "id": "plan",
+      "lane": "factory",
+      "col": 2,
+      "type": "messagebus",
+      "label": "planner",
+      "sublabel": "steps from spec",
+      "tag": "plan gate off",
+      "width": 118
+    },
+    {
+      "id": "build",
+      "lane": "factory",
+      "col": 3,
+      "type": "messagebus",
+      "label": "implementer",
+      "sublabel": "TDD, local commits",
+      "width": 118
+    },
+    {
+      "id": "verify",
+      "lane": "factory",
+      "col": 4,
+      "type": "backend",
+      "label": "Verify",
+      "sublabel": "tests + spec check",
+      "width": 118
+    },
+    {
+      "id": "review",
+      "lane": "factory",
+      "col": 5,
+      "type": "messagebus",
+      "label": "reviewer",
+      "sublabel": "diff + spec",
+      "width": 118
+    },
+    {
+      "id": "blocked",
+      "lane": "stop",
+      "col": 4,
+      "type": "security",
+      "icon": "waiting",
+      "label": "Blocked",
+      "sublabel": "question on the Board",
+      "width": 118
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_claim",
+      "from": "write_task",
+      "to": "claim",
+      "label": "Ready",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "e_spec",
+      "from": "claim",
+      "to": "spec",
+      "variant": "default"
+    },
+    {
+      "id": "e_gate",
+      "from": "spec",
+      "to": "spec_gate",
+      "label": "for review",
+      "variant": "default",
+      "fromSide": "top",
+      "toSide": "left"
+    },
+    {
+      "id": "e_plan",
+      "from": "spec_gate",
+      "to": "plan",
+      "label": "approved",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "e_build",
+      "from": "plan",
+      "to": "build",
+      "variant": "default"
+    },
+    {
+      "id": "e_verify",
+      "from": "build",
+      "to": "verify",
+      "variant": "default"
+    },
+    {
+      "id": "e_review",
+      "from": "verify",
+      "to": "review",
+      "label": "pass",
+      "variant": "emphasis"
+    },
+    {
+      "id": "e_verify_back",
+      "from": "verify",
+      "to": "build",
+      "label": "tests fail",
+      "variant": "dashed",
+      "role": "return",
+      "fromSide": "top",
+      "toSide": "top",
+      "route": "up-channel"
+    },
+    {
+      "id": "e_blocked",
+      "from": "verify",
+      "to": "blocked",
+      "label": "3rd fail",
+      "variant": "security",
+      "role": "error",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "e_pr",
+      "from": "review",
+      "to": "pr",
+      "label": "protected base",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "e_auto",
+      "from": "review",
+      "to": "auto_merge",
+      "label": "PR gate off",
+      "variant": "dashed",
+      "role": "branch",
+      "fromSide": "top",
+      "toSide": "right"
+    },
+    {
+      "id": "e_merge",
+      "from": "pr",
+      "to": "you_merge",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Gates are settings",
+      "items": [
+        "Spec and PR gates on by default, plan gate off",
+        "Set globally, per repo or per task",
+        "Spec changes go back to spec-writer",
+        "dev, stg and main always wait for you"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Fix loop",
+      "items": [
+        "Failed tests go back to the implementer",
+        "Reviewer change requests go back too",
+        "After the 3rd failed try the task is Blocked"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Every move is recorded",
+      "items": [
+        "Only the core writes to the Board",
+        "Each change adds a history row: who, what, why",
+        "History rows can never be edited or deleted"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Agents hold no keys",
+      "items": [
+        "Agents edit code in their worktree only",
+        "The core pushes, opens PRs and merges",
+        "Hooks block git push and secret files"
+      ]
+    }
+  ]
+}

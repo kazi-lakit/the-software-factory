@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "21d2f4b6-db28-4505-a44a-a05b3d060e94",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/kazilakit/scratchpad/selise/the-software-factory/.archify/architecture-system-20261109/candidate.json",
+  "output": "/Users/kazilakit/scratchpad/selise/the-software-factory/.archify/architecture-system-20261109/system-map.html",
+  "specification": {
+    "sha256": "a9bbcf70f37a629d4aafbdd807116b5b13fe745e63098657cf6b1f8eae3bd611",
+    "bytes": 6325
+  },
+  "artifact": {
+    "sha256": "ff871c1a822e69e3c6a4e82f0062f893ca0d3fa243f68f5dbd1b7fb4955b666d",
+    "bytes": 767907
+  }
+}

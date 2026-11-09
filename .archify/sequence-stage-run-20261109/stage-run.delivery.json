@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "e1215c00-aee6-4191-bcf4-7702b6a44df2",
+  "status": "current",
+  "command": "deliver",
+  "type": "sequence",
+  "input": "/Users/kazilakit/scratchpad/selise/the-software-factory/.archify/sequence-stage-run-20261109/candidate.json",
+  "output": "/Users/kazilakit/scratchpad/selise/the-software-factory/.archify/sequence-stage-run-20261109/stage-run.html",
+  "specification": {
+    "sha256": "019cf56c42fae718b8846c601316bd83ed69023d9ca83926a0a698d77f711469",
+    "bytes": 4925
+  },
+  "artifact": {
+    "sha256": "278a119d22ecd2159f9b54298134282f85333823ce940080359a411215e60d4f",
+    "bytes": 762094
+  }
+}

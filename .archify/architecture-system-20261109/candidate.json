@@ -1,0 +1,340 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Software Factory: System Map",
+    "output": ".archify/architecture-system-20261109/system-map.html",
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "backend": {
+          "label": "Factory core (code)"
+        },
+        "messagebus": {
+          "label": "Stage agent (Claude)"
+        },
+        "security": {
+          "label": "Gate, guard or stop"
+        },
+        "cloud": {
+          "label": "GitHub"
+        },
+        "external": {
+          "label": "You"
+        },
+        "frontend": {
+          "label": "Board page"
+        },
+        "database": {
+          "label": "Data or files"
+        }
+      }
+    }
+  },
+  "components": [
+    {
+      "id": "you",
+      "type": "external",
+      "icon": "person",
+      "label": "You",
+      "sublabel": "only Board user",
+      "pos": [
+        20,
+        300
+      ],
+      "size": [
+        120,
+        60
+      ]
+    },
+    {
+      "id": "board_ui",
+      "type": "frontend",
+      "label": "Board page",
+      "sublabel": "localhost, hosted login",
+      "pos": [
+        270,
+        300
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "sdk",
+      "type": "backend",
+      "label": "SDK runner",
+      "sublabel": "factory run",
+      "pos": [
+        430,
+        140
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "loop",
+      "type": "backend",
+      "label": "Claude loop",
+      "sublabel": "/loop /factory",
+      "pos": [
+        580,
+        140
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "session",
+      "type": "backend",
+      "label": "In session",
+      "sublabel": "/factory",
+      "pos": [
+        730,
+        140
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "factory core + CLI",
+      "sublabel": "stages, gates, history",
+      "pos": [
+        580,
+        300
+      ],
+      "size": [
+        130,
+        60
+      ],
+      "tag": "only writer"
+    },
+    {
+      "id": "keychain",
+      "type": "security",
+      "label": "macOS Keychain",
+      "sublabel": "kazi-lakit PAT",
+      "pos": [
+        420,
+        460
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "agents",
+      "type": "messagebus",
+      "label": "Stage agents",
+      "sublabel": "Claude via Agent SDK",
+      "pos": [
+        810,
+        300
+      ],
+      "size": [
+        140,
+        60
+      ]
+    },
+    {
+      "id": "hooks",
+      "type": "security",
+      "label": "Plugin hooks",
+      "sublabel": "no push, no secrets",
+      "pos": [
+        815,
+        460
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "worktree",
+      "type": "database",
+      "label": "Task worktree",
+      "sublabel": "factory clones only",
+      "pos": [
+        1010,
+        300
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "github",
+      "type": "cloud",
+      "label": "GitHub",
+      "sublabel": "7 Blocks repos",
+      "pos": [
+        1220,
+        300
+      ],
+      "size": [
+        130,
+        60
+      ]
+    },
+    {
+      "id": "blocks_data",
+      "type": "database",
+      "label": "Blocks Data",
+      "sublabel": "factory project, 6 tables",
+      "pos": [
+        270,
+        600
+      ],
+      "size": [
+        130,
+        60
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "Your Mac",
+      "wraps": [
+        "board_ui",
+        "sdk",
+        "loop",
+        "session",
+        "core",
+        "keychain",
+        "agents",
+        "hooks",
+        "worktree"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Blocks cloud",
+      "wraps": [
+        "blocks_data"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "c_you_board",
+      "from": "you",
+      "to": "board_ui",
+      "label": "tasks, approvals",
+      "variant": "emphasis"
+    },
+    {
+      "id": "c_board_data",
+      "from": "board_ui",
+      "to": "blocks_data",
+      "label": "your sign-in",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "c_sdk_core",
+      "from": "sdk",
+      "to": "core"
+    },
+    {
+      "id": "c_loop_core",
+      "from": "loop",
+      "to": "core",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "c_session_core",
+      "from": "session",
+      "to": "core"
+    },
+    {
+      "id": "c_core_data",
+      "from": "core",
+      "to": "blocks_data",
+      "label": "factory credential",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "id": "c_key_core",
+      "from": "keychain",
+      "to": "core",
+      "label": "PAT",
+      "variant": "security"
+    },
+    {
+      "id": "c_core_agents",
+      "from": "core",
+      "to": "agents",
+      "label": "runs stages",
+      "variant": "emphasis"
+    },
+    {
+      "id": "c_hooks_agents",
+      "from": "hooks",
+      "to": "agents",
+      "label": "guard",
+      "variant": "security",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "c_agents_wt",
+      "from": "agents",
+      "to": "worktree",
+      "label": "edits",
+      "variant": "emphasis"
+    },
+    {
+      "id": "c_wt_github",
+      "from": "worktree",
+      "to": "github",
+      "label": "push, PR",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Three ways to run",
+      "items": [
+        "factory run: code drives each stage",
+        "/loop /factory: Claude repeats it on a timer",
+        "/factory: one step, in your session"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "One rule keeper",
+      "items": [
+        "All modes go through the factory core",
+        "The core refuses skipped stages and closed gates",
+        "Pushes and PRs come from the core, not agents"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Boundaries",
+      "items": [
+        "Agents see only their task worktree",
+        "Factory clones are apart from your checkouts",
+        "Approvals and settings are yours alone in Blocks"
+      ]
+    }
+  ]
+}

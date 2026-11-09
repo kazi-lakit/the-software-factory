@@ -1,0 +1,50 @@
+{
+  "schema_version": 2,
+  "diagram_type": "lifecycle",
+  "meta": {
+    "title": "Board Task Statuses",
+    "output": ".archify/lifecycle-task-status-20261109/task-status.html",
+    "quality_profile": "showcase"
+  },
+  "lanes": [
+    { "id": "main", "label": "Plan the work" },
+    { "id": "make", "label": "Make and ship" },
+    { "id": "stops", "label": "Stops" },
+    { "id": "terminal", "label": "Ended" }
+  ],
+  "states": [
+    { "id": "inbox", "type": "start", "label": "Inbox", "sublabel": "you wrote it", "lane": "main", "col": 0 },
+    { "id": "ready", "type": "waiting", "label": "Ready", "sublabel": "factory may take it", "lane": "main", "col": 1 },
+    { "id": "spec", "type": "active", "label": "Spec", "sublabel": "spec-writer", "lane": "main", "col": 2 },
+    { "id": "spec_review", "type": "decision", "label": "Spec review", "sublabel": "waits for you", "lane": "main", "col": 3, "tag": "gate" },
+    { "id": "plan", "type": "active", "label": "Plan", "sublabel": "planner", "lane": "main", "col": 4 },
+    { "id": "build", "type": "active", "label": "Build", "sublabel": "implementer", "lane": "make", "col": 4 },
+    { "id": "verify", "type": "decision", "label": "Verify", "sublabel": "tests + spec", "lane": "make", "col": 3 },
+    { "id": "review", "type": "active", "label": "Review", "sublabel": "reviewer", "lane": "make", "col": 2 },
+    { "id": "pr_open", "type": "decision", "label": "PR open", "sublabel": "waits for you", "lane": "make", "col": 1, "tag": "gate" },
+    { "id": "done", "type": "success", "label": "Done", "sublabel": "merged", "lane": "make", "col": 0 },
+    { "id": "blocked", "type": "waiting", "label": "Blocked", "sublabel": "question for you", "lane": "stops", "col": 3 },
+    { "id": "cancelled", "type": "failure", "label": "Cancelled", "sublabel": "by you", "lane": "terminal", "col": 3 }
+  ],
+  "transitions": [
+    { "id": "t_ready", "from": "inbox", "to": "ready", "label": "mark Ready", "variant": "emphasis" },
+    { "id": "t_spec", "from": "ready", "to": "spec", "label": "claimed", "variant": "default" },
+    { "id": "t_spec_review", "from": "spec", "to": "spec_review", "label": "written", "variant": "default" },
+    { "id": "t_plan", "from": "spec_review", "to": "plan", "label": "approved", "variant": "emphasis" },
+    { "id": "t_spec_back", "from": "spec_review", "to": "spec", "label": "changes", "variant": "dashed", "route": "top-channel" },
+    { "id": "t_build", "from": "plan", "to": "build", "variant": "default" },
+    { "id": "t_verify", "from": "build", "to": "verify", "variant": "default" },
+    { "id": "t_review", "from": "verify", "to": "review", "label": "pass", "variant": "emphasis" },
+    { "id": "t_fix", "from": "verify", "to": "build", "label": "fail", "variant": "dashed", "route": "top-channel" },
+    { "id": "t_pr", "from": "review", "to": "pr_open", "label": "approved", "variant": "emphasis" },
+    { "id": "t_done", "from": "pr_open", "to": "done", "label": "you merge", "variant": "emphasis" },
+    { "id": "t_blocked", "from": "verify", "to": "blocked", "label": "3rd fail", "variant": "security" },
+    { "id": "t_unblock", "from": "blocked", "to": "build", "label": "you answer", "variant": "dashed" },
+    { "id": "t_cancel", "from": "blocked", "to": "cancelled", "label": "you cancel", "variant": "security" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "Gates change the path", "items": ["Spec gate off: Spec goes straight to Plan", "Plan gate on: Plan waits for you too", "PR gate off on a non-protected base: the core merges"] },
+    { "dot": "amber", "title": "Loops", "items": ["Spec changes go back to Spec", "Failed tests and review changes go back to Build", "Any stage can stop at Blocked with a question"] },
+    { "dot": "slate", "title": "Moves", "items": ["Only the factory core changes a status", "Each move writes a history row", "You can cancel a task from any status"] }
+  ]
+}

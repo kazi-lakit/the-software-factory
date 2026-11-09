@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "02418ac8-429b-48cf-ad27-fceac0c5f13d",
+  "status": "current",
+  "command": "deliver",
+  "type": "lifecycle",
+  "input": "/Users/kazilakit/scratchpad/selise/the-software-factory/.archify/lifecycle-task-status-20261109/candidate.json",
+  "output": "/Users/kazilakit/scratchpad/selise/the-software-factory/.archify/lifecycle-task-status-20261109/task-status.html",
+  "specification": {
+    "sha256": "7c106f86c8b8a928478f89614c68ff23bf69aab49082cd1f96a9a7c0b965a8a1",
+    "bytes": 3902
+  },
+  "artifact": {
+    "sha256": "fdb11e081eee5db8be6000ec84772760202e22e35a4066264819aeddf67302e5",
+    "bytes": 768724
+  }
+}

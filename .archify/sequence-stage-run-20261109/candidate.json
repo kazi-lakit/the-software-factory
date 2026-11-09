@@ -1,0 +1,249 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "One Stage Run (SDK runner)",
+    "output": ".archify/sequence-stage-run-20261109/stage-run.html",
+    "column_fit": "spread",
+    "quality_profile": "showcase"
+  },
+  "participants": [
+    {
+      "id": "blocks",
+      "type": "database",
+      "label": "Blocks Data",
+      "sublabel": "Board tables"
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "factory core",
+      "sublabel": "rules + history"
+    },
+    {
+      "id": "runner",
+      "type": "backend",
+      "label": "SDK runner",
+      "sublabel": "factory run"
+    },
+    {
+      "id": "agent",
+      "type": "messagebus",
+      "label": "implementer",
+      "sublabel": "stage agent"
+    },
+    {
+      "id": "wt",
+      "type": "database",
+      "label": "Task worktree",
+      "sublabel": "factory clone"
+    },
+    {
+      "id": "hooks",
+      "type": "security",
+      "label": "Hooks",
+      "sublabel": "plugin guard"
+    }
+  ],
+  "segments": [
+    {
+      "from": 148,
+      "to": 312,
+      "label": "Claim"
+    },
+    {
+      "from": 330,
+      "to": 494,
+      "label": "Run the stage"
+    },
+    {
+      "from": 512,
+      "to": 620,
+      "label": "Record"
+    }
+  ],
+  "messages": [
+    {
+      "id": "next",
+      "from": "runner",
+      "to": "core",
+      "y": 160,
+      "label": "next work?",
+      "variant": "default"
+    },
+    {
+      "id": "read",
+      "from": "core",
+      "to": "blocks",
+      "y": 188,
+      "label": "read actionable tasks",
+      "variant": "default"
+    },
+    {
+      "id": "rows",
+      "from": "blocks",
+      "to": "core",
+      "y": 216,
+      "label": "T-12 is at build",
+      "variant": "return"
+    },
+    {
+      "id": "claim",
+      "from": "core",
+      "to": "blocks",
+      "y": 244,
+      "label": "claim T-12 (version check)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "h1",
+      "from": "core",
+      "to": "blocks",
+      "y": 272,
+      "label": "history: claimed",
+      "variant": "dashed"
+    },
+    {
+      "id": "inputs",
+      "from": "core",
+      "to": "runner",
+      "y": 300,
+      "label": "stage build + inputs",
+      "variant": "return"
+    },
+    {
+      "id": "query",
+      "from": "runner",
+      "to": "agent",
+      "y": 342,
+      "label": "query(): worktree, tools, limits",
+      "variant": "emphasis"
+    },
+    {
+      "id": "edit",
+      "from": "agent",
+      "to": "wt",
+      "y": 370,
+      "label": "edit files, run tests",
+      "variant": "default"
+    },
+    {
+      "id": "push",
+      "from": "agent",
+      "to": "hooks",
+      "y": 398,
+      "label": "git push?",
+      "variant": "security"
+    },
+    {
+      "id": "deny",
+      "from": "hooks",
+      "to": "agent",
+      "y": 426,
+      "label": "blocked",
+      "variant": "return"
+    },
+    {
+      "id": "commit",
+      "from": "agent",
+      "to": "wt",
+      "y": 454,
+      "label": "commit locally",
+      "variant": "default"
+    },
+    {
+      "id": "result",
+      "from": "agent",
+      "to": "runner",
+      "y": 482,
+      "label": "result: done + summary",
+      "variant": "return"
+    },
+    {
+      "id": "complete",
+      "from": "runner",
+      "to": "core",
+      "y": 524,
+      "label": "complete build",
+      "variant": "emphasis"
+    },
+    {
+      "id": "move",
+      "from": "core",
+      "to": "blocks",
+      "y": 552,
+      "label": "status build to verify",
+      "variant": "emphasis"
+    },
+    {
+      "id": "h2",
+      "from": "core",
+      "to": "blocks",
+      "y": 580,
+      "label": "history: implementer, run 41",
+      "variant": "dashed"
+    },
+    {
+      "id": "ok",
+      "from": "core",
+      "to": "runner",
+      "y": 608,
+      "label": "next stage ready",
+      "variant": "return"
+    }
+  ],
+  "activations": [
+    {
+      "participant": "runner",
+      "from": 156,
+      "to": 614,
+      "type": "backend"
+    },
+    {
+      "participant": "core",
+      "from": 160,
+      "to": 304,
+      "type": "backend"
+    },
+    {
+      "participant": "core",
+      "from": 524,
+      "to": 612,
+      "type": "backend"
+    },
+    {
+      "participant": "agent",
+      "from": 342,
+      "to": 486,
+      "type": "messagebus"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Claim",
+      "items": [
+        "A version check lets only one runner win a task",
+        "Claims expire, so a crashed run frees its tasks"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Run",
+      "items": [
+        "The agent sees only its worktree and stage tools",
+        "Hooks stop pushes and secret reads",
+        "Turn and cost limits end a runaway stage"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Record",
+      "items": [
+        "Only the core changes the Board",
+        "Each change adds a history row naming the agent",
+        "The other two modes call the same core commands"
+      ]
+    }
+  ]
+}
