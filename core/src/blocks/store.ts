@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DocTooLargeError, MAX_DOC_BYTES } from '../limits.js';
 import { DEFAULT_SETTINGS } from '../defaults.js';
 import {
-  CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, VersionConflictError,
-  type BoardStore, type StoredSettings,
+  CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval,
+  VersionConflictError, type BoardStore, type NewApproval, type StoredSettings,
 } from '../store.js';
 import type {
   Approval, Doc, DocKind, FactoryEvent, Gate, Mode, RepoId, RepoSettings, Run, Settings, Step, Task,
@@ -183,9 +183,19 @@ export class BlocksStore implements BoardStore {
         costUsd: 0,
         version: 1,
       };
-      const row: Record<string, Value> = {};
+      // The writeId finds this row again if the insert's reply is lost.
+      const writeId = randomUUID();
+      const row: Record<string, Value> = { writeId };
       for (const [key, value] of Object.entries(task)) row[key] = encodeTaskValue(key as keyof Task, value);
-      const r = await this.data.insert('FactoryTask', row);
+      let r: Awaited<ReturnType<BlocksData['insert']>>;
+      try {
+        r = await this.data.insert('FactoryTask', row);
+      } catch (error) {
+        // A lost reply: if the row is stored it is ours. A retry under a new task id would make a second task.
+        const [found] = await this.data.list('FactoryTask', { writeId }).catch((): Row[] => []);
+        if (found) return decodeTask(found);
+        throw error;
+      }
       if (r.kind === 'inserted') return task;
       if (r.kind === 'forbidden') throw new BlocksForbiddenError('insertFactoryTask');
     }
@@ -255,12 +265,30 @@ export class BlocksStore implements BoardStore {
     return row ? decodeDoc(row) : undefined;
   }
 
-  async addApproval(a: Omit<Approval, 'at'>): Promise<Approval> {
+  async addApproval(a: NewApproval): Promise<Approval> {
     this.ownerOnly('addApproval');
+    const approvalId = a.approvalId ?? randomUUID();
     const approval: Approval = { taskId: a.taskId, gate: a.gate, docVersion: a.docVersion, decision: a.decision, comment: a.comment, at: this.now().toISOString() };
-    const r = await this.data.insert('FactoryApproval', { approvalId: randomUUID(), ...approval });
+    // The approval stored under this id, if it is this one: a retry (lost reply, or the caller's own) returns it.
+    const stored = async (): Promise<Approval | undefined> => {
+      const [row] = await this.data.list('FactoryApproval', { approvalId });
+      const found = row ? decodeApproval(row) : undefined;
+      return found && sameApproval(found, a) ? found : undefined;
+    };
+    let r: Awaited<ReturnType<BlocksData['insert']>>;
+    try {
+      r = await this.data.insert('FactoryApproval', { approvalId, ...approval });
+    } catch (error) {
+      const found = await stored().catch(() => undefined);
+      if (found) return found;
+      throw error;
+    }
     if (r.kind === 'forbidden') throw new BlocksForbiddenError('insertFactoryApproval');
-    if (r.kind === 'duplicate') throw new Error('addApproval: approval id already taken');
+    if (r.kind === 'duplicate') {
+      const found = await stored();
+      if (found) return found;
+      throw new Error('addApproval: approval id already taken');
+    }
     return approval;
   }
 

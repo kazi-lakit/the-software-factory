@@ -63,6 +63,12 @@ export class RereadAfterUpdateError extends Error {
   }
 }
 
+export type NewApproval = Omit<Approval, 'at'> & { approvalId?: string };
+
+/** The same approval content: a stored one with the caller's id is a retry only if this matches. */
+export const sameApproval = (a: Omit<Approval, 'at'>, b: Omit<Approval, 'at'>): boolean =>
+  a.taskId === b.taskId && a.gate === b.gate && a.docVersion === b.docVersion && a.decision === b.decision && a.comment === b.comment;
+
 export interface StoredSettings {
   global: Settings;
   repos: Partial<Record<RepoId, RepoSettings>>;
@@ -77,7 +83,8 @@ export interface BoardStore {
   updateTask(id: string, expectedVersion: number, patch: Partial<Task>): Promise<Task>;
   addDoc(taskId: string, kind: DocKind, body: string, author: string): Promise<Doc>;
   currentDoc(taskId: string, kind: DocKind): Promise<Doc | undefined>;
-  addApproval(a: Omit<Approval, 'at'>): Promise<Approval>;
+  /** A caller-supplied `approvalId` makes a retry safe: the same id returns the approval already stored. */
+  addApproval(a: NewApproval): Promise<Approval>;
   listApprovals(taskId: string): Promise<Approval[]>;
   getSettings(): Promise<StoredSettings>;
   /** Dev use only. */
@@ -106,7 +113,8 @@ export async function updateHeld(store: BoardStore, task: Task, patch: Partial<T
 interface State {
   tasks: Task[];
   docs: Doc[];
-  approvals: Approval[];
+  /** `approvalId` only when the caller gave one; never returned. */
+  approvals: (Approval & { approvalId?: string })[];
   settings: StoredSettings | null;
   runs: Run[];
   events: FactoryEvent[];
@@ -115,6 +123,7 @@ interface State {
 const emptyState = (): State => ({ tasks: [], docs: [], approvals: [], settings: null, runs: [], events: [] });
 const clone = <T>(v: T): T => structuredClone(v);
 const num = (id: string) => Number(id.slice(id.indexOf('-') + 1)) || 0;
+const publicApproval = ({ approvalId: _id, ...a }: Approval & { approvalId?: string }): Approval => clone(a);
 const nextId = (prefix: string, ids: string[]) => `${prefix}-${1 + Math.max(0, ...ids.map(num))}`;
 
 export class MemoryStore implements BoardStore {
@@ -201,16 +210,21 @@ export class MemoryStore implements BoardStore {
     });
   }
 
-  addApproval(a: Omit<Approval, 'at'>) {
+  addApproval({ approvalId, ...a }: NewApproval) {
     return this.write(() => {
+      const stored = approvalId === undefined ? undefined : this.state.approvals.find((x) => x.approvalId === approvalId);
+      if (stored) {
+        if (!sameApproval(stored, a)) throw new Error('addApproval: approval id already taken');
+        return publicApproval(stored);
+      }
       const approval: Approval = { ...a, at: new Date().toISOString() };
-      this.state.approvals.push(approval);
+      this.state.approvals.push(approvalId === undefined ? approval : { ...approval, approvalId });
       return clone(approval);
     });
   }
 
   listApprovals(taskId: string) {
-    return this.read(() => clone(this.state.approvals.filter((a) => a.taskId === taskId)));
+    return this.read(() => this.state.approvals.filter((a) => a.taskId === taskId).map(publicApproval));
   }
 
   getSettings(): Promise<StoredSettings> {

@@ -371,8 +371,11 @@ export class Engine {
     let runId: string | null = null;
     if (AGENT_STEPS.has(step)) {
       const agentStep = step as AgentStep;
-      const open = await retry(() => store.openRun(task.taskId, step));
-      runId = (open ?? (await retry(() => store.startRun({ taskId: task.taskId, step, mode, agent: AGENT_FOR[agentStep] })))).runId;
+      // Each try looks for the open run first: a start whose reply was lost has made it already.
+      const run = await retry(async () =>
+        (await store.openRun(task.taskId, step)) ?? store.startRun({ taskId: task.taskId, step, mode, agent: AGENT_FOR[agentStep] }),
+      );
+      runId = run.runId;
     }
 
     const body = async (kind: DocKind) => (await retry(() => store.currentDoc(task.taskId, kind)))?.body;

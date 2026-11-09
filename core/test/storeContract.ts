@@ -67,6 +67,14 @@ export function runStoreContract(name: string, make: () => BoardStore | Promise<
       expect(await s.listApprovals('T-1')).toEqual([a]);
       expect(await s.listApprovals('T-2')).toHaveLength(0);
     });
+    test('addApproval with the same approvalId twice records one approval', async () => {
+      const s = await make();
+      const a = { taskId: 'T-1', gate: 'spec' as const, docVersion: 1, decision: 'approve' as const, comment: '', approvalId: 'x-1' };
+      const first = await s.addApproval(a);
+      expect(first).not.toHaveProperty('approvalId');
+      expect(await s.addApproval(a)).toEqual(first);
+      expect(await s.listApprovals('T-1')).toEqual([first]);
+    });
     test('empty store settings are defaults', async () => {
       expect(await (await make()).getSettings()).toEqual({ global: DEFAULT_SETTINGS, repos: {} });
     });

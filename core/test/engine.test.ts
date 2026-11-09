@@ -397,6 +397,21 @@ describe('on BlocksStore', () => {
     expect((await store.listEvents('T-1')).filter((e) => e.field === 'status')).toEqual([expect.objectContaining({ from: 'ready', to: 'spec' })]);
   });
 
+  test('a lost startRun reply is retried by finding the open run, not by starting another', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    let data!: FakeBlocksData;
+    const { store, engine } = setup({
+      store: (now) => new BlocksStore((data = new FakeBlocksData('any', { now })), 'owner', { now }),
+    });
+    await put(store, { status: 'ready' });
+    data.failNextReply('insert', 'FactoryRun');
+    const p = engine.next();
+    await vi.runAllTimersAsync();
+    const ticket = await p;
+    expect(data.rows('FactoryRun')).toHaveLength(1);
+    expect(ticket?.runId).toBe(data.rows('FactoryRun')[0]!.runId);
+  });
+
   test('a setup error note is retried with the same event', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout'] });
     let data!: FakeBlocksData;

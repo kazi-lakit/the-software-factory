@@ -148,6 +148,32 @@ describe('BlocksStore', () => {
     await expect(new BlocksStore(data, 'core').addEvents([event])).rejects.toThrow(new ForbiddenError('factory core may not write events'));
   });
 
+  it('lost reply: createTask returns the row it stored instead of making another task', async () => {
+    const data = new FakeBlocksData('any');
+    const s = new BlocksStore(data, 'owner');
+    data.failNextReply('insert', 'FactoryTask');
+    const t = await s.createTask({ title: 't', description: 'd', repo: 'data' });
+    expect(t).toMatchObject({ taskId: 'T-1', title: 't', status: 'inbox', version: 1 });
+    expect(data.rows('FactoryTask')).toHaveLength(1);
+    expect(data.rows('FactoryTask')[0]!.writeId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await s.getTask('T-1')).toEqual(t);
+  });
+
+  it('lost reply: addApproval returns the stored approval; the same approvalId again is not a second row', async () => {
+    const clock = { t: new Date('2026-11-09T10:00:00Z') };
+    const data = new FakeBlocksData('any');
+    const s = new BlocksStore(data, 'owner', { now: () => clock.t });
+    const a = { taskId: 'T-1', gate: 'spec' as const, docVersion: 1, decision: 'approve' as const, comment: '', approvalId: 'appr-1' };
+    data.failNextReply('insert', 'FactoryApproval');
+    const first = await s.addApproval(a);
+    expect(first).toEqual({ taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'approve', comment: '', at: clock.t.toISOString() });
+    clock.t = new Date(clock.t.getTime() + 5000);
+    expect(await s.addApproval(a)).toEqual(first);
+    expect(data.rows('FactoryApproval')).toHaveLength(1);
+    // The same id for a different decision is not a retry.
+    await expect(s.addApproval({ ...a, decision: 'changes' })).rejects.toThrow('addApproval: approval id already taken');
+  });
+
   it('lost reply: addEvents retried writes one row', async () => {
     const data = new FakeBlocksData('factory-core');
     const s = new BlocksStore(data, 'core');
