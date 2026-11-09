@@ -14,10 +14,11 @@ const REFRESH_WINDOW_MS = 120_000;
 const FAILED = 'blocks: client-credentials token request failed';
 
 /** Default mint through the SDK. The token endpoint's error body can echo request data, so it is never surfaced. */
-export const sdkMint: Mint = async (cred) => {
+export function sdkMint(options: { fetch?: typeof fetch } = {}): Mint {
+  return async (cred) => {
   let answer: Record<string, unknown>;
   try {
-    const client = createBlocksClient({ apiUrl: cred.apiUrl, xBlocksKey: cred.projectKey });
+    const client = createBlocksClient({ apiUrl: cred.apiUrl, xBlocksKey: cred.projectKey, ...(options.fetch ? { fetch: options.fetch } : {}) });
     answer = (await client.auth.oidc.clientCredentials({ clientId: cred.clientId, clientSecret: cred.clientSecret })) as Record<string, unknown>;
   } catch { throw new Error(FAILED); }
   // Blocks answers in camelCase ({ accessToken, expiresIn }); OAuth's snake_case is accepted too.
@@ -25,7 +26,8 @@ export const sdkMint: Mint = async (cred) => {
   const expiresIn = answer?.expiresIn ?? answer?.expires_in;
   if (typeof token !== 'string' || !token || typeof expiresIn !== 'number' || expiresIn <= 0) throw new Error(FAILED);
   return { accessToken: token, expiresIn };
-};
+  };
+}
 
 /** In-memory client-credentials token: refreshed when under 120 s are left, one mint in flight, never written to disk. */
 export class ClientCredentialsToken implements TokenSource {
@@ -35,7 +37,7 @@ export class ClientCredentialsToken implements TokenSource {
 
   constructor(
     private readonly cred: BlocksCredential,
-    private readonly mint: Mint = sdkMint,
+    private readonly mint: Mint = sdkMint(),
     private readonly now: () => number = Date.now,
   ) {}
 

@@ -4,6 +4,7 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import type { BlocksCredential } from '../src/blocks/credential.js';
+import { readSecret, realExecFile, type ExecFile } from '../src/secrets.js';
 
 export type Spawner = (file: string, args: string[], stdin: string) => Promise<{ code: number }>;
 
@@ -33,13 +34,15 @@ export function buildCredential(cliJson: unknown, projectKey: string, apiUrl: st
 }
 
 export function keychainCommand(cred: BlocksCredential): string {
-  const json = JSON.stringify(cred).replaceAll("'", "'\\''");
-  return `add-generic-password -U -s the-software-factory -a blocks-credential -w '${json}'`;
+  // Hex keeps quotes, backslashes and any other character out of the command line.
+  const hex = Buffer.from(JSON.stringify(cred), 'utf8').toString('hex');
+  return `add-generic-password -U -s the-software-factory -a blocks-credential -X ${hex}`;
 }
 
 function flag(argv: string[], name: string): string | undefined {
   const i = argv.indexOf(name);
-  return i >= 0 ? argv[i + 1] : undefined;
+  const value = i >= 0 ? argv[i + 1] : undefined;
+  return value !== undefined && value.startsWith('--') ? undefined : value;
 }
 
 function httpsUrl(value: string): boolean {
@@ -55,7 +58,7 @@ const realSpawn: Spawner = (file, args, stdin) =>
     child.stdin.end(stdin);
   });
 
-export async function runSave(opts: { raw: string; argv: string[]; spawn?: Spawner }): Promise<{ code: number; stdout: string }> {
+export async function runSave(opts: { raw: string; argv: string[]; spawn?: Spawner; exec?: ExecFile }): Promise<{ code: number; stdout: string }> {
   const fail = (stdout: string) => ({ code: 1, stdout });
   const projectKey = flag(opts.argv, '--project-key');
   const apiUrl = flag(opts.argv, '--api-url');
@@ -65,16 +68,23 @@ export async function runSave(opts: { raw: string; argv: string[]; spawn?: Spawn
   try { cred = buildCredential(JSON.parse(opts.raw), projectKey, apiUrl); } catch { return fail('error: could not save blocks-credential'); }
   const { code } = await (opts.spawn ?? realSpawn)('security', ['-i'], `${keychainCommand(cred)}\nquit\n`);
   if (code !== 0) return fail('error: could not save blocks-credential');
+  // Read back and compare exactly; neither value is ever printed.
+  try {
+    const stored = await readSecret('blocks-credential', opts.exec ?? realExecFile);
+    if (stored.trim() !== JSON.stringify(cred)) return fail('error: could not save blocks-credential');
+  } catch { return fail('error: could not save blocks-credential'); }
   return { code: 0, stdout: `saved blocks-credential (client ${cred.clientId})` };
 }
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
-  let raw = '';
+  const chunks: Buffer[] = [];
+  let size = 0;
   for await (const chunk of process.stdin) {
-    raw += chunk;
-    if (raw.length > 262144) break;
+    chunks.push(chunk as Buffer);
+    size += (chunk as Buffer).length;
+    if (size > 262144) break;
   }
-  const out = await runSave({ raw, argv: process.argv.slice(2) });
-  console.log(out.stdout);
+  const out = await runSave({ raw: Buffer.concat(chunks).toString('utf8'), argv: process.argv.slice(2) });
+  (out.code === 0 ? console.log : console.error)(out.stdout);
   process.exitCode = out.code;
 }

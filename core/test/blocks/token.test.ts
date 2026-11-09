@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ClientCredentialsToken } from '../../src/blocks/token.js';
+import { ClientCredentialsToken, sdkMint } from '../../src/blocks/token.js';
 import type { BlocksCredential } from '../../src/blocks/credential.js';
 
 const cred: BlocksCredential = { clientId: 'c', clientSecret: 's', projectKey: 'p', apiUrl: 'https://a.example.com' };
@@ -39,7 +39,7 @@ describe('ClientCredentialsToken', () => {
     expect(await src.get()).toBe('tok2');
     expect(count()).toBe(2);
   });
-  it('does not let an in-flight mint revive after invalidate', async () => {
+  it('does not let a stale in-flight mint revive after invalidate', async () => {
     let n = 0;
     const releases: (() => void)[] = [];
     const mint = () => new Promise<{ accessToken: string; expiresIn: number }>((res) => { n += 1; const id = n; releases.push(() => res({ accessToken: `tok${id}`, expiresIn: 900 })); });
@@ -47,17 +47,25 @@ describe('ClientCredentialsToken', () => {
     const first = src.get();
     src.invalidate();
     const second = src.get();
-    releases[0](); releases[1]();
-    await first;
-    expect(await second).toBe('tok2');
+    releases[1](); releases[0]();
+    await second; await first;
     expect(await src.get()).toBe('tok2');
+    expect(n).toBe(2);
   });
-  it('hides the underlying mint error', async () => {
-    const src = new ClientCredentialsToken(cred, async () => { throw new Error('echoed LEAKME'); }, () => 0);
+  it('hides the underlying mint error and recovers on the same instance', async () => {
+    let calls = 0;
+    const src = new ClientCredentialsToken(cred, async () => {
+      calls += 1;
+      if (calls === 1) throw new Error('echoed LEAKME');
+      return { accessToken: 'x', expiresIn: 900 };
+    }, () => 0);
     const err = await src.get().catch((e: Error) => e);
     expect((err as Error).message).toBe('blocks: client-credentials token request failed');
-    // a failure does not poison later calls
-    const ok = new ClientCredentialsToken(cred, async () => ({ accessToken: 'x', expiresIn: 900 }), () => 0);
-    expect(await ok.get()).toBe('x');
+    expect(await src.get()).toBe('x');
+  });
+  it('sdkMint hides a failing response body', async () => {
+    const fetchStub = (async () => new Response('{"error":"LEAKME-MARKER"}', { status: 400 })) as typeof fetch;
+    const err = await sdkMint({ fetch: fetchStub })(cred).catch((e: Error) => e);
+    expect((err as Error).message).toBe('blocks: client-credentials token request failed');
   });
 });
