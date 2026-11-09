@@ -93,6 +93,9 @@ export class SdkBlocksData implements BlocksData {
           continue;
         }
         if (error.status === 403) return { kind: 'forbidden' };
+        // The gateway may answer a column refusal with a non-2xx status; BlocksApiError carries the parsed body.
+        const body = error.body;
+        if (isObject(body) && Array.isArray(body.errors) && body.errors.some(isColumnRefusal)) return { kind: 'column-refused' };
         throw new Error(`blocks: ${operationName} failed (HTTP ${error.status})`);
       }
     }

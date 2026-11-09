@@ -87,6 +87,13 @@ describe('SdkBlocksData', () => {
       expect(await t.data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'forbidden' });
       expect(t.seen).toHaveLength(1);
     });
+    it('the same refusal answered with HTTP 400 is also final (SDK error body)', async () => {
+      const r = refusal('VALIDATION_ERROR', 'ColumnAccess');
+      expect(await adapt([{ status: 400, body: r.body }]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'forbidden' });
+      const other = refusal('VALIDATION_ERROR', 'Required');
+      expect(await adapt([{ status: 400, body: other.body }]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });
+      expect(await adapt([{ status: 400, body: {} }]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });
+    });
     it('other validation errors, other codes and a bare message stay unknown', async () => {
       expect(await adapt([refusal('VALIDATION_ERROR', 'Required')]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });
       expect(await adapt([refusal('OTHER', 'ColumnAccess')]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });

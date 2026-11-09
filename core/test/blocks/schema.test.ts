@@ -52,6 +52,7 @@ describe('blocks schema', () => {
     expect(cls[0]).toMatchObject({ schemaName: 'FactoryTask', policyName: 'factory-task-edit-fields-factory-owner', operation: 2, isAllowPolicy: true, fieldNames: ['title', 'description', 'repo', 'baseBranch', 'gateOverrides'] });
     expect(cls[0]!.ruleGroup.rules.map(r => r.staticValue)).toEqual([['factory-owner']]);
     expect(JSON.stringify(cls[0])).not.toContain('factory-core');
+    expect(rules.security).toHaveLength(29);
     expect(rules.security.filter(e => e.policyType === 1)).toEqual([{ schemaName: 'FactoryTask', operation: 2, policyType: 1, accessLevel: 3, fieldNames: ['title', 'description', 'repo', 'baseBranch', 'gateOverrides'] }]);
     expect(PROTECTED_TASK_FIELDS).toEqual(cls[0]!.fieldNames);
     for (const f of PROTECTED_TASK_FIELDS) expect(FIELDS.FactoryTask.map(x => x.name)).toContain(f);

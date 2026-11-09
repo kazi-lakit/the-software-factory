@@ -186,7 +186,7 @@ export const STEPS: Step[] = [
         return row as { title: string; status: string; version: number; writeId: string };
       };
       const checks: [string, () => Promise<void>][] = [
-        ['11a core title edit refused, row unchanged', async () => {
+        ['11a core title edit refused (column rule or row rule; 11b/11c confirm row access), row unchanged', async () => {
           const before = await read();
           const r = await d.core.update('FactoryTask', { taskId, version: before.version }, { title: 'gate-core-title', version: before.version + 1, writeId: `gate-${c.suffix}-a` });
           expect(r.kind !== 'applied', 'column rule not enforced (strip build?)');
@@ -215,8 +215,17 @@ export const STEPS: Step[] = [
         }],
       ];
       const failed: string[] = [];
-      for (const [label, check] of checks) {
-        try { await check(); d.log(`  ${label}: pass`); } catch (error) { failed.push(label.split(' ')[0]!); d.log(`  ${label}: FAIL (${firstLine(error)})`); }
+      try {
+        for (const [label, check] of checks) {
+          try { await check(); d.log(`  ${label}: pass`); } catch (error) { failed.push(label.split(' ')[0]!); d.log(`  ${label}: FAIL (${firstLine(error)})`); }
+        }
+      } finally {
+        // The row cannot be deleted: cancel it so no live task is left on the Board.
+        try {
+          const { version } = await read();
+          const r = await d.owner.update('FactoryTask', { taskId, version }, { status: 'cancelled', version: version + 1, writeId: `gate-${c.suffix}-e` });
+          if (r.kind !== 'applied') throw new Error(`owner cancel was ${r.kind}`);
+        } catch (error) { failed.push('cleanup'); d.log(`  11 cleanup (cancel the column-rule task): FAIL (${firstLine(error)})`); }
       }
       expect(failed.length === 0, `sub-checks failed: ${failed.join(', ')}`);
     },
