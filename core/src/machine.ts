@@ -27,11 +27,15 @@ export class IllegalInputError extends Error {
   }
 }
 
-/** Steps whose answer is fed back to the agent, so it survives an `answered` resume. */
-const KEEPS_ANSWER: ReadonlySet<Step> = new Set<Step>(['spec', 'plan', 'build']);
+/** Agent steps: the answer is fed back to the agent, so it survives an `answered` resume. */
+const KEEPS_ANSWER: ReadonlySet<Step> = new Set<Step>(['spec', 'plan', 'build', 'verify', 'review']);
 
 const go = (status: Status, stage: Step | null, reason: string, patch: Partial<Task> = {}): Decision =>
   ({ status, stage, patch, reason });
+
+/** A forward move: the feedback the finished step consumed must not reach the next one. */
+const forward = (status: Status, stage: Step | null, reason: string, patch: Partial<Task> = {}): Decision =>
+  go(status, stage, reason, { ...patch, answer: null });
 
 function returnToBuild(task: Task, feedback: string): Decision {
   const attempt = task.attempt + 1;
@@ -54,17 +58,17 @@ function agentDone(task: Task, step: AgentStep, r: AgentResult, gates: Record<Ga
   }
   switch (step) {
     case 'spec':
-      return gates.spec ? go('spec_review', null, 'spec written, awaiting review') : go('plan', 'plan', 'spec written');
+      return gates.spec ? forward('spec_review', null, 'spec written, awaiting review') : forward('plan', 'plan', 'spec written');
     case 'plan':
-      return gates.plan ? go('plan_review', null, 'plan written, awaiting review') : go('build', 'build', 'plan written');
+      return gates.plan ? forward('plan_review', null, 'plan written, awaiting review') : forward('build', 'build', 'plan written');
     case 'build':
-      return go('verify', 'check', 'build done');
+      return forward('verify', 'check', 'build done');
     case 'verify':
-      if (r.verdict === 'pass') return go('review', 'review', 'verify passed');
+      if (r.verdict === 'pass') return forward('review', 'review', 'verify passed');
       if (r.verdict === 'fail') return returnToBuild(task, r.summary);
       throw new IllegalInputError(task, 'verify result needs a pass or fail verdict');
     case 'review':
-      if (r.verdict === 'approve') return go('review', 'ship', 'review approved');
+      if (r.verdict === 'approve') return forward('review', 'ship', 'review approved');
       if (r.verdict === 'changes') return returnToBuild(task, r.summary);
       throw new IllegalInputError(task, 'review result needs an approve or changes verdict');
   }
@@ -98,18 +102,18 @@ export function decide(task: Task, input: Input, gates: Record<Gate, boolean>): 
 
     case 'checks':
       if (task.status !== 'verify' || task.stage !== 'check') throw new IllegalInputError(task, 'checks');
-      return input.passed ? go('verify', 'verify', 'checks passed') : returnToBuild(task, input.summary);
+      return input.passed ? forward('verify', 'verify', 'checks passed') : returnToBuild(task, input.summary);
 
     case 'approval': {
       const a = input.approval;
       switch (task.status) {
         case 'spec_review':
           return gateApproval(task, 'spec', a) === 'approve'
-            ? go('plan', 'plan', 'spec approved')
+            ? forward('plan', 'plan', 'spec approved')
             : go('spec', 'spec', 'spec changes requested', { answer: a.comment });
         case 'plan_review':
           return gateApproval(task, 'plan', a) === 'approve'
-            ? go('build', 'build', 'plan approved')
+            ? forward('build', 'build', 'plan approved')
             : go('plan', 'plan', 'plan changes requested', { answer: a.comment });
         case 'pr_open':
           if (gateApproval(task, 'pr', a) === 'changes') return returnToBuild(task, a.comment);
@@ -122,13 +126,13 @@ export function decide(task: Task, input: Input, gates: Record<Gate, boolean>): 
     case 'shipped':
       if (task.status !== 'review' || task.stage !== 'ship') throw new IllegalInputError(task, 'shipped');
       return input.merged
-        ? go('done', null, 'PR merged', { prUrl: input.prUrl })
-        : go('pr_open', null, 'PR opened', { prUrl: input.prUrl });
+        ? forward('done', null, 'PR merged', { prUrl: input.prUrl })
+        : forward('pr_open', null, 'PR opened', { prUrl: input.prUrl });
 
     case 'pr':
       if (task.status !== 'pr_open') throw new IllegalInputError(task, 'pr');
       return input.state === 'merged'
-        ? go('done', null, 'PR merged')
+        ? forward('done', null, 'PR merged')
         : go('blocked', 'build', 'PR closed without merge', { blockedReason: 'PR closed without merge' });
 
     case 'limit':

@@ -219,6 +219,39 @@ describe('next', () => {
   });
 });
 
+describe('feedback', () => {
+  test('a spec-change comment does not leak into the planner or implementer feedback', async () => {
+    const { store, engine } = setup();
+    await put(store, { status: 'ready' });
+    await engine.next();
+    await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'v1' }));
+    await store.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'changes', comment: 'drop the cache idea' });
+    const respec = await engine.next();
+    expect(respec).toMatchObject({ step: 'spec', context: { feedback: 'drop the cache idea' } });
+    await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'v2' }));
+    await store.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 2, decision: 'approve', comment: '' });
+    const plan = await engine.next();
+    expect(plan!.step).toBe('plan');
+    expect(plan!.context.feedback).toBeUndefined();
+    await engine.complete('T-1', 'plan', result({ status: 'done', summary: 's', doc: 'p' }));
+    const build = await engine.next();
+    expect(build!.step).toBe('build');
+    expect(build!.context.feedback).toBeUndefined();
+  });
+
+  test('the answer to a verifier question reaches the resumed verifier', async () => {
+    const { store, engine } = setup();
+    await put(store, { status: 'verify', stage: 'verify', branch: 'factory/T-1-x' });
+    await engine.next();
+    await engine.complete('T-1', 'verify', result({ status: 'blocked', summary: 's', question: 'AC3: which API?' }));
+    const b = await store.getTask('T-1');
+    await store.updateTask('T-1', b.version, { answer: 'use v2' });
+    const resumed = await engine.next();
+    expect(resumed).toMatchObject({ step: 'verify', context: { feedback: 'use v2' } });
+    expect(resumed!.context.task).toMatchObject({ question: null, blockedReason: null, attempt: 0 });
+  });
+});
+
 describe('complete', () => {
   test('rejects another claimant and a step that is not the stage', async () => {
     const { store, engine, clock } = setup();

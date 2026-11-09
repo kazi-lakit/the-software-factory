@@ -55,7 +55,27 @@ const rows: Row[] = [
   ['answered at spec keeps answer', task({ status: 'blocked', stage: 'spec', answer: 'a' }), { kind: 'answered' }, G, { status: 'spec', stage: 'spec', patch: { answer: 'a' } }],
   ['answered at plan keeps answer', task({ status: 'blocked', stage: 'plan', answer: 'a' }), { kind: 'answered' }, G, { status: 'plan', stage: 'plan', patch: { answer: 'a' } }],
   ['answered at check', task({ status: 'blocked', stage: 'check', answer: 'a' }), { kind: 'answered' }, G, { status: 'verify', stage: 'check', patch: { answer: null } }],
-  ['answered at review', task({ status: 'blocked', stage: 'review', answer: 'a' }), { kind: 'answered' }, G, { status: 'review', stage: 'review', patch: { answer: null } }],
+  ['answered at review keeps answer', task({ status: 'blocked', stage: 'review', answer: 'a' }), { kind: 'answered' }, G, { status: 'review', stage: 'review', patch: { answer: 'a' } }],
+  ['answered at verify keeps answer', task({ status: 'blocked', stage: 'verify', answer: 'a' }), { kind: 'answered' }, G, { status: 'verify', stage: 'verify', patch: { answer: 'a' } }],
+  ['answered at ship', task({ status: 'blocked', stage: 'ship', answer: 'a' }), { kind: 'answered' }, G, { status: 'review', stage: 'ship', patch: { answer: null } }],
+];
+
+// Forward moves clear the feedback the previous step consumed, so it never reaches the next agent.
+const stale = { answer: 'old feedback' };
+const forwardRows: [string, Task, Input, Record<Gate, boolean>][] = [
+  ['spec done gate on', task({ status: 'spec', stage: 'spec', ...stale }), done('spec'), G],
+  ['spec done gate off', task({ status: 'spec', stage: 'spec', ...stale }), done('spec'), NOGATES],
+  ['plan done gate on', task({ status: 'plan', stage: 'plan', ...stale }), done('plan'), { ...G, plan: true }],
+  ['plan done gate off', task({ status: 'plan', stage: 'plan', ...stale }), done('plan'), G],
+  ['build done', task({ status: 'build', stage: 'build', ...stale }), done('build'), G],
+  ['verify pass', task({ status: 'verify', stage: 'verify', ...stale }), done('verify', 'pass'), G],
+  ['review approve', task({ status: 'review', stage: 'review', ...stale }), done('review', 'approve'), G],
+  ['spec approved', task({ status: 'spec_review', ...stale }), { kind: 'approval', approval: approval('spec', 'approve') }, G],
+  ['plan approved', task({ status: 'plan_review', ...stale }), { kind: 'approval', approval: approval('plan', 'approve') }, G],
+  ['checks passed', task({ status: 'verify', stage: 'check', ...stale }), { kind: 'checks', passed: true, summary: 'ok' }, G],
+  ['shipped open', task({ status: 'review', stage: 'ship', ...stale }), { kind: 'shipped', prUrl: 'u', merged: false }, G],
+  ['shipped merged', task({ status: 'review', stage: 'ship', ...stale }), { kind: 'shipped', prUrl: 'u', merged: true }, G],
+  ['pr merged', task({ status: 'pr_open', ...stale }), { kind: 'pr', state: 'merged' }, G],
 ];
 
 describe('decide', () => {
@@ -68,6 +88,10 @@ describe('decide', () => {
       const d: Decision = decide(t, input, gates);
       if (d.status !== t.status) expect(() => assertMove(t.status, d.status, 'core')).not.toThrow();
     }
+  });
+
+  test.each(forwardRows)('forward move clears the answer: %s', (_n, t, input, gates) => {
+    expect(decide(t, input, gates).patch).toHaveProperty('answer', null);
   });
 
   test('every decision carries a reason', () => {
@@ -95,9 +119,9 @@ describe('decide', () => {
     expect(decide(blocked, { kind: 'answered' }, G)).toMatchObject({ status: 'build', stage: 'build', patch: { attempt: 0 } });
   });
 
-  test('answered blocked task resumes where it stopped with attempt reset', () => {
+  test('answered blocked task resumes where it stopped with attempt reset, keeping the answer as feedback', () => {
     const t = task({ status: 'blocked', stage: 'verify', attempt: 3, question: 'q', blockedReason: 'r', answer: 'use the v2 API' });
-    expect(decide(t, { kind: 'answered' }, G)).toMatchObject({ status: 'verify', stage: 'verify', patch: { attempt: 0, question: null, blockedReason: null, answer: null } });
+    expect(decide(t, { kind: 'answered' }, G)).toMatchObject({ status: 'verify', stage: 'verify', patch: { attempt: 0, question: null, blockedReason: null, answer: 'use the v2 API' } });
   });
 
   test('agent failure at spec blocks, at review returns to build', () => {
