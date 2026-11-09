@@ -1,15 +1,15 @@
 import { parseAgentResult } from './agentResult.js';
 import { assertPushAllowed, branchName } from './branchGuard.js';
 import { formatReport, runChecks, type Exec } from './checks.js';
-import { claim, claimExpired } from './claims.js';
+import { claim, claimExpired, release } from './claims.js';
 import { AGENT_FOR } from './defaults.js';
 import { resolveGates, resolveSettings, shouldMerge, validApproval } from './gates.js';
 import type { GitRepos } from './git.js';
 import type { GitHub } from './github.js';
 import { diffEvents } from './history.js';
-import { decide, type Decision, type Input } from './machine.js';
+import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
 import type { RepoConfig } from './repoConfig.js';
-import { assertMove, TERMINAL } from './status.js';
+import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
 import { VersionConflictError, type BoardStore, type StoredSettings } from './store.js';
 import type { AgentStep, DocKind, Gate, Mode, RepoId, Settings, Status, Step, Task } from './types.js';
 
@@ -93,8 +93,9 @@ export class Engine {
         if (t.stage !== null && t.status !== 'blocked' && !TERMINAL.has(t.status) && t.costUsd > settings.maxCostPerTaskUsd) {
           await this.apply(t, this.decideFor(t, { kind: 'limit', reason: costReason(t.costUsd, settings) }, settings), this.coreActor);
         }
-      } catch {
-        // Version conflicts and outages that outlast the retries: skip this task for this pass.
+      } catch (e) {
+        // Illegal inputs and moves are bugs and surface. Version conflicts and outages that outlast the retries skip this task for this pass.
+        if (e instanceof IllegalInputError || e instanceof IllegalMoveError) throw e;
       }
     }
   }
@@ -121,7 +122,13 @@ export class Engine {
       } catch {
         continue; // outage on this task: skip it this pass
       }
-      if (claimed) return this.ticket(claimed, this.settingsFor(stored, claimed));
+      if (!claimed) continue;
+      try {
+        return await this.ticket(claimed, this.settingsFor(stored, claimed));
+      } catch (e) {
+        await this.releaseOwnClaim(claimed.taskId);
+        throw e;
+      }
     }
     return null;
   }
@@ -212,6 +219,8 @@ export class Engine {
     const updated = await retry(() =>
       store.updateTask(task.taskId, task.version, {
         ...decision.patch,
+        // A blocked task waits for a new answer; a stale one must not resume it.
+        ...(decision.status === 'blocked' ? { answer: null } : {}),
         status: decision.status,
         stage: decision.stage,
         claimBy: null,
@@ -285,7 +294,8 @@ export class Engine {
     let runId: string | null = null;
     if (AGENT_STEPS.has(step)) {
       const agentStep = step as AgentStep;
-      runId = (await retry(() => store.startRun({ taskId: task.taskId, step, mode, agent: AGENT_FOR[agentStep] }))).runId;
+      const open = await retry(() => store.openRun(task.taskId, step));
+      runId = (open ?? (await retry(() => store.startRun({ taskId: task.taskId, step, mode, agent: AGENT_FOR[agentStep] })))).runId;
     }
 
     const body = async (kind: DocKind) => (await retry(() => store.currentDoc(task.taskId, kind)))?.body;
@@ -300,6 +310,16 @@ export class Engine {
       if (v !== undefined) context[k] = v;
     }
     return { taskId: task.taskId, step, worktree, runId, context };
+  }
+
+  /** Best effort: drops this claimant's claim on the fresh task; errors are ignored. */
+  private async releaseOwnClaim(taskId: string): Promise<void> {
+    try {
+      const fresh = await retry(() => this.deps.store.getTask(taskId));
+      if (fresh.claimBy === this.deps.claimant) await retry(() => release(this.deps.store, fresh));
+    } catch {
+      // The claim expires on its own.
+    }
   }
 
   /** Reads the task and checks this claimant holds it at `step`. A lapsed claim nobody re-claimed still counts. */

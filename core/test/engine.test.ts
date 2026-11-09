@@ -6,6 +6,7 @@ import { ClaimError, Engine, StageError, withRetry, type EngineDeps } from '../s
 import type { Exec } from '../src/checks.js';
 import type { GitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
+import { IllegalInputError } from '../src/machine.js';
 import type { RepoConfig } from '../src/repoConfig.js';
 import { MemoryStore, VersionConflictError } from '../src/store.js';
 import type { RepoId, Task } from '../src/types.js';
@@ -43,9 +44,9 @@ class FakeGit implements GitRepos {
   }
 }
 
-function setup(opts: { failing?: string[] } = {}) {
+function setup(opts: { failing?: string[]; git?: FakeGit } = {}) {
   const store = new MemoryStore();
-  const git = new FakeGit();
+  const git = opts.git ?? new FakeGit();
   const github = new FakeGitHub();
   const clock = { t: new Date('2026-11-09T10:00:00Z') };
   const exec: Exec = async (cmd) => ({ code: opts.failing?.includes(cmd) ? 1 : 0, output: 'out' });
@@ -166,6 +167,28 @@ describe('next', () => {
     const ticket = await engine.next();
     expect(ticket).toMatchObject({ step: 'check', runId: null });
     expect(await store.openRun('T-1', 'check')).toBeUndefined();
+  });
+
+  test('releases the claim and rethrows when work after the claim fails', async () => {
+    class BrokenGit extends FakeGit {
+      override async worktree(): Promise<string> {
+        throw new Error('worktree add failed');
+      }
+    }
+    const { store, engine } = setup({ git: new BrokenGit() });
+    await put(store, { status: 'ready' });
+    await expect(engine.next()).rejects.toThrow('worktree add failed');
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', claimBy: null, claimUntil: null });
+  });
+
+  test('reuses the open run for the step instead of starting a new one', async () => {
+    const { store, engine, clock } = setup();
+    await put(store, { status: 'ready' });
+    expect((await engine.next())!.runId).toBe('R-1');
+    clock.t = new Date(clock.t.getTime() + 3_600_000); // claim lapses, the run is still open
+    const startRun = vi.spyOn(store, 'startRun');
+    expect(await engine.next()).toMatchObject({ taskId: 'T-1', step: 'spec', runId: 'R-1' });
+    expect(startRun).not.toHaveBeenCalled();
   });
 
   test('returns null when nothing is workable', async () => {
@@ -403,6 +426,35 @@ describe('sync', () => {
     expect(await store.getTask('T-1')).toMatchObject({ status: 'blocked', stage: 'build' });
     expect((await store.getTask('T-2')).status).toBe('spec_review');
     expect((await store.getTask('T-3')).blockedReason).toBeNull();
+  });
+
+  test('a third failed check blocks the task and a stale answer does not resume it', async () => {
+    const { store, engine } = setup({ failing: ['dotnet build'] });
+    await put(store, { status: 'verify', stage: 'check', branch: 'factory/T-1-x' });
+    for (let i = 0; i < 3; i++) {
+      const t = await store.getTask('T-1');
+      if (t.status === 'build') await store.updateTask('T-1', t.version, { status: 'verify', stage: 'check' });
+      await engine.next();
+      await engine.check('T-1');
+    }
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'blocked', stage: 'build', attempt: 3, answer: null });
+    await engine.sync();
+    const blocked = await store.getTask('T-1');
+    expect(blocked.status).toBe('blocked');
+    await store.updateTask('T-1', blocked.version, { answer: 'try a clean build' });
+    await engine.sync();
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'build', stage: 'build', attempt: 0, answer: 'try a clean build' });
+  });
+
+  test('an illegal input or move is a bug and surfaces from sync', async () => {
+    vi.useFakeTimers();
+    const { engine, github } = await prOpen();
+    const task = { status: 'pr_open', stage: null } as const;
+    vi.spyOn(github, 'prState').mockRejectedValue(new IllegalInputError(task, 'bug'));
+    const p = engine.sync();
+    const settled = expect(p).rejects.toBeInstanceOf(IllegalInputError);
+    await vi.runAllTimersAsync();
+    await settled;
   });
 
   test('a GitHub outage: 3 failed tries skip the task without moving it', async () => {
