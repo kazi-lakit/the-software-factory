@@ -1,0 +1,141 @@
+import { describe, expect, it, vi } from 'vitest';
+import { BlocksForbiddenError, SdkBlocksData } from '../../src/blocks/data.js';
+import { FIELDS } from '../../src/blocks/schema.js';
+
+const projectKey = 'PK-test';
+const apiUrl = 'https://api.example.test';
+type Seen = { url: string; key: string | null; auth: string | null; body: { operationName: string; query: string; variables: Record<string, any> } };
+type Answer = { status?: number; body?: unknown };
+
+function platform(answers: (Answer | Error)[]) {
+  const seen: Seen[] = [];
+  const fetcher: typeof fetch = async (url, init) => {
+    const headers = new Headers(init?.headers);
+    seen.push({ url: String(url), key: headers.get('x-blocks-key'), auth: headers.get('authorization'), body: JSON.parse(String(init?.body)) });
+    const next = answers.shift() ?? { body: { data: {} } };
+    if (next instanceof Error) throw next;
+    return new Response(JSON.stringify(next.body ?? {}), { status: next.status ?? 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  return { fetcher, seen };
+}
+const tokens = (...values: string[]) => {
+  const queue = [...values];
+  let current = queue.shift()!;
+  return { get: vi.fn(async () => current), invalidate: vi.fn(() => { current = queue.shift() ?? current; }) };
+};
+const adapt = (answers: (Answer | Error)[], o: { token?: ReturnType<typeof tokens>; timeoutMs?: number; fetcher?: typeof fetch } = {}) => {
+  const p = platform(answers);
+  const token = o.token ?? tokens('token-1');
+  return { ...p, token, data: new SdkBlocksData({ apiUrl, projectKey, token, fetch: o.fetcher ?? p.fetcher, ...(o.timeoutMs ? { timeoutMs: o.timeoutMs } : {}) }) };
+};
+const tasks = (...ids: string[]) => ids.map(ItemId => ({ ItemId, taskId: `t-${ItemId}`, version: 1 }));
+const page = (items: unknown[], totalCount: number): Answer => ({ body: { data: { getFactoryTasks: { items, totalCount } } } });
+
+describe('SdkBlocksData', () => {
+  it('list pages of 100 until totalCount, with key, bearer, path and filter as JSON string', async () => {
+    const first = Array.from({ length: 100 }, (_, n) => ({ ItemId: `a${n}`, taskId: `t${n}` }));
+    const t = adapt([page(first, 101), page(tasks('z'), 101)]);
+    const rows = await t.data.list('FactoryTask', { status: 'ready' });
+    expect(rows).toHaveLength(101);
+    expect(t.seen).toHaveLength(2);
+    expect(t.seen[0]!.url).toBe(`${apiUrl}/data/v4/gateway`);
+    expect(t.seen.map(s => s.key)).toEqual([projectKey, projectKey]);
+    expect(t.seen.map(s => s.auth)).toEqual(['Bearer token-1', 'Bearer token-1']);
+    const q = t.seen[0]!.body;
+    expect(q.operationName).toBe('getFactoryTasks');
+    expect(q.query).toContain('query getFactoryTasks($input: DynamicQueryInput)');
+    for (const name of ['ItemId', 'CreatedBy', 'CreatedDate', ...FIELDS.FactoryTask.map(f => f.name)]) expect(q.query).toContain(name);
+    expect(q.variables.input).toEqual({ filter: JSON.stringify({ status: 'ready' }), pageNo: 1, pageSize: 100 });
+    expect(typeof q.variables.input.filter).toBe('string');
+    expect(t.seen[1]!.body.variables.input.pageNo).toBe(2);
+  });
+  it('list normalizes missing keys to null and honours a fields override', async () => {
+    const t = adapt([page([{ ItemId: 'a', taskId: 'x' }], 1)]);
+    const rows = await t.data.list('FactoryTask', {}, ['taskId', 'version']);
+    expect(rows).toEqual([{ ItemId: 'a', CreatedBy: null, CreatedDate: null, taskId: 'x', version: null }]);
+    expect(t.seen[0]!.body.query).not.toContain('claimBy');
+    expect(t.seen[0]!.body.query).toContain('version');
+  });
+  it('list stops on an empty page and gives up after 100 pages by throwing', async () => {
+    expect(await adapt([page(tasks('a'), 5), page([], 5)]).data.list('FactoryTask', {})).toHaveLength(1);
+    const t = adapt(Array.from({ length: 150 }, () => page(tasks('x'), 100000)));
+    await expect(t.data.list('FactoryTask', {})).rejects.toThrow(/too many/i);
+    expect(t.seen).toHaveLength(100);
+  });
+  it('401 invalidates the token and retries once with the new token', async () => {
+    const token = tokens('old', 'new');
+    const t = adapt([{ status: 401, body: {} }, page(tasks('a'), 1)], { token });
+    expect(await t.data.list('FactoryTask', {})).toHaveLength(1);
+    expect(token.invalidate).toHaveBeenCalledTimes(1);
+    expect(t.seen.map(s => s.auth)).toEqual(['Bearer old', 'Bearer new']);
+  });
+  it('a second 401 throws', async () => {
+    const t = adapt([{ status: 401, body: {} }, { status: 401, body: {} }]);
+    await expect(t.data.list('FactoryTask', {})).rejects.toThrow('blocks: unauthorized after token refresh');
+    expect(t.seen).toHaveLength(2);
+  });
+  it('403 is forbidden for insert and update, and BlocksForbiddenError for list', async () => {
+    expect(await adapt([{ status: 403, body: {} }]).data.insert('FactoryTask', { taskId: 'a' })).toEqual({ kind: 'forbidden' });
+    expect(await adapt([{ status: 403, body: {} }]).data.update('FactoryTask', { taskId: 'a' }, { status: 'x' })).toEqual({ kind: 'forbidden' });
+    await expect(adapt([{ status: 403, body: {} }]).data.list('FactoryTask', {})).rejects.toBeInstanceOf(BlocksForbiddenError);
+  });
+  it('insert sends only present keys and returns the item id', async () => {
+    const t = adapt([{ body: { data: { insertFactoryTask: { acknowledged: true, itemId: 'row-1', totalImpactedData: 1 } } } }]);
+    expect(await t.data.insert('FactoryTask', { taskId: 'a', title: 'T', question: null })).toEqual({ kind: 'inserted', itemId: 'row-1' });
+    expect(t.seen[0]!.body.operationName).toBe('insertFactoryTask');
+    expect(t.seen[0]!.body.query).toContain('mutation insertFactoryTask($input: FactoryTaskInsertInput!)');
+    expect(JSON.parse(JSON.stringify(t.seen[0]!.body.variables))).toEqual({ input: { taskId: 'a', title: 'T', question: null } });
+  });
+  it('insert drops undefined keys and rejects unknown keys before sending', async () => {
+    const t = adapt([{ body: { data: { insertFactoryTask: { acknowledged: true, itemId: 'r', totalImpactedData: 1 } } } }]);
+    await t.data.insert('FactoryTask', { taskId: 'a', title: undefined as unknown as string });
+    expect(Object.keys(t.seen[0]!.body.variables.input)).toEqual(['taskId']);
+    await expect(t.data.insert('FactoryTask', { nope: 'x' })).rejects.toThrow(/unknown/i);
+    expect(t.seen).toHaveLength(1);
+  });
+  it('the duplicate text maps to duplicate on insert, and is an error on list', async () => {
+    const dup = { body: { errors: [{ message: "A record with the same value for 'taskId' already exists." }] } };
+    expect(await adapt([dup]).data.insert('FactoryTask', { taskId: 'a' })).toEqual({ kind: 'duplicate' });
+    await expect(adapt([dup]).data.list('FactoryTask', {})).rejects.toThrow(/getFactoryTasks/);
+  });
+  it('other GraphQL and HTTP errors throw with operation name and status, without row values or tokens', async () => {
+    const e1 = await adapt([{ status: 500, body: {} }]).data.insert('FactoryTask', { taskId: 'secret-value' }).catch(e => e as Error);
+    expect(e1).toBeInstanceOf(Error);
+    expect((e1 as Error).message).toContain('insertFactoryTask');
+    expect((e1 as Error).message).toContain('500');
+    expect((e1 as Error).message).not.toContain('secret-value');
+    expect((e1 as Error).message).not.toContain('token-1');
+    await expect(adapt([{ body: { errors: [{ message: 'boom secret-value' }] } }]).data.insert('FactoryTask', { taskId: 'a' })).rejects.toThrow(/insertFactoryTask/);
+  });
+  it('update sends filter as a JSON string and classifies the outcome', async () => {
+    const ans = (acknowledged: boolean, n: number): Answer => ({ body: { data: { updateFactoryTask: { acknowledged, itemId: 'r', totalImpactedData: n } } } });
+    const t = adapt([ans(true, 1), ans(false, 0), ans(true, 2)]);
+    expect(await t.data.update('FactoryTask', { taskId: 'a', version: 1 }, { status: 'done' })).toEqual({ kind: 'applied' });
+    expect(await t.data.update('FactoryTask', { taskId: 'a', version: 1 }, { status: 'done' })).toEqual({ kind: 'not-applied' });
+    expect(await t.data.update('FactoryTask', { taskId: 'a', version: 1 }, { status: 'done' })).toEqual({ kind: 'unknown' });
+    const b = t.seen[0]!.body;
+    expect(b.operationName).toBe('updateFactoryTask');
+    expect(b.query).toContain('mutation updateFactoryTask($filter: String, $input: FactoryTaskUpdateInput!)');
+    expect(b.variables).toEqual({ filter: JSON.stringify({ taskId: 'a', version: 1 }), input: { status: 'done' } });
+  });
+  it('update never rejects: transport errors, 500 and GraphQL errors become unknown', async () => {
+    expect(await adapt([new Error('socket')]).data.update('FactoryTask', { taskId: 'a' }, { status: 'x' })).toEqual({ kind: 'unknown' });
+    expect(await adapt([{ status: 500, body: {} }]).data.update('FactoryTask', { taskId: 'a' }, { status: 'x' })).toEqual({ kind: 'unknown' });
+    expect(await adapt([{ body: { errors: [{ message: 'x' }] } }]).data.update('FactoryTask', { taskId: 'a' }, { status: 'x' })).toEqual({ kind: 'unknown' });
+  });
+  it('hardDelete sends a hard delete by ItemId', async () => {
+    const t = adapt([{ body: { data: { deleteFactorySpike: { acknowledged: true, itemId: 'r', totalImpactedData: 1 } } } }]);
+    await t.data.hardDelete('FactorySpike', 'row-9');
+    const b = t.seen[0]!.body;
+    expect(b.operationName).toBe('deleteFactorySpike');
+    expect(b.variables).toEqual({ filter: JSON.stringify({ ItemId: 'row-9' }), input: { isHardDelete: true } });
+    await expect(adapt([{ status: 403, body: {} }]).data.hardDelete('FactorySpike', 'x')).rejects.toBeInstanceOf(BlocksForbiddenError);
+    await expect(adapt([]).data.hardDelete('FactorySpike', '')).rejects.toThrow();
+  });
+  it('times out a stalled request', async () => {
+    const stalled: typeof fetch = (_url, init) => new Promise((_res, rej) => { init?.signal?.addEventListener('abort', () => rej(new Error('aborted'))); });
+    const t = adapt([], { fetcher: stalled, timeoutMs: 30 });
+    await expect(t.data.list('FactoryTask', {})).rejects.toThrow(/getFactoryTasks/);
+    expect(await t.data.update('FactoryTask', { taskId: 'a' }, { status: 'x' })).toEqual({ kind: 'unknown' });
+  });
+});
