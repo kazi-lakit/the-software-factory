@@ -25,15 +25,19 @@ const cfg: RepoConfig = {
   },
 };
 
+const iamCfg: RepoConfig = { ...cfg, repo: 'iam', remote: 'git@github.com:SELISEdigitalplatforms/blocks-iam.git' };
+
 class FakeGit implements GitRepos {
   readonly calls: string[] = [];
+  readonly bases: string[] = [];
   readonly pushes: { path: string; branch: string }[] = [];
   async ensureClone(c: RepoConfig) {
     this.calls.push(`clone ${c.repo}`);
     return join(ROOT, '.clones', c.repo);
   }
-  async worktree(_c: RepoConfig, taskId: string, branch: string) {
+  async worktree(c: RepoConfig, taskId: string, branch: string) {
     this.calls.push(`worktree ${taskId} ${branch}`);
+    this.bases.push(c.baseBranch);
     return join(ROOT, '.clones', 'worktrees', taskId);
   }
   async push(path: string, branch: string) {
@@ -54,7 +58,7 @@ function setup(opts: { failing?: string[]; git?: FakeGit } = {}) {
     store,
     git,
     github,
-    repos: { data: cfg } as Record<RepoId, RepoConfig>,
+    repos: { data: cfg, iam: iamCfg } as Record<RepoId, RepoConfig>,
     exec,
     now: () => clock.t,
     mode: 'session',
@@ -64,8 +68,8 @@ function setup(opts: { failing?: string[]; git?: FakeGit } = {}) {
 }
 
 /** Creates a task and puts it straight into the given state. */
-async function put(store: MemoryStore, patch: Partial<Task>, base = 'dev'): Promise<Task> {
-  const t = await store.createTask({ title: 'Add widget', description: 'd', repo: 'data', baseBranch: base });
+async function put(store: MemoryStore, patch: Partial<Task>, base = 'dev', repo: RepoId = 'data'): Promise<Task> {
+  const t = await store.createTask({ title: 'Add widget', description: 'd', repo, baseBranch: base });
   return Object.keys(patch).length ? store.updateTask(t.taskId, t.version, patch) : t;
 }
 
@@ -87,6 +91,23 @@ describe('next', () => {
     await put(store, { status: 'ready' });
     expect(await engine.next()).toBeNull();
     expect((await store.getTask('T-1')).claimBy).toBeNull();
+  });
+
+  test('skips tasks in a paused repo but still claims in other repos', async () => {
+    const { store, engine } = setup();
+    await store.setSettings({ global: DEFAULT_SETTINGS, repos: { data: { paused: true } } });
+    await put(store, { status: 'ready' });
+    await put(store, { status: 'ready' }, 'dev', 'iam');
+    expect(await engine.next()).toMatchObject({ taskId: 'T-2', step: 'spec' });
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', claimBy: null });
+    expect(await engine.next('T-1')).toBeNull();
+  });
+
+  test('the worktree branches from the task base, not the repo default', async () => {
+    const { store, engine, git } = setup();
+    await put(store, { status: 'ready' }, 'feature/x');
+    await engine.next();
+    expect(git.bases).toEqual(['feature/x']);
   });
 
   test('returns null when maxParallel tasks are already claimed', async () => {
@@ -330,6 +351,53 @@ describe('ship', () => {
     });
   });
 
+  test('ships from the task base', async () => {
+    const { engine, git } = await atShip('feature/x', true);
+    await engine.ship('T-1');
+    expect(git.bases.at(-1)).toBe('feature/x');
+  });
+
+  test('shipping again after PR changes reuses the open PR', async () => {
+    const { store, engine, github, git } = await atShip('dev', true);
+    const first = await engine.ship('T-1');
+    await store.addDoc('T-1', 'review', 'approve', 'reviewer');
+    await store.addApproval({ taskId: 'T-1', gate: 'pr', docVersion: 1, decision: 'changes', comment: 'rename it' });
+    await engine.sync();
+    const back = await store.getTask('T-1');
+    expect(back.status).toBe('build');
+    // build → verify → review happen; the reviewer approves a new review doc.
+    await store.updateTask('T-1', back.version, { status: 'review', stage: 'ship' });
+    await store.addDoc('T-1', 'review', 'approve again', 'reviewer');
+    await engine.next();
+    const again = await engine.ship('T-1');
+    expect(again).toMatchObject({ status: 'pr_open', prUrl: first.prUrl });
+    expect(github.prs.size).toBe(1);
+    expect(git.pushes).toHaveLength(2);
+  });
+
+  test('shipping a task whose PR was already merged completes it without a push', async () => {
+    const { store, engine, github, git } = await atShip('dev', true);
+    const pr = await github.openPr({ remote: REMOTE, head: 'factory/T-1-add-widget', base: 'dev', title: 't', body: 'b' });
+    github.setState(pr.url, 'merged');
+    const t = await store.getTask('T-1');
+    await store.updateTask('T-1', t.version, { prUrl: pr.url });
+    const done = await engine.ship('T-1');
+    expect(done).toMatchObject({ status: 'done', prUrl: pr.url });
+    expect(git.pushes).toHaveLength(0);
+  });
+
+  test('shipping a task whose PR was closed opens a new PR', async () => {
+    const { store, engine, github } = await atShip('dev', true);
+    const pr = await github.openPr({ remote: REMOTE, head: 'factory/T-1-add-widget', base: 'dev', title: 't', body: 'b' });
+    github.setState(pr.url, 'closed');
+    const t = await store.getTask('T-1');
+    await store.updateTask('T-1', t.version, { prUrl: pr.url });
+    const shipped = await engine.ship('T-1');
+    expect(shipped.status).toBe('pr_open');
+    expect(shipped.prUrl).not.toBe(pr.url);
+    expect(github.prs.size).toBe(2);
+  });
+
   test('requires the claim and stage ship', async () => {
     const { store, engine, clock } = setup();
     await put(store, { status: 'review', stage: 'ship', branch: 'b' });
@@ -412,9 +480,11 @@ describe('sync', () => {
     const { store, engine } = setup();
     await put(store, { status: 'blocked', stage: 'build', branch: 'b', question: 'q?', answer: 'do x' });
     await put(store, { status: 'blocked', stage: 'build', branch: 'b', question: 'q?', answer: '' });
+    await put(store, { status: 'blocked', stage: 'build', branch: 'b', question: 'q?', answer: '  \n\t ' });
     await engine.sync();
     expect(await store.getTask('T-1')).toMatchObject({ status: 'build', stage: 'build', question: null, answer: 'do x' });
     expect((await store.getTask('T-2')).status).toBe('blocked');
+    expect((await store.getTask('T-3')).status).toBe('blocked');
   });
 
   test('a working task over the cost limit is blocked; waiting-without-stage and blocked tasks are left alone', async () => {

@@ -55,8 +55,14 @@ export class FakeGitHub implements GitHub {
 
   async openPr(p: { remote: string; head: string; base: string; title: string; body: string }): Promise<{ url: string; number: number }> {
     const { owner, repo } = parseRemote(p.remote);
+    const prefix = `https://github.com/${owner}/${repo}/pull/`;
+    for (const [u, pr] of this.prs) {
+      if (u.startsWith(prefix) && pr.head === p.head && pr.base === p.base && pr.state === 'open') {
+        throw new Error(`A pull request already exists for ${p.head} into ${p.base}`);
+      }
+    }
     const number = this.next++;
-    const url = `https://github.com/${owner}/${repo}/pull/${number}`;
+    const url = `${prefix}${number}`;
     this.prs.set(url, { base: p.base, head: p.head, state: 'open' });
     return { url, number };
   }

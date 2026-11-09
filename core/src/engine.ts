@@ -112,6 +112,7 @@ export class Engine {
 
     const workable = (t: Task) => t.status === 'ready' || (t.stage !== null && WORKING.has(t.status));
     const candidates = tasks
+      .filter((t) => !this.settingsFor(stored, t).paused)
       .filter((t) => (taskId === undefined ? workable(t) && claimExpired(t, now()) : t.taskId === taskId && workable(t)))
       .sort((a, b) => taskNum(a.taskId) - taskNum(b.taskId));
 
@@ -163,7 +164,7 @@ export class Engine {
     const { store, exec } = this.deps;
     const task = await this.claimedAt(taskId, 'check');
     const cfg = this.repo(task);
-    const worktree = await this.deps.git.worktree(cfg, taskId, requireBranch(task));
+    const worktree = await this.worktreeFor(task, requireBranch(task));
     const report = await runChecks(cfg, worktree, exec);
     const settings = this.settingsFor(await retry(() => store.getSettings()), task);
     await retry(() => store.addDoc(taskId, 'verify', formatReport(report), 'core · checks'));
@@ -180,24 +181,38 @@ export class Engine {
     const cfg = this.repo(task);
     const branch = requireBranch(task);
     assertPushAllowed(branch);
-    const worktree = await this.deps.git.worktree(cfg, taskId, branch);
+    const settings = this.settingsFor(await retry(() => store.getSettings()), task);
+    const shipped = (prUrl: string, merged: boolean) =>
+      this.apply(task, this.decideFor(task, { kind: 'shipped', prUrl, merged }, settings), this.coreActor);
+
+    // A task returned from pr_open already has a PR: reuse it while open, finish if it merged meanwhile.
+    const existing = task.prUrl;
+    const state = existing ? await retry(() => github.prState(existing)) : undefined;
+    if (existing && state === 'merged') return shipped(existing, true);
+
+    const worktree = await this.worktreeFor(task, branch);
     await this.deps.git.push(worktree, branch);
 
-    const spec = (await retry(() => store.currentDoc(taskId, 'spec')))?.body ?? '';
-    const pr = await retry(() =>
-      github.openPr({
-        remote: cfg.remote,
-        head: branch,
-        base: task.baseBranch,
-        title: `[${taskId}] ${task.title}`,
-        body: `Factory task ${taskId}\n\n${spec.slice(0, 3000)}`,
-      }),
-    );
+    let url: string;
+    if (existing && state === 'open') {
+      url = existing;
+    } else {
+      const spec = (await retry(() => store.currentDoc(taskId, 'spec')))?.body ?? '';
+      const pr = await retry(() =>
+        github.openPr({
+          remote: cfg.remote,
+          head: branch,
+          base: task.baseBranch,
+          title: `[${taskId}] ${task.title}`,
+          body: `Factory task ${taskId}\n\n${spec.slice(0, 3000)}`,
+        }),
+      );
+      url = pr.url;
+    }
 
-    const settings = this.settingsFor(await retry(() => store.getSettings()), task);
     const merged = shouldMerge(task.baseBranch, resolveGates(settings, task.gateOverrides).pr);
-    if (merged) await retry(() => github.mergePr(pr.url, task.baseBranch));
-    return this.apply(task, this.decideFor(task, { kind: 'shipped', prUrl: pr.url, merged }, settings), this.coreActor);
+    if (merged) await retry(() => github.mergePr(url, task.baseBranch));
+    return shipped(url, merged);
   }
 
   async status(): Promise<EngineStatus> {
@@ -262,7 +277,7 @@ export class Engine {
         return undefined;
       }
       case 'blocked':
-        if (task.answer && task.stage !== null) {
+        if (task.answer?.trim() && task.stage !== null) {
           return this.apply(task, this.decideFor(task, { kind: 'answered' }, settings), this.coreActor);
         }
         return undefined;
@@ -280,14 +295,14 @@ export class Engine {
     if (task.status === 'ready') {
       const branch = branchName(task.taskId, task.title);
       await git.ensureClone(cfg);
-      worktree = await git.worktree(cfg, task.taskId, branch);
+      worktree = await this.worktreeFor(task, branch);
       const d = this.decideFor(task, { kind: 'claimed' }, settings);
       const moved = await this.apply(task, { ...d, patch: { ...d.patch, branch } }, this.coreActor);
       const reclaimed = await retry(() => claim(store, moved, claimant, now()));
       if (!reclaimed) return null;
       task = reclaimed;
     } else {
-      worktree = await git.worktree(cfg, task.taskId, requireBranch(task));
+      worktree = await this.worktreeFor(task, requireBranch(task));
     }
 
     const step = task.stage!;
@@ -336,6 +351,11 @@ export class Engine {
 
   private settingsFor(stored: StoredSettings, task: Task): Settings {
     return resolveSettings(stored.global, stored.repos[task.repo]);
+  }
+
+  /** The task's worktree; a new one branches from the task's base, not the repo default. */
+  private worktreeFor(task: Task, branch: string): Promise<string> {
+    return this.deps.git.worktree({ ...this.repo(task), baseBranch: task.baseBranch }, task.taskId, branch);
   }
 
   private repo(task: Task): RepoConfig {

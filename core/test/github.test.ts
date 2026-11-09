@@ -72,6 +72,16 @@ describe('FakeGitHub', () => {
     expect(gh.prs.get(b.url)).toEqual({ base: 'feature/x', head: 'h2', state: 'closed' });
   });
 
+  test('openPr refuses a second open PR with the same head and base in the same repo, like GitHub', async () => {
+    const gh = new FakeGitHub();
+    const p = { remote: 'git@github.com:o/r.git', head: 'h', base: 'dev', title: 't', body: 'b' };
+    const a = await gh.openPr(p);
+    await expect(gh.openPr(p)).rejects.toThrow('already exists');
+    await gh.openPr({ ...p, remote: 'git@github.com:o/other.git' });
+    gh.setState(a.url, 'closed');
+    await expect(gh.openPr(p)).resolves.toMatchObject({ number: 3 });
+  });
+
   test('mergePr to a protected base throws and leaves state', async () => {
     const gh = new FakeGitHub();
     const a = await gh.openPr({ remote: 'git@github.com:o/r.git', head: 'h', base: 'dev', title: 't', body: 'b' });
