@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { blocksClient } from "../../lib/blocks/client";
 import { completeLogin, fetchSessionClaims, renewSession } from "../../lib/blocks/auth";
@@ -26,9 +26,12 @@ vi.mock("../../lib/blocks/auth", () => ({
 const me = vi.mocked(blocksClient.iam.me);
 const claims = vi.mocked(fetchSessionClaims);
 
+let lastClient: QueryClient | undefined;
+
 function renderAt(url: string) {
   window.history.replaceState({}, "", url);
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  lastClient = client;
   return render(
     <QueryClientProvider client={client}>
       <LocalizationProvider>
@@ -65,6 +68,19 @@ describe("the owner check", () => {
     me.mockResolvedValue({ data: { roles: ["factory-owner"] } } as never);
     renderAt("/");
     expect(await screen.findByRole("heading", { name: "Board" })).toBeInTheDocument();
+  });
+
+  it("keeps_the_board_when_a_later_profile_refetch_fails", async () => {
+    claims.mockResolvedValue({ sub: "me" });
+    me.mockResolvedValueOnce({ data: { roles: ["factory-owner"] } } as never).mockRejectedValue(new Error("blocks: unavailable"));
+    renderAt("/");
+    expect(await screen.findByRole("heading", { name: "Board" })).toBeInTheDocument();
+    await act(async () => { await lastClient!.refetchQueries({ queryKey: ["iam", "me"] }); });
+    expect(lastClient!.getQueryState(["iam", "me"])?.status).toBe("error");
+    // TanStack Query notifies components on a later tick.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(screen.getByRole("heading", { name: "Board" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
   });
 
   it("shows_not_owner_to_a_signed_in_user_without_the_role", async () => {

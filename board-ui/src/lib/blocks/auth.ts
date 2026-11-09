@@ -95,10 +95,18 @@ export async function fetchSessionClaims(): Promise<Record<string, unknown> | un
   }
 }
 
-// Only a path on this site: anything else (another origin, `//host`, a
-// scheme) would make the post-sign-in navigation leave the app or throw.
+// Only a page on this site: anything else (another origin, `//host`, a
+// scheme, a path the URL parser turns into one) would make the post-sign-in
+// navigation leave the app or throw. Parsed the way the browser will parse it.
 function safeReturnTo(value: string | null | undefined): string {
-  return value && value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\") ? value : "/";
+  if (!value || !value.startsWith("/")) return "/";
+  let url: URL;
+  try {
+    url = new URL(value, window.location.origin);
+  } catch {
+    return "/";
+  }
+  return url.origin === window.location.origin ? `${url.pathname}${url.search}${url.hash}` : "/";
 }
 
 export async function startLogin(returnTo?: string): Promise<void> {

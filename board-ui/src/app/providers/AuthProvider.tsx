@@ -27,8 +27,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [claims, setClaims] = useState<Record<string, unknown> | undefined>();
   // Read by the timer and the checks below without re-creating them.
   const statusRef = useRef<AuthStatus>("loading");
+  // Checks overlap (mount, the timer, focus, /login/callback): only the latest
+  // one may set the status, so a slow older answer cannot undo a newer one.
+  const checkSeq = useRef(0);
 
   const signOutLocally = useCallback(() => {
+    checkSeq.current += 1;
     statusRef.current = "unauthenticated";
     setClaims(undefined);
     setStatus("unauthenticated");
@@ -39,13 +43,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // keeps the session in Secure, httpOnly cookies that never reach this
   // app's JS, so a successful check is what "signed in" means.
   const refresh = useCallback(async () => {
+    const seq = ++checkSeq.current;
+    const stale = () => seq !== checkSeq.current;
     let sessionClaims = await fetchSessionClaims();
+    if (stale()) return;
     if (!sessionClaims && statusRef.current !== "unauthenticated") {
       // The access cookie may have run out while the refresh cookie still
       // holds (a sleeping laptop, a long-hidden tab): renew once before
       // calling the session over. Once signed out there is nothing to renew.
       const renewal = await renewSession();
-      if (renewal === "renewed") sessionClaims = await fetchSessionClaims();
+      if (stale()) return;
+      if (renewal === "renewed") {
+        sessionClaims = await fetchSessionClaims();
+        if (stale()) return;
+      }
       // A renewal that could not reach IAM says nothing about the session:
       // keep a signed-in user signed in until a check gets an answer.
       else if (renewal === "unavailable" && statusRef.current === "authenticated") return;

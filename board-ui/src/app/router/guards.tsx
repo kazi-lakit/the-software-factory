@@ -40,11 +40,14 @@ export function RedirectIfAuthenticated({ children, onNavigate }: GuardProps) {
 
 // Inside RequireAuth: the Board is for the factory owner only. Roles come from
 // `iam.me()` and the check fails closed; a profile that could not be read is
-// an error to retry, not a missing role.
+// an error to retry, not a missing role. Once a profile has loaded it decides,
+// so a later failed refetch does not take the Board away.
 export function RequireOwner({ children, onNavigate }: GuardProps) {
   const me = useCurrentUser();
 
-  if (me.isPending) return <LoadingScreen />;
+  if (me.data !== undefined) {
+    return isFactoryOwner(me.data) ? <>{children}</> : <NotOwnerPage onNavigate={onNavigate} />;
+  }
   if (me.isError) {
     return (
       <div className="auth-screen">
@@ -56,6 +59,5 @@ export function RequireOwner({ children, onNavigate }: GuardProps) {
       </div>
     );
   }
-  if (!isFactoryOwner(me.data)) return <NotOwnerPage onNavigate={onNavigate} />;
-  return <>{children}</>;
+  return <LoadingScreen />;
 }

@@ -150,10 +150,16 @@ describe("hosted sign-in", () => {
 
   it("returns_only_to_a_path_on_this_site", async () => {
     callback.mockResolvedValue({});
-    for (const unsafe of ["https://evil.test/x", "//evil.test/x", "javascript:alert(1)", "board"]) {
+    for (const unsafe of ["https://evil.test/x", "https://evil.test", "//evil.test/x", "//evil.test", "/\t/evil.test", "/\n/evil.test", "/\\evil.test", "javascript:alert(1)", "board", ""]) {
       sessionStorage.setItem("blocks-app:oidc-return-to", unsafe);
       await expect(completeLogin("https://app.test/login/callback?code=c")).resolves.toEqual({ ok: true, returnTo: "/" });
     }
+  });
+
+  it("keeps_the_path_query_and_hash_of_a_page_on_this_site", async () => {
+    callback.mockResolvedValue({});
+    sessionStorage.setItem("blocks-app:oidc-return-to", "/tasks/T-3?view=plan#diff");
+    await expect(completeLogin("https://app.test/login/callback?code=c")).resolves.toEqual({ ok: true, returnTo: "/tasks/T-3?view=plan#diff" });
   });
 
   it("logout_asks_iam_to_end_the_cookie_session_and_survives_a_failure", async () => {

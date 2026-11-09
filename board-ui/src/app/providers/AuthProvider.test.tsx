@@ -1,5 +1,5 @@
 // Ported from ACR origin/main apps/web/src/app/providers/AuthProvider.test.tsx, plus the visibility and expiry cases.
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchSessionClaims, onSessionExpired, renewSession } from "../../lib/blocks/auth";
 import { AuthProvider, useAuth } from "./AuthProvider";
@@ -15,7 +15,8 @@ vi.mock("../../lib/blocks/auth", () => ({
 const claims = vi.mocked(fetchSessionClaims), renew = vi.mocked(renewSession);
 
 function Status() {
-  return <p>{useAuth().status}</p>;
+  const { refresh, status } = useAuth();
+  return <><p>{status}</p><button onClick={() => void refresh()}>check</button></>;
 }
 
 async function settle(ms = 0) {
@@ -33,6 +34,8 @@ function setVisibility(state: "visible" | "hidden") {
 }
 
 afterEach(() => {
+  // Drop the instance override so document.visibilityState reads jsdom's own value again.
+  delete (document as { visibilityState?: unknown }).visibilityState;
   cleanup();
   vi.clearAllMocks();
   vi.useRealTimers();
@@ -111,5 +114,20 @@ describe("AuthProvider session renewal", () => {
     expect(listener).toBeTypeOf("function");
     await act(async () => { listener!(); await vi.advanceTimersByTimeAsync(0); });
     expect(screen.getByText("unauthenticated")).toBeInTheDocument();
+  });
+
+  it("ignores_an_older_check_that_answers_after_a_newer_one", async () => {
+    vi.useFakeTimers();
+    // The first check (on mount) is slow and finds no session; the check run
+    // after sign-in (/login/callback) answers first and finds one.
+    let firstAnswer!: (value: undefined) => void;
+    claims.mockReturnValueOnce(new Promise(resolve => { firstAnswer = resolve; })).mockResolvedValue({ sub: "me" });
+    renew.mockResolvedValue("rejected");
+    await mount();
+    fireEvent.click(screen.getByRole("button", { name: "check" }));
+    await settle();
+    expect(screen.getByText("authenticated")).toBeInTheDocument();
+    await act(async () => { firstAnswer(undefined); await vi.advanceTimersByTimeAsync(0); });
+    expect(screen.getByText("authenticated")).toBeInTheDocument();
   });
 });

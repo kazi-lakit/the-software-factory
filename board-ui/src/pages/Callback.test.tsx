@@ -42,6 +42,13 @@ describe("CallbackPage", () => {
     await waitFor(() => expect(navigate).toHaveBeenCalledWith("/"));
   });
 
+  it("shows_an_error_instead_of_spinning_when_navigation_throws", async () => {
+    vi.mocked(completeLogin).mockResolvedValue({ ok: true, returnTo: "/" });
+    const navigate = vi.fn(() => { throw new DOMException("blocked", "SecurityError"); });
+    render(<CallbackPage onNavigate={navigate} />);
+    expect(await screen.findByText("Sign-in could not be completed. Try again.")).toBeInTheDocument();
+  });
+
   it("shows_the_provider_error", async () => {
     vi.mocked(completeLogin).mockResolvedValue({ ok: false, message: "Denied" });
     render(<CallbackPage onNavigate={vi.fn()} />);

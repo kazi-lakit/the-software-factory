@@ -17,17 +17,21 @@ export function CallbackPage({ onNavigate }: { onNavigate: (path: string) => voi
 
     // Once only (StrictMode runs effects twice in dev): the authorization code
     // can be redeemed a single time. Ported from ACR apps/web/src/acr/auth-pages.tsx.
+    const failed = () => setError("Sign-in could not be completed. Try again.");
     completeLogin(window.location.href).then(async (result) => {
-      if (result.ok) {
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+      try {
         // Learn the session before navigating, so RequireAuth does not bounce
         // the returning user back to /login while the status is still unknown.
         await refresh();
         onNavigate(result.returnTo);
-        return;
+      } catch {
+        failed();
       }
-
-      setError(result.message);
-    }, () => setError("Sign-in could not be completed. Try again."));
+    }, failed);
   }, [onNavigate, refresh]);
 
   if (error) {
