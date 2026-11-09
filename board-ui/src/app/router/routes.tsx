@@ -1,13 +1,18 @@
 import { useEffect, useState } from "react";
+import type { ComponentType } from "react";
 import { AppShell } from "../AppShell";
 import { RedirectIfAuthenticated, RequireAuth, RequireOwner } from "./guards";
 import { ErrorPage } from "../../features/auth/ErrorPage";
 import { NotFoundPage } from "../../features/auth/NotFoundPage";
+import { BoardView } from "../../features/board/BoardView";
+import { TaskView } from "../../features/task/TaskView";
 import { ProfilePage } from "../../features/profile/ProfilePage";
 import { CallbackPage } from "../../pages/Callback";
 import { LoginPage } from "../../pages/Login";
 
-// Placeholders until the Board, History and Settings views land.
+type PageProps = { onNavigate: (path: string) => void };
+
+// Placeholders until the History and Settings views land.
 function placeholder(title: string) {
   return function PlaceholderView() {
     return (
@@ -18,8 +23,8 @@ function placeholder(title: string) {
   };
 }
 
-const protectedRoutes = {
-  "/": placeholder("Board"),
+const protectedRoutes: Record<string, ComponentType<PageProps>> = {
+  "/": BoardView,
   "/error": ErrorPage,
   "/history": placeholder("History"),
   "/profile": ProfilePage,
@@ -60,8 +65,11 @@ export function AppRouter() {
     );
   }
 
-  const Page = protectedRoutes[path as keyof typeof protectedRoutes];
-  if (!Page) {
+  // /tasks/<taskId>: one task, shown under the Board view.
+  const taskMatch = /^\/tasks\/([^/]+)$/.exec(path);
+  const taskId = taskMatch ? decodeSegment(taskMatch[1] ?? "") : undefined;
+  const Page = taskId === undefined ? protectedRoutes[path] : undefined;
+  if (!taskId && !Page) {
     return <NotFoundPage onNavigate={navigate} />;
   }
 
@@ -69,9 +77,17 @@ export function AppRouter() {
     <RequireAuth currentPath={path} onNavigate={navigate}>
       <RequireOwner onNavigate={navigate}>
         <AppShell activePath={path} onNavigate={navigate}>
-          <Page />
+          {taskId ? <TaskView key={taskId} taskId={taskId} onNavigate={navigate} /> : Page ? <Page onNavigate={navigate} /> : null}
         </AppShell>
       </RequireOwner>
     </RequireAuth>
   );
+}
+
+function decodeSegment(segment: string): string | undefined {
+  try {
+    return decodeURIComponent(segment) || undefined;
+  } catch {
+    return undefined;
+  }
 }

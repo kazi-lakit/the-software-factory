@@ -2,6 +2,7 @@ import type { MouseEvent, ReactNode } from "react";
 import { useAuth } from "./providers/AuthProvider";
 import { useCurrentUser, userDisplayName } from "../features/profile/useCurrentUser";
 import { useSettings } from "../features/settings/useSettings";
+import { clearAllUnsent } from "../lib/unsent";
 
 export const PROJECT_NAME = "the-software-factory";
 
@@ -10,6 +11,10 @@ const views = [
   { href: "/history", label: "History" },
   { href: "/settings", label: "Settings" }
 ] as const;
+
+// A task page (/tasks/<id>) belongs to the Board view.
+const isCurrent = (href: string, activePath: string): boolean =>
+  href === "/" ? activePath === "/" || activePath.startsWith("/tasks/") : activePath === href;
 
 type ShellProps = { activePath: string; children: ReactNode; onNavigate: (path: string) => void };
 
@@ -29,9 +34,17 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
     onNavigate(href);
   }
 
+  // A deliberate sign out drops unsent text (a session that merely ended keeps it). A failed logout
+  // still leaves for /login and never becomes an unhandled rejection.
   async function signOut() {
-    await logout();
-    onNavigate("/login");
+    clearAllUnsent();
+    try {
+      await logout();
+    } catch {
+      // logout is best-effort; /login shows whether the session is still alive.
+    } finally {
+      onNavigate("/login");
+    }
   }
 
   return (
@@ -44,7 +57,7 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
               key={view.href}
               className="sf-view-link"
               href={view.href}
-              aria-current={activePath === view.href ? "page" : undefined}
+              aria-current={isCurrent(view.href, activePath) ? "page" : undefined}
               onClick={(event) => follow(event, view.href)}
             >
               {view.label}
@@ -52,8 +65,9 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
           ))}
         </nav>
         <div className="sf-topbar-end">
-          {paused ? <span className="sf-paused" role="status">Factory paused</span> : null}
-          {user ? <span className="sf-user">{user}</span> : null}
+          {/* Always present, so a screen reader hears the change when the factory pauses. */}
+          <span className={paused ? "sf-paused" : "sf-paused-off"} role="status">{paused ? "Factory paused" : ""}</span>
+          {user ? <span className="sf-user" title={user}>{user}</span> : null}
           <button type="button" className="sf-button" onClick={() => void signOut()}>Sign out</button>
         </div>
       </header>

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { blocksClient } from "../../lib/blocks/client";
 import { completeLogin, fetchSessionClaims, renewSession } from "../../lib/blocks/auth";
@@ -25,7 +25,18 @@ vi.mock("../../lib/blocks/auth", () => ({
 
 // The shell reads the settings for its pause indicator; no test reaches Blocks Data.
 vi.mock("../../lib/board", () => ({
-  boardStore: { getSettings: vi.fn(async () => ({ global: { gates: { spec: true, plan: true, pr: true }, maxParallel: 1, maxTurnsPerStage: 1, maxCostPerTaskUsd: 1, paused: false }, repos: {} })) }
+  boardStore: {
+    getSettings: vi.fn(async () => ({ global: { gates: { spec: true, plan: true, pr: true }, maxParallel: 1, maxTurnsPerStage: 1, maxCostPerTaskUsd: 1, paused: false }, repos: {} })),
+    getTask: vi.fn(async (id: string) => ({
+      answer: null, attempt: 0, baseBranch: "dev", blockedReason: null, branch: null, claimBy: null, claimUntil: null, costUsd: 0, description: "",
+      gateOverrides: {}, prUrl: null, question: null, repo: "data", stage: null, status: "inbox", taskId: id, title: "Routed task", version: 1
+    })),
+    listApprovals: vi.fn(async () => []),
+    listDocs: vi.fn(async () => []),
+    listEvents: vi.fn(async () => []),
+    listRuns: vi.fn(async () => []),
+    listTasks: vi.fn(async () => [])
+  }
 }));
 
 const me = vi.mocked(blocksClient.iam.me);
@@ -114,6 +125,24 @@ describe("the owner views", () => {
     expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: heading })).toHaveAttribute("aria-current", "page");
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+  });
+});
+
+describe("the task route", () => {
+  it("renders_a_task_in_the_shell_under_board", async () => {
+    claims.mockResolvedValue({ sub: "me" });
+    me.mockResolvedValue({ data: { roles: ["factory-owner"] } } as never);
+    renderAt("/tasks/T-12");
+    expect(await screen.findByRole("heading", { name: "Routed task" })).toBeInTheDocument();
+    const views = screen.getByRole("navigation", { name: "Views" });
+    expect(within(views).getByRole("link", { name: "Board" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("returns_to_the_task_after_sign_in", async () => {
+    claims.mockResolvedValue(undefined);
+    renderAt("/tasks/T-12");
+    await waitFor(() => expect(window.location.pathname).toBe("/login"));
+    expect(window.location.search).toBe(`?returnTo=${encodeURIComponent("/tasks/T-12")}`);
   });
 });
 

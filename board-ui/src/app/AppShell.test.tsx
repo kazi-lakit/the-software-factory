@@ -104,6 +104,31 @@ describe("AppShell", () => {
     expect(onNavigate).not.toHaveBeenCalled();
   });
 
+  it("keeps_board_current_on_a_task_page", () => {
+    renderShell("/tasks/T-3");
+    expect(screen.getByRole("link", { name: "Board" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("link", { name: "History" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("keeps_a_live_region_for_the_pause_state_while_running", async () => {
+    renderShell();
+    await waitFor(() => expect(getSettings).toHaveBeenCalled());
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("");
+  });
+
+  it("titles_the_user_text_so_a_truncated_name_can_be_read", async () => {
+    renderShell();
+    expect(await screen.findByText("Kazi Rahman")).toHaveAttribute("title", "Kazi Rahman");
+  });
+
+  it("goes_to_login_even_when_sign_out_fails", async () => {
+    vi.mocked(logout).mockRejectedValueOnce(new Error("network"));
+    const { onNavigate } = renderShell();
+    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("/login"));
+  });
+
   it("signs_out_and_goes_to_login", async () => {
     const { onNavigate } = renderShell();
     fireEvent.click(screen.getByRole("button", { name: "Sign out" }));

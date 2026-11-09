@@ -18,6 +18,11 @@
   --sf-done: #616773;
   --sf-done-soft: #e6e8eb;
   --sf-focus: #1b1f27;
+  /* Diff lines; the +/− prefix carries the meaning, these repeat it. */
+  --sf-added: #1d6b3a;
+  --sf-added-soft: #e3f3e8;
+  --sf-removed: #a1262b;
+  --sf-removed-soft: #fbe6e6;
 
   --sf-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --sf-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
@@ -41,6 +46,10 @@
     --sf-done: #8a909b;
     --sf-done-soft: #20232a;
     --sf-focus: #e4e6eb;
+    --sf-added: #7fd49b;
+    --sf-added-soft: #16291d;
+    --sf-removed: #f19a9a;
+    --sf-removed-soft: #331a1c;
   }
 }
 
@@ -173,4 +182,498 @@ body {
 .sf-main {
   flex: 1;
   padding: 16px;
+}
+
+/* The live region for the pause state stays in the page while the factory runs. */
+.sf-paused-off,
+.sf-visually-hidden {
+  border: 0;
+  clip: rect(0 0 0 0);
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+/* Shared view parts */
+.sf-view h2 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.sf-view h3 {
+  font-size: var(--sf-size);
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.sf-muted,
+.sf-empty {
+  color: var(--sf-muted);
+}
+
+.sf-empty {
+  margin: 0;
+}
+
+.sf-badge {
+  background: var(--sf-accent-soft);
+  border: 1px solid var(--sf-accent);
+  border-radius: var(--sf-radius);
+  color: var(--sf-accent);
+  font-size: var(--sf-size-small);
+  font-weight: 600;
+  margin-left: 6px;
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+.sf-button-primary {
+  background: var(--sf-text);
+  border-color: var(--sf-text);
+  color: var(--sf-surface);
+}
+
+.sf-button-primary:hover:not(:disabled) {
+  background: var(--sf-muted);
+  border-color: var(--sf-muted);
+}
+
+.sf-button-danger {
+  border-color: var(--sf-removed);
+  color: var(--sf-removed);
+}
+
+.sf-input,
+.sf-select {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
+  font: inherit;
+  min-height: 28px;
+  padding: 4px 8px;
+}
+
+.sf-input.sf-mono,
+.sf-select.sf-mono {
+  font-family: var(--sf-mono);
+}
+
+textarea.sf-input {
+  resize: vertical;
+  width: 100%;
+}
+
+.sf-field {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sf-field > span,
+.sf-inline-field > span,
+.sf-doc-controls label,
+.sf-facts dt {
+  color: var(--sf-muted);
+  font-size: var(--sf-size-small);
+}
+
+.sf-inline-field {
+  align-items: center;
+  display: inline-flex;
+  gap: 6px;
+}
+
+.sf-field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.sf-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sf-panel {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  padding: 12px;
+}
+
+/* A panel that waits for the owner (gate, answer) is the accent's other use. */
+.sf-panel-needs-you {
+  border-left: 3px solid var(--sf-accent);
+}
+
+.sf-panel-needs-you form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sf-problem {
+  align-items: center;
+  background: var(--sf-removed-soft);
+  border: 1px solid var(--sf-removed);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 0;
+  padding: 6px 10px;
+}
+
+/* Board */
+.sf-toolbar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-bottom: 12px;
+}
+
+.sf-toolbar-end {
+  margin-left: auto;
+}
+
+.sf-view > .sf-form,
+.sf-view > .sf-problem {
+  margin-bottom: 12px;
+}
+
+.sf-columns {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.sf-column {
+  background: var(--sf-surface-sunk);
+  border-radius: var(--sf-radius);
+  flex: 0 0 216px;
+  padding: 8px;
+}
+
+.sf-column-collapsed {
+  flex-basis: 132px;
+}
+
+.sf-column-head {
+  align-items: baseline;
+  display: flex;
+  gap: 6px;
+  justify-content: space-between;
+}
+
+.sf-view .sf-column-head {
+  font-size: var(--sf-size-small);
+  margin-bottom: 6px;
+}
+
+.sf-count {
+  color: var(--sf-muted);
+}
+
+.sf-column-toggle {
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.sf-column-muted .sf-column-toggle {
+  color: var(--sf-done);
+}
+
+.sf-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sf-card {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  position: relative;
+}
+
+.sf-card:hover {
+  border-color: var(--sf-muted);
+}
+
+.sf-card-needs-you {
+  border-left: 3px solid var(--sf-accent);
+}
+
+.sf-card-muted {
+  background: var(--sf-done-soft);
+  color: var(--sf-done);
+}
+
+.sf-card-top {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.sf-card-id,
+.sf-card-meta {
+  color: var(--sf-muted);
+  font-size: var(--sf-size-small);
+}
+
+.sf-card-muted .sf-card-id,
+.sf-card-muted .sf-card-meta {
+  color: var(--sf-done);
+}
+
+.sf-card-link {
+  color: inherit;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+/* The title link covers the card, so the whole card is one target with one name. */
+.sf-card-link::after {
+  content: "";
+  inset: 0;
+  position: absolute;
+}
+
+/* The ring goes on the card that the stretched link covers, for keyboard focus only. */
+.sf-card:has(.sf-card-link:focus-visible) {
+  outline: 2px solid var(--sf-focus);
+  outline-offset: 1px;
+}
+
+.sf-card-link:focus-visible {
+  outline: none;
+}
+
+.sf-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+
+.sf-card-question {
+  font-size: var(--sf-size-small);
+  margin: 2px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Task */
+.sf-task {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 1100px;
+}
+
+.sf-breadcrumb a,
+.sf-task a:not(.sf-button) {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.sf-task-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sf-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 0;
+}
+
+.sf-facts dd {
+  margin: 0;
+}
+
+.sf-task-section {
+  border-top: 1px solid var(--sf-border);
+  padding-top: 12px;
+}
+
+.sf-doc {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sf-doc-controls {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+/* Docs are markdown shown as text; this overrides the scaffold's dark pre. */
+.sf-doc-body,
+.sf-diff {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
+  font-family: var(--sf-mono);
+  font-size: 13px;
+  margin: 0;
+  max-height: 520px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
+.sf-diff-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sf-diff-summary {
+  color: var(--sf-muted);
+  margin: 0;
+}
+
+.sf-diff {
+  padding: 6px 0;
+}
+
+.sf-diff-line {
+  display: block;
+  padding: 0 12px;
+}
+
+.sf-diff-added {
+  background: var(--sf-added-soft);
+  color: var(--sf-added);
+}
+
+.sf-diff-removed {
+  background: var(--sf-removed-soft);
+  color: var(--sf-removed);
+}
+
+.sf-stale {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sf-stale > .sf-button {
+  align-self: flex-start;
+}
+
+.sf-table-wrap {
+  overflow-x: auto;
+}
+
+.sf-table {
+  font-size: 13px;
+  min-width: 0;
+}
+
+.sf-table th,
+.sf-table td {
+  padding: 4px 10px 4px 0;
+}
+
+.sf-table th {
+  color: var(--sf-muted);
+  font-size: var(--sf-size-small);
+  font-weight: 600;
+  text-transform: none;
+}
+
+.sf-table tbody tr:hover {
+  background: var(--sf-surface-sunk);
+}
+
+.sf-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sf-history li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+
+.sf-history-actor {
+  font-weight: 600;
+}
+
+.sf-dialog-backdrop {
+  align-items: center;
+  background: rgb(0 0 0 / 40%);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  position: fixed;
+  z-index: 20;
+}
+
+.sf-dialog {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  max-width: 420px;
+  padding: 16px;
+}
+
+.sf-dialog p {
+  margin: 0 0 12px;
+}
+
+/* Below the 1024px desktop width the columns stack. */
+@media (max-width: 1023px) {
+  .sf-columns {
+    flex-direction: column;
+    overflow-x: visible;
+  }
+
+  .sf-column,
+  .sf-column-collapsed {
+    flex-basis: auto;
+    width: 100%;
+  }
 }
