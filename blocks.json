@@ -1,5 +1,7 @@
 {
   "project": {
-    "tenantId": "Deb7f5deb843045ff9f8e9b0eb9624f1a"
+    "tenantId": "Deb7f5deb843045ff9f8e9b0eb9624f1a",
+    "apiUrl": "https://blocksapi.slsblx.com",
+    "appDomain": "https://dfrsgz.slsblx.com"
   }
 }
