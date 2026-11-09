@@ -51,11 +51,22 @@ describe("TaskView", () => {
     expect(within(runs).getByText("12")).toBeInTheDocument();
   });
 
-  it("does_not_link_a_pr_url_outside_github", async () => {
-    const task = await seedTask({}, "pr_open", { prUrl: "javascript:alert(1)", stage: "ship" });
+  it.each(["javascript:alert(1)", "https://github.com.evil.test/x", "http://github.com/x", "https://evil.test/https://github.com/x"])(
+    "does_not_link_the_pr_url_%s",
+    async (prUrl) => {
+      const task = await seedTask({}, "pr_open", { prUrl, stage: "ship" });
+      renderTask(task.taskId);
+      const header = await screen.findByRole("region", { name: "Task details" });
+      expect(within(header).queryByRole("link")).not.toBeInTheDocument();
+    }
+  );
+
+  it("moves_focus_to_the_task_heading_after_a_cancel", async () => {
+    const task = await seedTask({ title: "Drop me" });
     renderTask(task.taskId);
-    await screen.findByRole("region", { name: "Task details" });
-    expect(screen.queryByRole("link", { name: /alert/ })).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Cancel task" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, cancel it" }));
+    await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Drop me" })).toHaveFocus());
   });
 
   it("lists_the_history_newest_first", async () => {

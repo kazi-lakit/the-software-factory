@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { FormEvent, KeyboardEvent } from "react";
 import {
   canMove, cancelTask, editTask, EDITABLE_STATUSES, markReady, REPO_IDS, type RepoId, type Task, type TaskEdit
@@ -12,8 +13,15 @@ type Reload = () => unknown;
 const EDIT_FIELDS = ["title", "description", "repo", "baseBranch"] as const;
 const editId = (taskId: string, field: (typeof EDIT_FIELDS)[number]) => `edit:${taskId}:${field}`;
 
+type ActionsProps = {
+  /** After a successful cancel, when the Cancel button is gone: the view moves focus (to the task heading). */
+  onCancelled?: () => void;
+  onReload: Reload;
+  task: Task;
+};
+
 /** Mark ready (inbox), Edit (inbox or ready) and Cancel (any open task, after a confirmation). */
-export function TaskActions({ onReload, task }: { onReload: Reload; task: Task }) {
+export function TaskActions({ onCancelled, onReload, task }: ActionsProps) {
   const canReady = canMove(task.status, "ready", "you");
   const canCancel = canMove(task.status, "cancelled", "you");
   const canEdit = EDITABLE_STATUSES.includes(task.status);
@@ -23,27 +31,43 @@ export function TaskActions({ onReload, task }: { onReload: Reload; task: Task }
   const [problem, setProblem] = useState<WriteProblem>();
   const [busy, setBusy] = useState(false);
   const cancelButton = useRef<HTMLButtonElement>(null);
+  // Focus goes back to Cancel only once the dialog is gone and the page is no longer inert.
+  const refocusCancel = useRef(false);
   const invalidate = useInvalidateAfterWrite();
+
+  useEffect(() => {
+    if (confirming || !refocusCancel.current) return;
+    refocusCancel.current = false;
+    cancelButton.current?.focus();
+  }, [confirming]);
 
   if (!canReady && !canCancel && !canEdit) return null;
 
-  async function run(write: () => Promise<unknown>) {
-    if (busy) return;
+  async function run(write: () => Promise<unknown>): Promise<boolean> {
+    if (busy) return false;
     setBusy(true);
     setProblem(undefined);
     try {
       await write();
       void invalidate(task.taskId);
+      return true;
     } catch (error) {
       setProblem(describeWriteError(error));
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  function closeConfirm() {
+  function keepTask() {
+    refocusCancel.current = true;
     setConfirming(false);
-    cancelButton.current?.focus();
+  }
+
+  async function confirmCancel() {
+    setConfirming(false);
+    if (await run(() => cancelTask(boardStore, now, task.taskId))) onCancelled?.();
+    else cancelButton.current?.focus();
   }
 
   return (
@@ -70,27 +94,36 @@ export function TaskActions({ onReload, task }: { onReload: Reload; task: Task }
       {confirming ? (
         <ConfirmCancel
           taskId={task.taskId}
-          onKeep={closeConfirm}
-          onConfirm={() => {
-            closeConfirm();
-            void run(() => cancelTask(boardStore, now, task.taskId));
-          }}
+          onKeep={keepTask}
+          onConfirm={() => void confirmCancel()}
         />
       ) : null}
     </div>
   );
 }
 
-/** A modal confirmation: focus starts on the safe choice, Tab stays inside, Escape keeps the task. */
+/**
+ * A modal confirmation, rendered in its own node under <body>. Everything else under <body> is inert while it
+ * is open, so neither Tab nor a click can move focus behind it. Focus starts on the safe choice, Tab cycles
+ * the two buttons, Escape keeps the task.
+ */
 function ConfirmCancel({ onConfirm, onKeep, taskId }: { onConfirm: () => void; onKeep: () => void; taskId: string }) {
   const titleId = useId();
   const textId = useId();
   const keep = useRef<HTMLButtonElement>(null);
   const confirm = useRef<HTMLButtonElement>(null);
+  const [host] = useState(() => document.createElement("div"));
 
   useEffect(() => {
+    document.body.appendChild(host);
+    const behind = Array.from(document.body.children).filter((el) => el !== host && !el.hasAttribute("inert"));
+    for (const el of behind) el.setAttribute("inert", "");
     keep.current?.focus();
-  }, []);
+    return () => {
+      for (const el of behind) el.removeAttribute("inert");
+      host.remove();
+    };
+  }, [host]);
 
   function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
     if (event.key === "Escape") {
@@ -104,7 +137,7 @@ function ConfirmCancel({ onConfirm, onKeep, taskId }: { onConfirm: () => void; o
     (document.activeElement === keep.current ? confirm : keep).current?.focus();
   }
 
-  return (
+  return createPortal(
     <div className="sf-dialog-backdrop">
       <div className="sf-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={textId} onKeyDown={onKeyDown}>
         <h3 id={titleId}>Cancel {taskId}?</h3>
@@ -114,37 +147,45 @@ function ConfirmCancel({ onConfirm, onKeep, taskId }: { onConfirm: () => void; o
           <button ref={confirm} type="button" className="sf-button sf-button-danger" onClick={onConfirm}>Yes, cancel it</button>
         </div>
       </div>
-    </div>
+    </div>,
+    host
   );
 }
 
-type Base = Pick<Task, "version" | (typeof EDIT_FIELDS)[number]>;
-const baseOf = (task: Task): Base => ({ baseBranch: task.baseBranch, description: task.description, repo: task.repo, title: task.title, version: task.version });
+type EditField = (typeof EDIT_FIELDS)[number];
+type Fields = Pick<Task, EditField>;
+const fieldsOf = (task: Task): Fields => ({ baseBranch: task.baseBranch, description: task.description, repo: task.repo, title: task.title });
 
 function EditForm({ onDone, onReload, task }: { onDone: () => void; onReload: Reload; task: Task }) {
   const formId = useId();
-  // The task as the owner saw it when the form opened: the edit is a compare-and-set on its version.
-  const [base, setBase] = useState<Base>(() => baseOf(task));
-  const [title, setTitle] = useUnsent(editId(task.taskId, "title"), base.title);
-  const [description, setDescription] = useUnsent(editId(task.taskId, "description"), base.description);
-  const [repo, setRepo] = useUnsent(editId(task.taskId, "repo"), base.repo);
-  const [baseBranch, setBaseBranch] = useUnsent(editId(task.taskId, "baseBranch"), base.baseBranch);
+  // Each field's starting value: what the owner began editing from for a field they changed, the latest
+  // stored value for one they did not. The edit is a compare-and-set on `version`.
+  const [origin, setOrigin] = useState<Fields>(() => fieldsOf(task));
+  const [version, setVersion] = useState(task.version);
+  const fields = {
+    title: useUnsent(editId(task.taskId, "title"), origin.title),
+    description: useUnsent(editId(task.taskId, "description"), origin.description),
+    repo: useUnsent(editId(task.taskId, "repo"), origin.repo),
+    baseBranch: useUnsent(editId(task.taskId, "baseBranch"), origin.baseBranch)
+  };
+  const value = (field: EditField) => fields[field][0];
+  const setter = (field: EditField) => fields[field][1];
   const [problem, setProblem] = useState<WriteProblem>();
   const [busy, setBusy] = useState(false);
   const invalidate = useInvalidateAfterWrite();
 
+  /** Only the owner's own changes, so a save never writes back a value someone else changed meanwhile. */
+  const ownChanges = (): EditField[] => EDIT_FIELDS.filter((field) => value(field) !== origin[field]);
+
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
-    const values = { baseBranch, description, repo: repo as RepoId, title };
     const patch: TaskEdit = {};
-    for (const field of EDIT_FIELDS) {
-      if (values[field] !== base[field]) Object.assign(patch, { [field]: values[field] });
-    }
+    for (const field of ownChanges()) Object.assign(patch, { [field]: field === "repo" ? (value(field) as RepoId) : value(field) });
     setBusy(true);
     setProblem(undefined);
     try {
-      if (Object.keys(patch).length > 0) await editTask(boardStore, now, task.taskId, base.version, patch);
+      if (Object.keys(patch).length > 0) await editTask(boardStore, now, task.taskId, version, patch);
       clearUnsent(...EDIT_FIELDS.map((f) => editId(task.taskId, f)));
       void invalidate(task.taskId);
       onDone();
@@ -155,11 +196,22 @@ function EditForm({ onDone, onReload, task }: { onDone: () => void; onReload: Re
     }
   }
 
-  // The typed values stay; the form now edits the latest version.
+  // After a conflict: the owner's changed fields keep their text; the others take the latest stored values,
+  // and the next save is a compare-and-set on the latest version.
   async function reload() {
     setProblem(undefined);
     const fresh = await onReload();
-    setBase(isTask(fresh) ? baseOf(fresh) : baseOf(task));
+    if (!isTask(fresh)) return;
+    const changed = new Set(ownChanges());
+    const latest = fieldsOf(fresh);
+    const next: Fields = { ...origin };
+    for (const field of EDIT_FIELDS) {
+      if (changed.has(field)) continue;
+      Object.assign(next, { [field]: latest[field] });
+      fields[field][2](latest[field]);
+    }
+    setOrigin(next);
+    setVersion(fresh.version);
   }
 
   function close() {
@@ -171,22 +223,33 @@ function EditForm({ onDone, onReload, task }: { onDone: () => void; onReload: Re
     <form className="sf-form" aria-label="Edit task" onSubmit={(event) => void save(event)}>
       <label className="sf-field" htmlFor={`${formId}-title`}>
         <span>Title</span>
-        <input id={`${formId}-title`} className="sf-input" value={title} onChange={(event) => setTitle(event.target.value)} />
+        <input id={`${formId}-title`} className="sf-input" value={value("title")} onChange={(event) => setter("title")(event.target.value)} />
       </label>
       <label className="sf-field" htmlFor={`${formId}-description`}>
         <span>Description</span>
-        <textarea id={`${formId}-description`} className="sf-input" rows={5} value={description} onChange={(event) => setDescription(event.target.value)} />
+        <textarea
+          id={`${formId}-description`}
+          className="sf-input"
+          rows={5}
+          value={value("description")}
+          onChange={(event) => setter("description")(event.target.value)}
+        />
       </label>
       <div className="sf-field-row">
         <label className="sf-field" htmlFor={`${formId}-repo`}>
           <span>Repo</span>
-          <select id={`${formId}-repo`} className="sf-select" value={repo} onChange={(event) => setRepo(event.target.value)}>
+          <select id={`${formId}-repo`} className="sf-select" value={value("repo")} onChange={(event) => setter("repo")(event.target.value)}>
             {REPO_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
           </select>
         </label>
         <label className="sf-field" htmlFor={`${formId}-base`}>
           <span>Base branch</span>
-          <input id={`${formId}-base`} className="sf-input sf-mono" value={baseBranch} onChange={(event) => setBaseBranch(event.target.value)} />
+          <input
+            id={`${formId}-base`}
+            className="sf-input sf-mono"
+            value={value("baseBranch")}
+            onChange={(event) => setter("baseBranch")(event.target.value)}
+          />
         </label>
       </div>
       <WriteProblemNotice problem={problem} onReload={() => void reload()} />

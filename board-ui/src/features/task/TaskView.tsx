@@ -1,4 +1,4 @@
-import { useCallback, useId } from "react";
+import { useCallback, useId, useRef } from "react";
 import type { ReactNode } from "react";
 import { GATE_DOC, GATE_STATUS, NotFoundError, type FactoryEvent, type Gate, type Run, type Task } from "@factory/core";
 import { followInApp } from "../board/TaskCard";
@@ -10,6 +10,17 @@ import { TaskActions } from "./TaskActions";
 import { useTask } from "./useTask";
 
 const GITHUB = "https://github.com/";
+
+/** A PR link only to github.com over https; anything else (another host, http, a script URL) is not linked. */
+function githubUrl(value: string | null): string | undefined {
+  if (!value?.startsWith(GITHUB)) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.hostname === "github.com" ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 const formatTime = (iso: string | null): string => {
   if (!iso) return "—";
@@ -98,10 +109,12 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
 }
 
 function TaskHeader({ onReload, task }: { onReload: () => Promise<Task | undefined>; task: Task }) {
-  const prUrl = task.prUrl?.startsWith(GITHUB) ? task.prUrl : undefined;
+  const prUrl = githubUrl(task.prUrl);
+  // After a cancel the Cancel button is gone; focus lands on the task's heading instead of the page.
+  const heading = useRef<HTMLHeadingElement>(null);
   return (
     <section className="sf-task-header" aria-label="Task details">
-      <h2>{task.title}</h2>
+      <h2 ref={heading} tabIndex={-1}>{task.title}</h2>
       <dl className="sf-facts">
         <div><dt>Task</dt><dd className="sf-mono">{task.taskId}</dd></div>
         <div><dt>Repo</dt><dd>{task.repo}</dd></div>
@@ -129,7 +142,7 @@ function TaskHeader({ onReload, task }: { onReload: () => Promise<Task | undefin
         <div><dt>Attempt</dt><dd className="sf-mono">{task.attempt}</dd></div>
         <div><dt>Cost</dt><dd className="sf-mono">{formatCost(task.costUsd)}</dd></div>
       </dl>
-      <TaskActions key={task.taskId} task={task} onReload={onReload} />
+      <TaskActions key={task.taskId} task={task} onReload={onReload} onCancelled={() => heading.current?.focus()} />
     </section>
   );
 }

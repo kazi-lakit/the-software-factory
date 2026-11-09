@@ -39,7 +39,12 @@ export function keepUnsent(id: string, text: string): void {
   try {
     storage()?.setItem(PREFIX + id, text);
   } catch {
-    // Kept in memory only.
+    // Kept in memory only; an older stored copy would win on read, so drop it.
+    try {
+      storage()?.removeItem(PREFIX + id);
+    } catch {
+      // Nothing more to do.
+    }
   }
 }
 
@@ -73,19 +78,20 @@ export function clearAllUnsent(): void {
 
 /**
  * A text field's value that survives the form unmounting and a page reload. Text equal to `initial` (the
- * starting value, e.g. the task's current title) is not held. Returns the value, a setter and `clear` (after a
- * successful write).
+ * starting value, e.g. the task's current title) is not held. Returns the value, a setter and `clear`, which
+ * forgets the text and shows `next` (default `initial`): after a successful write, or to take a fresh value.
  */
-export function useUnsent(id: string, initial = ""): [string, (text: string) => void, () => void] {
+export function useUnsent(id: string, initial = ""): [string, (text: string) => void, (next?: unknown) => void] {
   const [value, setValue] = useState(() => readUnsent(id) ?? initial);
   const set = useCallback((text: string) => {
     if (text === initial) clearUnsent(id);
     else keepUnsent(id, text);
     setValue(text);
   }, [id, initial]);
-  const clear = useCallback(() => {
+  // `next` is ignored unless it is text, so `clear` can be an event handler.
+  const clear = useCallback((next?: unknown) => {
     clearUnsent(id);
-    setValue(initial);
+    setValue(typeof next === "string" ? next : initial);
   }, [id, initial]);
   return [value, set, clear];
 }

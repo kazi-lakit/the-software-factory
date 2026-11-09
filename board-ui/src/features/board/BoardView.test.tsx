@@ -120,4 +120,27 @@ describe("BoardView", () => {
     fireEvent.click(await screen.findByRole("link", { name: "Open me" }));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith(`/tasks/${task.taskId}`));
   });
+
+  it("returns_focus_to_new_task_after_creating", async () => {
+    renderBoard();
+    const open = await screen.findByRole("button", { name: "New task" });
+    fireEvent.click(open);
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Focus me" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+    await waitFor(() => expect(screen.queryByRole("form", { name: "New task" })).not.toBeInTheDocument());
+    expect(open).toHaveFocus();
+  });
+
+  it("points_aria_controls_only_at_a_rendered_list", async () => {
+    await seedTask({ title: "Shipped" }, "done");
+    renderBoard();
+    const done = await screen.findByRole("button", { name: "Done (1)" });
+    const cancelled = screen.getByRole("button", { name: "Cancelled (0)" });
+    expect(done).not.toHaveAttribute("aria-controls");
+    fireEvent.click(done);
+    const listId = done.getAttribute("aria-controls");
+    expect(listId && document.getElementById(listId)).toBeTruthy();
+    fireEvent.click(cancelled);
+    expect(cancelled).not.toHaveAttribute("aria-controls");
+  });
 });

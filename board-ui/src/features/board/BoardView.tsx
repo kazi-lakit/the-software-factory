@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createTask, REPO_IDS, type RepoId, type Status, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
@@ -24,6 +24,14 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   // Reopens on unsent text, e.g. after the session ended mid-form.
   const [creating, setCreating] = useState(() => NEW_TASK_FIELDS.some((f) => hasUnsent(newTaskId(f))));
   const [notice, setNotice] = useState("");
+  const newTaskButton = useRef<HTMLButtonElement>(null);
+  // After a create the form is gone: focus returns to the button that opened it.
+  const [refocusNewTask, setRefocusNewTask] = useState(false);
+  useEffect(() => {
+    if (!refocusNewTask) return;
+    newTaskButton.current?.focus();
+    setRefocusNewTask(false);
+  }, [refocusNewTask]);
 
   const visible = (board.data ?? []).filter((task) => (showTest || !isTestTask(task)) && (repo === "" || task.repo === repo));
   const byStatus = new Map<Status, Task[]>(COLUMNS.map((status) => [status, []]));
@@ -54,6 +62,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
           <span>Show test tasks</span>
         </label>
         <button
+          ref={newTaskButton}
           type="button"
           className="sf-button sf-toolbar-end"
           aria-expanded={creating}
@@ -71,6 +80,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
           onClose={() => setCreating(false)}
           onCreated={(task) => {
             setCreating(false);
+            setRefocusNewTask(true);
             setNotice(`Created ${task.taskId}.`);
           }}
         />
@@ -90,13 +100,14 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             const tasks = byStatus.get(status) ?? [];
             const collapsible = MUTED.has(status);
             const open = !collapsible || expanded.has(status);
+            const listed = open && tasks.length > 0;
             const listId = `${formId}-${status}`;
             const tone = collapsible ? " sf-column-muted" : "";
             return (
               <section key={status} className={`sf-column${tone}${open ? "" : " sf-column-collapsed"}`} aria-label={STATUS_LABEL[status]}>
                 <h3 className="sf-column-head">
                   {collapsible ? (
-                    <button type="button" className="sf-column-toggle" aria-expanded={open} aria-controls={open ? listId : undefined} onClick={() => toggle(status)}>
+                    <button type="button" className="sf-column-toggle" aria-expanded={open} aria-controls={listed ? listId : undefined} onClick={() => toggle(status)}>
                       {STATUS_LABEL[status]} ({tasks.length})
                     </button>
                   ) : (
@@ -106,7 +117,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
                     </>
                   )}
                 </h3>
-                {open && tasks.length > 0 ? (
+                {listed ? (
                   <ul id={listId} className="sf-card-list">
                     {tasks.map((task) => (
                       <li key={task.taskId}><TaskCard task={task} onNavigate={onNavigate} /></li>

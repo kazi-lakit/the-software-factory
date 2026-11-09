@@ -98,4 +98,12 @@ describe("unsent text", () => {
     clearUnsent("answer:T-2");
     expect(readUnsent("answer:T-2")).toBeUndefined();
   });
+
+  it("drops_the_stored_copy_when_a_newer_text_cannot_be_stored", () => {
+    keepUnsent("answer:T-3", "old draft");
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("QuotaExceededError"); });
+    keepUnsent("answer:T-3", "newer draft");
+    expect(sessionStorage.getItem("factory-board:unsent:answer:T-3")).toBeNull();
+    expect(readUnsent("answer:T-3")).toBe("newer draft");
+  });
 });

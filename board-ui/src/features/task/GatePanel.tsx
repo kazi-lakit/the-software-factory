@@ -31,7 +31,8 @@ export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
   const [comment, setComment, clearComment] = useUnsent(`gate:${task.taskId}:${gate}`);
   const [seen, setSeen] = useState<number | undefined>(() => currentOf(docs)?.version);
   const [problem, setProblem] = useState<WriteProblem>();
-  const [staleDocs, setStaleDocs] = useState<Doc[]>();
+  // The doc's versions for the stale diff: undefined while loading, "failed" when the load failed.
+  const [staleDocs, setStaleDocs] = useState<Doc[] | "failed">();
   const [recorded, setRecorded] = useState<Approval>();
   const [busy, setBusy] = useState(false);
   const approvalId = useRef(globalThis.crypto.randomUUID());
@@ -44,6 +45,22 @@ export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
   }, [latest, seen]);
 
   const decided = recorded ?? [...approvals].reverse().find((a) => a.gate === gate && a.docVersion === seen);
+
+  // A decision is recorded and a newer version arrived: a new round (the view may have missed the task
+  // leaving and re-entering the gate). An undecided panel keeps its version; deciding then is a StaleDocError.
+  const isDecided = decided !== undefined;
+  useEffect(() => {
+    if (!isDecided || seen === undefined || latest === undefined || latest <= seen) return;
+    setSeen(latest);
+    setRecorded(undefined);
+    setProblem(undefined);
+    setStaleDocs(undefined);
+  }, [isDecided, latest, seen]);
+
+  function loadStaleDocs() {
+    setStaleDocs(undefined);
+    boardStore.listDocs(task.taskId, kind).then(setStaleDocs, () => setStaleDocs("failed"));
+  }
 
   async function decide(decision: "approve" | "changes") {
     if (busy || seen === undefined) return;
@@ -63,9 +80,8 @@ export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
       const next = describeWriteError(error);
       setProblem(next);
       if (next.kind === "stale") {
-        setStaleDocs(undefined);
         void invalidate(task.taskId);
-        boardStore.listDocs(task.taskId, kind).then(setStaleDocs, () => setStaleDocs([]));
+        loadStaleDocs();
       }
     } finally {
       setBusy(false);
@@ -104,22 +120,14 @@ export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
           </label>
           <WriteProblemNotice problem={problem} onReload={() => void onReload()} />
           {problem?.kind === "stale" ? (
-            <div className="sf-stale">
-              {staleDocs ? (
-                <DocVersions
-                  key={`${problem.seenVersion}-${problem.currentVersion}`}
-                  label={KIND_TITLE[kind]}
-                  docs={staleDocs}
-                  from={problem.seenVersion}
-                  to={problem.currentVersion}
-                />
-              ) : (
-                <p className="sf-empty">Loading v{problem.currentVersion}…</p>
-              )}
-              <button type="button" className="sf-button" onClick={() => reviewNewVersion(problem.currentVersion)}>
-                Decide on v{problem.currentVersion}
-              </button>
-            </div>
+            <StaleDiff
+              docs={staleDocs}
+              kind={kind}
+              currentVersion={problem.currentVersion}
+              seenVersion={problem.seenVersion}
+              onRetry={loadStaleDocs}
+              onReview={reviewNewVersion}
+            />
           ) : null}
           <div className="sf-actions">
             <button type="submit" className="sf-button sf-button-primary" disabled={busy}>Approve</button>
@@ -128,5 +136,37 @@ export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
         </form>
       )}
     </section>
+  );
+}
+
+/**
+ * The diff from the version the owner saw to the newer one. "Decide on vN" appears only once that diff is on
+ * screen, so the owner cannot move on to a version they have not been shown.
+ */
+function StaleDiff({ currentVersion, docs, kind, onRetry, onReview, seenVersion }: {
+  currentVersion: number;
+  docs: Doc[] | "failed" | undefined;
+  kind: Doc["kind"];
+  onRetry: () => void;
+  onReview: (version: number) => void;
+  seenVersion: number;
+}) {
+  if (docs === undefined) return <p className="sf-empty">Loading v{currentVersion}…</p>;
+  // The newest version, if another arrived since the refusal.
+  const target = Math.max(currentVersion, ...docs === "failed" ? [] : docs.map((d) => d.version));
+  const ready = docs !== "failed" && docs.some((d) => d.version === seenVersion) && docs.some((d) => d.version === target);
+  if (!ready) {
+    return (
+      <div className="sf-problem">
+        <span>{docs === "failed" ? `Could not load the ${kind} versions.` : `v${currentVersion} is not available yet.`}</span>
+        <button type="button" className="sf-button" onClick={onRetry}>Retry</button>
+      </div>
+    );
+  }
+  return (
+    <div className="sf-stale">
+      <DocVersions key={`${seenVersion}-${target}`} label={KIND_TITLE[kind]} docs={docs} from={seenVersion} to={target} />
+      <button type="button" className="sf-button" onClick={() => onReview(target)}>Decide on v{target}</button>
+    </div>
   );
 }

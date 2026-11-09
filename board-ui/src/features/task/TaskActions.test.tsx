@@ -7,9 +7,9 @@ import { TaskActions } from "./TaskActions";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
 
-function renderActions(task: Task, onReload = vi.fn()) {
-  renderWithClient(<TaskActions task={task} onReload={onReload} />);
-  return { onReload };
+function renderActions(task: Task, onReload: () => unknown = vi.fn(), onCancelled = vi.fn()) {
+  const result = renderWithClient(<TaskActions task={task} onReload={onReload} onCancelled={onCancelled} />);
+  return { onCancelled, onReload, ...result };
 }
 
 const stored = (task: Task) => fakeBoard().owner.getTask(task.taskId);
@@ -111,9 +111,44 @@ describe("TaskActions", () => {
   it("reloads_on_a_conflict_when_asked", async () => {
     const task = await seedTask();
     vi.spyOn(fakeBoard().owner, "updateTask").mockRejectedValueOnce(new VersionConflictError(task.taskId, 1, 2));
-    const { onReload } = renderActions(task);
+    const onReload = vi.fn();
+    renderActions(task, onReload);
     fireEvent.click(screen.getByRole("button", { name: "Mark ready" }));
     fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
     await waitFor(() => expect(onReload).toHaveBeenCalled());
+  });
+
+  it("keeps_the_other_writers_changes_after_a_reload", async () => {
+    const task = await seedTask({ description: "Old description", title: "Old title" });
+    renderActions(task, () => fakeBoard().owner.getTask(task.taskId));
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await fakeBoard().owner.updateTask(task.taskId, task.version, { description: "changed elsewhere" });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "My title" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reload" }));
+    // Fields the owner did not touch show the other writer's values; the owner's own edit stays.
+    await waitFor(() => expect(screen.getByLabelText("Description")).toHaveValue("changed elsewhere"));
+    expect(screen.getByLabelText("Title")).toHaveValue("My title");
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(async () => expect(await stored(task)).toMatchObject({ description: "changed elsewhere", title: "My title", version: 3 }));
+  });
+
+  it("makes_the_page_inert_behind_the_confirmation", async () => {
+    const task = await seedTask();
+    const { container } = renderActions(task);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel task" }));
+    expect(container).toHaveAttribute("inert");
+    expect(screen.getByRole("dialog").closest("[inert]")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Keep task" }));
+    expect(container).not.toHaveAttribute("inert");
+    expect(screen.getByRole("button", { name: "Cancel task" })).toHaveFocus();
+  });
+
+  it("reports_a_successful_cancel_so_the_view_can_move_focus", async () => {
+    const task = await seedTask();
+    const { onCancelled } = renderActions(task);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel task" }));
+    fireEvent.click(screen.getByRole("button", { name: "Yes, cancel it" }));
+    await waitFor(() => expect(onCancelled).toHaveBeenCalledTimes(1));
   });
 });
