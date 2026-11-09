@@ -13,6 +13,7 @@
     "build": "tsc -p tsconfig.build.json",
     "blocks:resources": "tsx tools/blocks-resources.ts",
     "blocks:spike-doc-size": "tsx tools/spike-doc-size.ts",
+    "blocks:gate": "tsx tools/gate-blocks.ts",
     "blocks:save-credential": "tsx tools/save-blocks-credential.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

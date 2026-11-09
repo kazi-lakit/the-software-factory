@@ -1,0 +1,86 @@
+import { describe, expect, it } from 'vitest';
+import { FakeBlocksData, newFakeStorage } from '../../src/blocks/fakeData.js';
+import { BlocksStore } from '../../src/blocks/store.js';
+import { main, ownerLogin, runGate, REFUSAL, STEPS, type GateDeps } from '../../tools/gate-blocks.js';
+
+function setup(over: { onStatus?: (taskId: string) => { code: number; stdout: string }; grantCore?: Parameters<FakeBlocksData['grant']> } = {}) {
+  const storage = newFakeStorage();
+  const owner = new FakeBlocksData('factory-owner', { storage });
+  const core = new FakeBlocksData('factory-core', { storage });
+  if (over.grantCore) core.grant(...over.grantCore);
+  const lines: string[] = [];
+  const deps: GateDeps = {
+    owner, core,
+    ownerStore: new BlocksStore(owner, 'owner'),
+    coreStore: new BlocksStore(core, 'core'),
+    // The fake status lists whatever tasks the shared storage holds, as the real CLI would.
+    runStatus: async () => {
+      const ids = owner.rows('FactoryTask').map((r) => String(r.taskId));
+      return over.onStatus ? over.onStatus(ids[0]!) : { code: 0, stdout: JSON.stringify({ tasks: ids.map((taskId) => ({ taskId })) }) };
+    },
+    log: (l) => lines.push(l),
+    suffix: () => 'abcd1234',
+  };
+  return { deps, lines, owner };
+}
+
+describe('runGate', () => {
+  it('passes every step against role-checked fakes sharing one storage', async () => {
+    const { deps, lines, owner } = setup();
+    expect(await runGate(deps)).toBe(true);
+    expect(lines).toHaveLength(STEPS.length);
+    expect(lines.every((l) => l.endsWith(': pass'))).toBe(true);
+    const [task] = owner.rows('FactoryTask');
+    expect(task).toMatchObject({ taskId: 'GATE-abcd1234', status: 'cancelled', version: 3, writeId: expect.any(String) });
+    // Rows the gate inserts directly can be updated: version 1, empty writeId.
+    expect(owner.rows('FactorySettings')[0]).toMatchObject({ version: 1 });
+  });
+
+  it('prints labels only, never row values', async () => {
+    const { deps, lines } = setup();
+    await runGate(deps);
+    expect(lines.join('\n')).not.toMatch(/gate-race|gate-denied|inbox/);
+  });
+
+  it('FAILs the matching step when the core is granted an extra permission', async () => {
+    const { deps, lines } = setup({ grantCore: ['FactoryApproval', 'insert'] });
+    expect(await runGate(deps)).toBe(false);
+    expect(lines.filter((l) => l.includes('FAIL')).map((l) => l[0])).toEqual(['3']);
+    expect(lines.filter((l) => l.endsWith(': pass'))).toHaveLength(STEPS.length - 1);
+  });
+
+  it('skips steps that need a failed step, and still runs independent ones', async () => {
+    const { deps, lines } = setup();
+    deps.owner.insert = async () => ({ kind: 'forbidden' });
+    expect(await runGate(deps)).toBe(false);
+    expect(lines[0]).toContain('FAIL');
+    expect(lines.filter((l) => l.endsWith(': skipped')).map((l) => l[0])).toEqual(['7', '8', '9', '1']);
+  });
+
+  it('FAILs step 9 when the status output omits the gate task', async () => {
+    const { deps, lines } = setup({ onStatus: () => ({ code: 0, stdout: '{}' }) });
+    expect(await runGate(deps)).toBe(false);
+    expect(lines[8]).toContain('FAIL');
+    expect(lines[9]).toContain('pass');
+  });
+});
+
+describe('main / ownerLogin', () => {
+  it('refuses without the confirm flag', async () => {
+    const lines: string[] = [];
+    expect(await main([], (l) => lines.push(l))).toBe(2);
+    expect(lines).toEqual([REFUSAL]);
+  });
+
+  it('logs in through the SDK, asks for the password hidden, and never surfaces login errors', async () => {
+    const asked: { q: string; hidden: boolean }[] = [];
+    const ask = async (q: string, o: { hidden: boolean }) => { asked.push({ q, hidden: o.hidden }); return o.hidden ? 'S3CRET-pw' : 'me@example.com'; };
+    const cred = { clientId: 'c', clientSecret: 's', projectKey: 'p', apiUrl: 'https://api.example.com' };
+    const ok = (async () => new Response(JSON.stringify({ accessToken: 'tok-1', expiresIn: 60 }), { status: 200, headers: { 'content-type': 'application/json' } })) as typeof fetch;
+    const token = await ownerLogin(cred, ask, ok);
+    expect(await token.get()).toBe('tok-1');
+    expect(asked.map((a) => a.hidden)).toEqual([false, true]);
+    const bad = (async () => new Response(JSON.stringify({ error: 'S3CRET-pw me@example.com' }), { status: 401, headers: { 'content-type': 'application/json' } })) as typeof fetch;
+    await expect(ownerLogin(cred, ask, bad)).rejects.toThrow(/^owner login failed$/);
+  });
+});

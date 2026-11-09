@@ -4,36 +4,44 @@ import type { WriteOutcome } from './update.js';
 
 type Role = 'factory-owner' | 'factory-core' | 'any';
 
+/** Tables and id counter that several fakes (one per role) can share, as one Blocks project is shared. Test-only. */
+export interface FakeStorage { tables: Map<SchemaName, Row[]>; counter: number }
+export const newFakeStorage = (): FakeStorage => ({ tables: new Map(), counter: 0 });
+
 /** In-memory BlocksData for tests. Role 'any' skips access checks (used by the shared store contract suite). */
 export class FakeBlocksData implements BlocksData {
-  private readonly tables = new Map<SchemaName, Row[]>();
-  private counter = 0;
+  private readonly storage: FakeStorage;
+  private readonly extra = new Set<string>();
   private failNext: { insert: boolean; update: boolean } = { insert: false, update: false };
 
   private readonly now: () => Date;
 
   /** `now` stamps CreatedDate (default: real time). */
-  constructor(private readonly role: Role, opts: { now?: () => Date } = {}) {
+  constructor(private readonly role: Role, opts: { now?: () => Date; storage?: FakeStorage } = {}) {
+    this.storage = opts.storage ?? newFakeStorage();
     this.now = opts.now ?? (() => new Date());
   }
+
+  /** Test setup: lets this role do `op` on `schema` although the access matrix says no (proves a gate can fail). */
+  grant(schema: SchemaName, op: Operation): void { this.extra.add(`${schema}:${op}`); }
 
   failNextReply(op: 'insert' | 'update'): void { this.failNext[op] = true; }
 
   /** Test setup: stores a row as given (system keys allowed), with no access or unique checks. */
   seed(schema: SchemaName, row: Row): void {
     const stored: Row = Object.fromEntries(FIELDS[schema].map(f => [f.name, null]));
-    Object.assign(stored, { ItemId: `I-${++this.counter}`, CreatedDate: this.now().toISOString(), CreatedBy: 'seed' }, row);
+    Object.assign(stored, { ItemId: `I-${++this.storage.counter}`, CreatedDate: this.now().toISOString(), CreatedBy: 'seed' }, row);
     this.table(schema).push(stored);
   }
 
-  rows(schema: SchemaName): Row[] { return (this.tables.get(schema) ?? []).map(r => ({ ...r })); }
+  rows(schema: SchemaName): Row[] { return (this.storage.tables.get(schema) ?? []).map(r => ({ ...r })); }
 
   private allowed(schema: SchemaName, op: Operation): boolean {
-    return this.role === 'any' || (ACCESS[schema][op] ?? []).includes(this.role);
+    return this.role === 'any' || this.extra.has(`${schema}:${op}`) || (ACCESS[schema][op] ?? []).includes(this.role);
   }
   private table(schema: SchemaName): Row[] {
-    let t = this.tables.get(schema);
-    if (!t) this.tables.set(schema, (t = []));
+    let t = this.storage.tables.get(schema);
+    if (!t) this.storage.tables.set(schema, (t = []));
     return t;
   }
   private static matches(row: Row, filter: Filter): boolean {
@@ -55,7 +63,7 @@ export class FakeBlocksData implements BlocksData {
     }
     const stored: Row = Object.fromEntries(FIELDS[schema].map(f => [f.name, null]));
     Object.assign(stored, input, {
-      ItemId: `I-${++this.counter}`,
+      ItemId: `I-${++this.storage.counter}`,
       CreatedDate: this.now().toISOString(),
       CreatedBy: this.role === 'factory-core' ? '' : this.role === 'factory-owner' ? 'owner-user' : 'any',
     });
