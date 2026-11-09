@@ -10,7 +10,12 @@ export class FakeBlocksData implements BlocksData {
   private counter = 0;
   private failNext: { insert: boolean; update: boolean } = { insert: false, update: false };
 
-  constructor(private readonly role: Role) {}
+  private readonly now: () => Date;
+
+  /** `now` stamps CreatedDate (default: real time). */
+  constructor(private readonly role: Role, opts: { now?: () => Date } = {}) {
+    this.now = opts.now ?? (() => new Date());
+  }
 
   failNextReply(op: 'insert' | 'update'): void { this.failNext[op] = true; }
 
@@ -44,7 +49,7 @@ export class FakeBlocksData implements BlocksData {
     const stored: Row = Object.fromEntries(FIELDS[schema].map(f => [f.name, null]));
     Object.assign(stored, input, {
       ItemId: `I-${++this.counter}`,
-      CreatedDate: new Date().toISOString(),
+      CreatedDate: this.now().toISOString(),
       CreatedBy: this.role === 'factory-core' ? '' : this.role === 'factory-owner' ? 'owner-user' : 'any',
     });
     table.push(stored);

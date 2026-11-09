@@ -34,6 +34,8 @@ type Value = string | number | null;
 const TASK_KEYS = new Set<string>([
   'title', 'description', 'repo', 'baseBranch', 'gateOverrides', ...CORE_TASK_FIELDS,
 ]);
+/** A current doc with the same body and author counts as a lost-reply retry only if it was created this recently. */
+export const DOC_RETRY_WINDOW_MS = 120_000;
 /** createTask and addDoc re-read and retry a duplicate key this many times. */
 const DUPLICATE_RETRIES = 3;
 
@@ -116,7 +118,12 @@ const byAt = <T extends { at: string }>(xs: T[]) => xs.sort((a, b) => (a.at < b.
  * the Board). Every conditional update goes through settleConditionalUpdate.
  */
 export class BlocksStore implements BoardStore {
-  constructor(private readonly data: BlocksData, private readonly identity: 'core' | 'owner') {}
+  private readonly now: () => Date;
+
+  /** `now` decides the addDoc retry window (default: real time). */
+  constructor(private readonly data: BlocksData, private readonly identity: 'core' | 'owner', opts: { now?: () => Date } = {}) {
+    this.now = opts.now ?? (() => new Date());
+  }
 
   private ownerOnly(method: string): void {
     if (this.identity !== 'owner') throw new OwnerOnlyError(`${method} is done on the Board, not by the factory core`);
@@ -186,9 +193,11 @@ export class BlocksStore implements BoardStore {
     if (bytes > MAX_DOC_BYTES) throw new DocTooLargeError(bytes);
     const bodySha256 = sha256(body);
     for (let attempt = 0; attempt <= DUPLICATE_RETRIES; attempt++) {
-      const top = highest(await this.data.list('FactoryDoc', { taskId, kind }, ['version', 'bodySha256', 'author']));
-      // The same body from the same author is a retry whose reply was lost.
-      if (top && top.bodySha256 === bodySha256 && top.author === author) {
+      const top = highest(await this.data.list('FactoryDoc', { taskId, kind }, ['version', 'bodySha256', 'author', 'CreatedDate']));
+      // The same body from the same author, created moments ago, is a retry whose reply was lost. Later, an
+      // identical body is a new version (as in MemoryStore): a rewrite after "changes" must not keep the old
+      // version, or the "changes" approval would still match it.
+      if (top && top.bodySha256 === bodySha256 && top.author === author && this.isRecent(top.CreatedDate)) {
         return { taskId, kind, version: num(top.version), body, author, status: 'current' };
       }
       const version = (top ? num(top.version) : 0) + 1;
@@ -197,6 +206,12 @@ export class BlocksStore implements BoardStore {
       if (r.kind === 'forbidden') throw new BlocksForbiddenError('insertFactoryDoc');
     }
     throw new Error(`addDoc: ${taskId} ${kind} version still taken after ${DUPLICATE_RETRIES} retries`);
+  }
+
+  /** A CreatedDate in the future (clock skew) counts as recent. */
+  private isRecent(createdDate: Value | undefined): boolean {
+    const created = Date.parse(text(createdDate));
+    return Number.isFinite(created) && this.now().getTime() - created <= DOC_RETRY_WINDOW_MS;
   }
 
   /** Older versions are superseded only in that a higher version exists; no status is stored. */

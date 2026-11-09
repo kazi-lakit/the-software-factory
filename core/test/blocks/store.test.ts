@@ -116,6 +116,22 @@ describe('BlocksStore', () => {
     expect((await s.addDoc('T-1', 'spec', 'body', 'you')).version).toBe(2);
   });
 
+  it('addDoc: a lost-reply retry within 120 s is one version; the same body after the window is v+1', async () => {
+    const clock = { t: new Date('2026-11-09T10:00:00Z') };
+    const now = () => clock.t;
+    const data = new FakeBlocksData('factory-core', { now });
+    const s = new BlocksStore(data, 'core', { now });
+    data.failNextReply('insert');
+    await expect(s.addDoc('T-1', 'spec', 'same', 'me')).rejects.toThrow();
+    clock.t = new Date(clock.t.getTime() + 120_000);
+    expect((await s.addDoc('T-1', 'spec', 'same', 'me')).version).toBe(1);
+    expect(data.rows('FactoryDoc')).toHaveLength(1);
+    clock.t = new Date(clock.t.getTime() + 1);
+    expect(await s.addDoc('T-1', 'spec', 'same', 'me')).toMatchObject({ version: 2, body: 'same', status: 'current' });
+    expect(data.rows('FactoryDoc')).toHaveLength(2);
+    expect((await s.currentDoc('T-1', 'spec'))?.version).toBe(2);
+  });
+
   it('lost reply on updateTask is settled by the re-read', async () => {
     const data = new FakeBlocksData('any');
     const s = new BlocksStore(data, 'owner');

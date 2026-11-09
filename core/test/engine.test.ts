@@ -9,7 +9,9 @@ import { FakeGitHub } from '../src/github.js';
 import { IllegalInputError } from '../src/machine.js';
 import type { RepoConfig } from '../src/repoConfig.js';
 import { SecretMissingError } from '../src/secrets.js';
-import { MemoryStore, VersionConflictError } from '../src/store.js';
+import { BlocksStore } from '../src/blocks/store.js';
+import { FakeBlocksData } from '../src/blocks/fakeData.js';
+import { MemoryStore, VersionConflictError, type BoardStore } from '../src/store.js';
 import type { RepoId, Task } from '../src/types.js';
 
 const ROOT = join(tmpdir(), 'factory-engine-test');
@@ -49,11 +51,13 @@ class FakeGit implements GitRepos {
   }
 }
 
-function setup(opts: { failing?: string[]; git?: FakeGit; onExec?: () => Promise<void>; log?: (msg: string) => void } = {}) {
-  const store = new MemoryStore();
+function setup(
+  opts: { failing?: string[]; git?: FakeGit; onExec?: () => Promise<void>; log?: (msg: string) => void; store?: (now: () => Date) => BoardStore } = {},
+) {
+  const clock = { t: new Date('2026-11-09T10:00:00Z') };
+  const store: BoardStore = opts.store?.(() => clock.t) ?? new MemoryStore();
   const git = opts.git ?? new FakeGit();
   const github = new FakeGitHub();
-  const clock = { t: new Date('2026-11-09T10:00:00Z') };
   const exec: Exec = async (cmd) => {
     await opts.onExec?.();
     return { code: opts.failing?.includes(cmd) ? 1 : 0, output: 'out' };
@@ -73,7 +77,7 @@ function setup(opts: { failing?: string[]; git?: FakeGit; onExec?: () => Promise
 }
 
 /** Creates a task and puts it straight into the given state. */
-async function put(store: MemoryStore, patch: Partial<Task>, base = 'dev', repo: RepoId = 'data'): Promise<Task> {
+async function put(store: BoardStore, patch: Partial<Task>, base = 'dev', repo: RepoId = 'data'): Promise<Task> {
   const t = await store.createTask({ title: 'Add widget', description: 'd', repo, baseBranch: base });
   return Object.keys(patch).length ? store.updateTask(t.taskId, t.version, patch) : t;
 }
@@ -277,6 +281,26 @@ describe('feedback', () => {
     const resumed = await engine.next();
     expect(resumed).toMatchObject({ step: 'verify', context: { feedback: 'use v2' } });
     expect(resumed!.context.task).toMatchObject({ question: null, blockedReason: null, attempt: 0 });
+  });
+});
+
+describe('on BlocksStore', () => {
+  test('an identical spec rewritten after a changes request waits at spec_review (no loop)', async () => {
+    const { store, engine, clock } = setup({
+      store: (now) => new BlocksStore(new FakeBlocksData('any', { now }), 'owner', { now }),
+    });
+    await put(store, { status: 'ready' });
+    await engine.next();
+    await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'same spec' }));
+    await store.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'changes', comment: 'try again' });
+    expect(await engine.next()).toMatchObject({ step: 'spec', context: { feedback: 'try again' } });
+    clock.t = new Date(clock.t.getTime() + 121_000);
+    const t = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'same spec' }));
+    expect(t.status).toBe('spec_review');
+    expect(await store.currentDoc('T-1', 'spec')).toMatchObject({ version: 2, body: 'same spec' });
+    await engine.sync();
+    expect(await engine.next()).toBeNull();
+    expect((await store.getTask('T-1')).status).toBe('spec_review');
   });
 });
 
@@ -514,7 +538,7 @@ describe('ship', () => {
   });
 
   /** Fails every task write whose patch matches `when` while `down.on` is true. */
-  function storeOutage(store: MemoryStore, when: (patch: Partial<Task>) => boolean) {
+  function storeOutage(store: BoardStore, when: (patch: Partial<Task>) => boolean) {
     const down = { on: true };
     const update = store.updateTask.bind(store);
     vi.spyOn(store, 'updateTask').mockImplementation(async (id, v, patch) => {

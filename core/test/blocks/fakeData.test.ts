@@ -13,6 +13,11 @@ describe('FakeBlocksData', () => {
     await c.insert('FactoryDoc', { docKey: 'k' });
     expect((await c.list('FactoryDoc', {}))[0]!.CreatedBy).toBe('');
   });
+  it('stamps CreatedDate from an injected clock', async () => {
+    const f = new FakeBlocksData('any', { now: () => new Date('2026-01-02T03:04:05.000Z') });
+    await f.insert('FactoryTask', { taskId: 'a' });
+    expect(f.rows('FactoryTask')[0]!.CreatedDate).toBe('2026-01-02T03:04:05.000Z');
+  });
   it('duplicate unique value returns duplicate and stores nothing', async () => {
     const f = new FakeBlocksData('factory-owner');
     await f.insert('FactoryTask', { taskId: 'a' });
