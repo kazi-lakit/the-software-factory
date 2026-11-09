@@ -41,11 +41,13 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 
 type Answer = { kind: 'answer'; payload: Record<string, unknown> } | { kind: 'duplicate' } | { kind: 'forbidden' } | { kind: 'column-refused' };
 
-/** A column write rule refusal: GraphQL error code VALIDATION_ERROR with a validationErrors entry of type ColumnAccess. Matched on structure only, never message text. */
+const COLUMN_ACCESS_ENTRY = /(^|[{,]\s*)validationType = ColumnAccess\s*([,}]|$)/;
+
+/** A column write rule refusal: GraphQL error code VALIDATION_ERROR with a validationErrors entry of type ColumnAccess. Entries arrive as objects or, live, as serialized strings ("{ field = title, ..., validationType = ColumnAccess }"). Matched on the validationType key only, never message text. */
 function isColumnRefusal(e: unknown): boolean {
   if (!isObject(e) || !isObject(e.extensions) || e.extensions.code !== 'VALIDATION_ERROR') return false;
   const list = e.extensions.validationErrors;
-  return Array.isArray(list) && list.some(v => isObject(v) && v.validationType === 'ColumnAccess');
+  return Array.isArray(list) && list.some(v => (isObject(v) && v.validationType === 'ColumnAccess') || (typeof v === 'string' && COLUMN_ACCESS_ENTRY.test(v)));
 }
 
 /** The SDK client has no timeout of its own, so a stalled connection would hang the caller. */

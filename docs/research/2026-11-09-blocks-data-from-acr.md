@@ -171,3 +171,5 @@ Date: 2026-11-10. Read-only source reading, nothing run against Blocks. Paths: `
   - (c) core update with `title` resent unchanged plus a `status` change → applied, and `title` is unchanged.
   - (d) owner update of `title` → applied.
   - (e) read back `blocks data rules policy get FactoryTask` and `blocks data schema aggregation --schema-name FactoryTask` to confirm the policy and the field EDIT level. As section 6 says, `policy get` has returned `[]` before, so a missing listing alone does not prove absence.
+
+Live 2026-11-10: validationErrors entries arrive as strings; matcher accepts both.

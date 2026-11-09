@@ -94,6 +94,21 @@ describe('SdkBlocksData', () => {
       expect(await adapt([{ status: 400, body: other.body }]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });
       expect(await adapt([{ status: 400, body: {} }]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });
     });
+    const LIVE_ENTRY = "{ field = title, message = You don't have permission to change title on this record., validationType = ColumnAccess }";
+    const live = (entry = LIVE_ENTRY) => ({ errors: [{ message: "You don't have permission to change title on this record.", locations: [{ line: 1, column: 80 }], path: ['updateFactoryTask'], extensions: { code: 'VALIDATION_ERROR', validationErrors: [entry] } }], data: { updateFactoryTask: null } });
+    it('live 2026-11-10 body (string validationErrors entry) is a final refusal, HTTP 200', async () => {
+      const t = adapt([{ body: live() }]);
+      expect(await t.data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'forbidden' });
+      expect(t.seen).toHaveLength(1);
+    });
+    it('the live body in a non-2xx BlocksApiError body is a final refusal', async () => {
+      expect(await adapt([{ status: 400, body: live() }]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'forbidden' });
+    });
+    it('a string entry with another validationType stays unknown', async () => {
+      const other = live("{ field = title, message = ColumnAccess is required, validationType = Required }");
+      expect(await adapt([{ body: other }]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });
+      expect(await adapt([{ status: 400, body: other }]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });
+    });
     it('other validation errors, other codes and a bare message stay unknown', async () => {
       expect(await adapt([refusal('VALIDATION_ERROR', 'Required')]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });
       expect(await adapt([refusal('OTHER', 'ColumnAccess')]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });
