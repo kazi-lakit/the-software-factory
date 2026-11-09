@@ -1,7 +1,7 @@
 // Writes (or with --check, verifies) the generated Blocks resource files at the factory root.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { TABLES, generateFields, generateIndexes, generateRules } from '../src/blocks/schema.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -14,16 +14,18 @@ export function renderFiles(): Record<string, string> {
   return files;
 }
 
-const files = renderFiles();
-if (process.argv.includes('--check')) {
-  const differing = Object.entries(files).filter(([path, content]) => {
-    try { return readFileSync(root + path, 'utf8') !== content; } catch { return true; }
-  }).map(([path]) => path);
-  for (const path of differing) console.error(`${path} differs from the generator output`);
-  process.exit(differing.length ? 1 : 0);
+if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
+  const files = renderFiles();
+  if (process.argv.includes('--check')) {
+    const differing = Object.entries(files).filter(([path, content]) => {
+      try { return readFileSync(root + path, 'utf8') !== content; } catch { return true; }
+    }).map(([path]) => path);
+    for (const path of differing) console.error(`${path} differs from the generator output`);
+    process.exit(differing.length ? 1 : 0);
+  }
+  for (const [path, content] of Object.entries(files)) {
+    mkdirSync(dirname(root + path), { recursive: true });
+    writeFileSync(root + path, content);
+  }
+  console.log(`Wrote ${Object.keys(files).length} files`);
 }
-for (const [path, content] of Object.entries(files)) {
-  mkdirSync(dirname(root + path), { recursive: true });
-  writeFileSync(root + path, content);
-}
-console.log(`Wrote ${Object.keys(files).length} files`);

@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { ACCESS, TABLES, generateIndexes, generateRules, collectionOf } from '../../src/blocks/schema.js';
+import { ACCESS, FIELDS, UNIQUE, TABLES, generateIndexes, generateRules, collectionOf } from '../../src/blocks/schema.js';
 
 const coreRoot = fileURLToPath(new URL('../../', import.meta.url));
 
@@ -33,6 +33,18 @@ describe('blocks schema', () => {
     expect(rules.security).toHaveLength(7 * 4);
     expect(rules.policies.map(p => p.policyName)).toContain('factory-task-edit-factory-core');
     expect(rules.policies.map(p => p.policyName)).toContain('factory-settings-insert-factory-owner');
+  });
+
+  it('rules policies match the matrix triples', () => {
+    const rules = generateRules() as Rules;
+    const ops = ['read', 'insert', 'edit', 'delete'];
+    const actual = rules.policies.map(p => `${p.schemaName}|${ops[p.operation]}|${p.ruleGroup.rules[0]!.staticValue[0]}`).sort();
+    const expected = Object.entries(MATRIX).flatMap(([schema, byOp]) => Object.entries(byOp).flatMap(([op, roles]) => roles.map(role => `${schema}|${op}|${role}`))).sort();
+    expect(actual).toEqual(expected);
+  });
+
+  it('every UNIQUE field exists in FIELDS', () => {
+    for (const t of TABLES) for (const f of UNIQUE[t]) expect(FIELDS[t].map(x => x.name)).toContain(f);
   });
 
   it('indexes follow factory_<table>_<field>_unique', () => {
