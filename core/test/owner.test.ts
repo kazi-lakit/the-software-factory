@@ -66,6 +66,11 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       expect(await owner.listEvents('T-1')).toEqual([you({ action: 'create', to: 'inbox', reason: 'created' })]);
     });
 
+    test('stores the title trimmed', async () => {
+      const { owner } = setup();
+      expect((await createTask(owner, now, { title: '  Add widget \n', description: '', repo: 'data' })).title).toBe('Add widget');
+    });
+
     test('the base branch defaults to dev', async () => {
       const { owner } = setup();
       expect((await createTask(owner, now, { title: 'X', description: '', repo: 'data' })).baseBranch).toBe('dev');
@@ -75,6 +80,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       ['a blank title', { title: '  ' }],
       ['an unknown repo', { repo: 'nope' as RepoId }],
       ['an empty base branch', { baseBranch: ' ' }],
+      ['a description that is not text', { description: 7 as unknown as string }],
     ])('refuses %s', async (_what, bad) => {
       const { owner } = setup();
       const err = await createTask(owner, now, { title: 'X', description: '', repo: 'data', ...bad }).catch((e: unknown) => e);
@@ -228,6 +234,26 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       expect(await owner.listApprovals('T-1')).toEqual([]);
     });
 
+    test.each([
+      ['seen version 0', 'spec', 'approve', 0], ['seen version 1.5', 'spec', 'approve', 1.5], ['seen version NaN', 'spec', 'approve', Number.NaN],
+      ['an unknown gate', 'deploy', 'approve', 1], ['an unknown decision', 'spec', 'maybe', 1],
+    ])('refuses %s', async (_what, gate, decision, seen) => {
+      const { owner, core, put } = setup();
+      await put({ status: 'spec_review', stage: 'spec' });
+      await core.addDoc('T-1', 'spec', 'S', 'a');
+      await expect(decideGate(owner, now, 'T-1', gate as never, decision as never, seen, '')).rejects.toMatchObject({ code: 'invalid' });
+      expect(await owner.listApprovals('T-1')).toEqual([]);
+    });
+
+    test('a caller approval id makes a retried click record one approval', async () => {
+      const { owner, core, put } = setup();
+      await put({ status: 'spec_review', stage: 'spec' });
+      await core.addDoc('T-1', 'spec', 'S', 'a');
+      const first = await decideGate(owner, now, 'T-1', 'spec', 'approve', 1, 'ok', 'click-1');
+      expect(await decideGate(owner, now, 'T-1', 'spec', 'approve', 1, 'ok', 'click-1')).toEqual(first);
+      expect(await owner.listApprovals('T-1')).toHaveLength(1);
+    });
+
     test('refuses a gate with no doc', async () => {
       const { owner, put } = setup();
       await put({ status: 'spec_review', stage: 'spec' });
@@ -253,6 +279,16 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       ]);
     });
 
+    test('stores the title trimmed and writes gate overrides as canonical JSON', async () => {
+      const { owner, put, ownerEvents } = setup();
+      const t = await put();
+      const u = await editTask(owner, now, 'T-1', t.version, { title: ' Renamed ', gateOverrides: { spec: false, plan: true } });
+      expect(u.title).toBe('Renamed');
+      expect((await ownerEvents()).map((e) => [e.field, e.to])).toEqual([['title', 'Renamed'], ['gateOverrides', '{"plan":true,"spec":false}']]);
+      // A trimmed title equal to the stored one is no change.
+      expect(await editTask(owner, now, 'T-1', u.version, { title: 'Renamed  ' })).toEqual(u);
+    });
+
     test('refuses a task the core is working on', async () => {
       const { owner, put } = setup();
       const t = await put({ status: 'spec', stage: 'spec' });
@@ -261,6 +297,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
 
     test.each([
       ['a blank title', { title: '' }],
+      ['a description that is not text', { description: 7 }],
       ['an unknown repo', { repo: 'nope' }],
       ['an empty base branch', { baseBranch: '' }],
       ['a non-boolean gate override', { gateOverrides: { spec: 'yes' } }],
@@ -354,6 +391,34 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       await saveSettings(owner, now, 'data', { gates: null });
       expect((await owner.getSettings()).repos).toEqual({ data: {} });
       expect((await owner.listEvents('-')).at(-1)).toMatchObject({ field: 'settings.data.gates', from: '{"plan":true}', to: 'inherit' });
+    });
+
+    test('a save from a stale read is a VersionConflictError and writes no event', async () => {
+      const { owner } = setup();
+      const getSettings = owner.getSettings.bind(owner);
+      // Another owner saves the same scope between this save's read and its write.
+      owner.getSettings = async () => {
+        const seen = await getSettings();
+        owner.getSettings = getSettings;
+        await saveSettings(owner, now, 'data', { maxParallel: 5 });
+        return seen;
+      };
+      await expect(saveSettings(owner, now, 'data', { maxParallel: 3 })).rejects.toBeInstanceOf(VersionConflictError);
+      expect((await owner.getSettings()).repos.data).toEqual({ maxParallel: 5 });
+      expect((await owner.listEvents('-')).map((e) => e.to)).toEqual(['5']);
+    });
+
+    test('saves only its scope: a scope changed by someone else meanwhile is kept', async () => {
+      const { owner } = setup();
+      const getSettings = owner.getSettings.bind(owner);
+      owner.getSettings = async () => {
+        const seen = await getSettings();
+        owner.getSettings = getSettings;
+        await saveSettings(owner, now, 'os', { paused: true });
+        return seen;
+      };
+      await saveSettings(owner, now, 'data', { maxParallel: 3 });
+      expect((await owner.getSettings()).repos).toEqual({ os: { paused: true }, data: { maxParallel: 3 } });
     });
 
     test('a patch that changes nothing writes no event', async () => {

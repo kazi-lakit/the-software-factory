@@ -7,13 +7,13 @@ import type {
 } from './types.js';
 
 export {
-  CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval, updateHeld,
+  canonicalJson, CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval, updateHeld,
   VersionConflictError,
 } from './boardStore.js';
 export type { BoardStore, NewApproval, StoredSettings } from './boardStore.js';
 import {
   CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval, updateHeld,
-  VersionConflictError, type BoardStore, type NewApproval, type StoredSettings,
+  VersionConflictError, canonicalJson, settingsConflict, type BoardStore, type NewApproval, type StoredSettings,
 } from './boardStore.js';
 
 interface State {
@@ -148,6 +148,19 @@ export class MemoryStore implements BoardStore {
   setSettings(s: StoredSettings) {
     return this.write(() => {
       this.state.settings = clone(s);
+    });
+  }
+
+  updateSettingsScope(scope: 'global' | RepoId, before: unknown, after: Settings | RepoSettings | null) {
+    if (scope === 'global' && after === null) return Promise.reject(new Error('global settings cannot be removed'));
+    return this.write(() => {
+      const s = this.state.settings ?? { global: clone(DEFAULT_SETTINGS), repos: {} };
+      const current = scope === 'global' ? s.global : s.repos[scope];
+      if (canonicalJson(current) !== canonicalJson(before)) throw settingsConflict(scope);
+      if (scope === 'global') s.global = clone(after as Settings);
+      else if (after === null) delete s.repos[scope];
+      else s.repos[scope] = clone(after as RepoSettings);
+      this.state.settings = s;
     });
   }
 

@@ -1,4 +1,6 @@
-import { ForbiddenError, OwnerOnlyError, updateHeld, VersionConflictError, type BoardStore, type StoredSettings } from './boardStore.js';
+import {
+  canonicalJson as canon, ForbiddenError, OwnerOnlyError, updateHeld, VersionConflictError, type BoardStore, type StoredSettings,
+} from './boardStore.js';
 import { GATE_DOC } from './gates.js';
 import { diffEvents } from './history.js';
 import { assertMove } from './status.js';
@@ -52,9 +54,6 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 /** Drops undefined values: a key set to undefined is a key not sent. */
 const defined = <T extends object>(o: T): Partial<T> =>
   Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
-/** JSON with sorted object keys, so equal values compare equal whatever their key order. */
-const canon = (v: unknown): string =>
-  JSON.stringify(v, (_k, x: unknown) => (isObject(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : 1))) : x)) ?? 'undefined';
 const randomUUID = (): string => globalThis.crypto.randomUUID();
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -95,7 +94,7 @@ async function ownerUpdate(store: BoardStore, now: () => Date, task: Task, patch
 
 /** diffEvents covers the core's fields; these are the owner's (title … gateOverrides). */
 function ownerFieldEvents(before: Task, after: Task, reason: string, at: string): FactoryEvent[] {
-  const text = (v: unknown) => (typeof v === 'string' ? v : JSON.stringify(v));
+  const text = (v: unknown) => (typeof v === 'string' ? v : canon(v));
   return EDITABLE_FIELDS.filter((f) => canon(before[f]) !== canon(after[f])).map((field) => ({
     taskId: after.taskId, actor: OWNER_ACTOR, action: 'set' as const, field, from: text(before[field]), to: text(after[field]), reason, at,
   }));
@@ -110,7 +109,7 @@ export async function createTask(
   if (input.baseBranch !== undefined && !nonBlank(input.baseBranch)) invalid('base branch must not be blank');
   const at = now().toISOString();
   const task = await store.createTask({
-    title: input.title, description: input.description, repo: input.repo, ...(input.baseBranch !== undefined ? { baseBranch: input.baseBranch } : {}),
+    title: input.title.trim(), description: input.description, repo: input.repo, ...(input.baseBranch !== undefined ? { baseBranch: input.baseBranch } : {}),
   });
   await writeEvents(store, [
     { taskId: task.taskId, actor: OWNER_ACTOR, action: 'create', field: null, from: null, to: task.status, reason: 'created', at },
@@ -147,11 +146,13 @@ export async function answerTask(store: BoardStore, now: () => Date, taskId: str
  */
 export async function decideGate(
   store: BoardStore, now: () => Date, taskId: string, gate: Gate, decision: 'approve' | 'changes', seenDocVersion: number, comment: string,
+  approvalId?: string,
 ): Promise<Approval> {
   if (!(GATES as readonly string[]).includes(gate)) invalid(`gate must be one of ${GATES.join(', ')}`);
   if (decision !== 'approve' && decision !== 'changes') invalid('decision must be approve or changes');
   if (!Number.isInteger(seenDocVersion) || seenDocVersion < 1) invalid('seen doc version must be a whole number from 1');
   if (typeof comment !== 'string') invalid('comment must be text');
+  if (approvalId !== undefined && !nonBlank(approvalId)) invalid('approval id must not be blank');
   const task = await store.getTask(taskId);
   if (task.status !== GATE_STATUS[gate]) throw new OwnerActionError('not-waiting', `${taskId} is not waiting at the ${gate} gate`);
   const kind = GATE_DOC[gate];
@@ -162,7 +163,7 @@ export async function decideGate(
   const events: FactoryEvent[] = [{
     taskId, actor: OWNER_ACTOR, action: 'set', field: 'approval', from: null, to: `${gate}:${decision}@v${doc.version}`, reason, at: now().toISOString(),
   }];
-  const approval = await store.addApproval({ approvalId: randomUUID(), taskId, gate, docVersion: doc.version, decision, comment });
+  const approval = await store.addApproval({ approvalId: approvalId ?? randomUUID(), taskId, gate, docVersion: doc.version, decision, comment });
   await writeEvents(store, events);
   return approval;
 }
@@ -180,6 +181,7 @@ export async function editTask(store: BoardStore, now: () => Date, taskId: strin
     if (key === 'gateOverrides') checkGates(value, 'gateOverrides');
   }
   const clean: TaskEdit = defined(patch);
+  if (clean.title !== undefined) clean.title = clean.title.trim();
   if (clean.gateOverrides) clean.gateOverrides = defined(clean.gateOverrides);
   const task = await store.getTask(taskId);
   if (!EDITABLE_STATUSES.includes(task.status)) {
@@ -224,7 +226,8 @@ export async function saveSettings(
     }
   }
   const stored = await store.getSettings();
-  const current: RepoSettings = scope === 'global' ? stored.global : (stored.repos[scope] ?? {});
+  const read = scope === 'global' ? stored.global : stored.repos[scope];
+  const current: RepoSettings = read ?? {};
   const next = mergeSettings(current, patch as RepoSettingsPatch);
   const changed = SETTING_KEYS.filter((k) => canon(current[k]) !== canon(next[k]));
   if (changed.length === 0) return stored;
@@ -236,7 +239,8 @@ export async function saveSettings(
   }));
   const updated: StoredSettings =
     scope === 'global' ? { global: next as Settings, repos: stored.repos } : { global: stored.global, repos: { ...stored.repos, [scope]: next } };
-  await store.setSettings(updated);
+  // Only this scope, and only if it is still what was read: a concurrent save is a VersionConflictError, not lost.
+  await store.updateSettingsScope(scope, read, next);
   await writeEvents(store, events);
   return updated;
 }

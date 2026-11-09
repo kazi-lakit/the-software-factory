@@ -10,8 +10,9 @@ export class NotFoundError extends Error {
 }
 
 export class VersionConflictError extends Error {
-  constructor(taskId: string, expected: number, actual: number) {
-    super(`version conflict on ${taskId}: expected ${expected}, found ${actual}`);
+  /** `message` replaces the version wording when the conflict is a changed value, not a version number. */
+  constructor(taskId: string, expected: number, actual: number, message?: string) {
+    super(message ?? `version conflict on ${taskId}: expected ${expected}, found ${actual}`);
     this.name = 'VersionConflictError';
   }
 }
@@ -65,6 +66,17 @@ export type NewApproval = Omit<Approval, 'at'> & { approvalId?: string };
 export const sameApproval = (a: Omit<Approval, 'at'>, b: Omit<Approval, 'at'>): boolean =>
   a.taskId === b.taskId && a.gate === b.gate && a.docVersion === b.docVersion && a.decision === b.decision && a.comment === b.comment;
 
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** JSON with object keys sorted, so equal values compare equal whatever their key order. undefined is 'undefined'. */
+export const canonicalJson = (v: unknown): string =>
+  JSON.stringify(v, (_k, x: unknown) =>
+    isPlainObject(x) ? Object.fromEntries(Object.entries(x).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) : x) ?? 'undefined';
+
+/** The stored value of one settings scope changed since the caller read it. */
+export const settingsConflict = (scope: string): VersionConflictError =>
+  new VersionConflictError(`settings ${scope}`, Number.NaN, Number.NaN, `settings ${scope} changed since they were read; reload and save again`);
+
 export interface StoredSettings {
   global: Settings;
   repos: Partial<Record<RepoId, RepoSettings>>;
@@ -85,8 +97,14 @@ export interface BoardStore {
   addApproval(a: NewApproval): Promise<Approval>;
   listApprovals(taskId: string): Promise<Approval[]>;
   getSettings(): Promise<StoredSettings>;
-  /** Dev use only. */
+  /** Dev use only (writes every scope, no conflict check). The Board uses updateSettingsScope. */
   setSettings(s: StoredSettings): Promise<void>;
+  /**
+   * Writes one scope only, if its stored value (as getSettings gives it: global merged over the defaults, a missing
+   * repo scope undefined) still equals `before` as canonical JSON; otherwise throws VersionConflictError.
+   * `after` null removes a repo scope.
+   */
+  updateSettingsScope(scope: 'global' | RepoId, before: unknown, after: Settings | RepoSettings | null): Promise<void>;
   startRun(r: { taskId: string; step: Step; mode: Mode; agent: string }): Promise<Run>;
   openRun(taskId: string, step: Step): Promise<Run | undefined>;
   finishRun(runId: string, p: { result: string; turns: number | null; costUsd: number | null }): Promise<void>;

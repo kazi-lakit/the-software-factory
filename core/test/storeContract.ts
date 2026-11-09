@@ -108,6 +108,38 @@ export function runStoreContract(name: string, make: () => BoardStore | Promise<
       await s.setSettings(next);
       expect(await s.getSettings()).toEqual(next);
     });
+    test('updateSettingsScope writes only its scope; null removes a repo scope', async () => {
+      const s = await make();
+      await s.updateSettingsScope('data', undefined, { maxParallel: 1 });
+      await s.updateSettingsScope('os', undefined, { gates: { pr: false } });
+      expect(await s.getSettings()).toEqual({ global: DEFAULT_SETTINGS, repos: { data: { maxParallel: 1 }, os: { gates: { pr: false } } } });
+      await s.updateSettingsScope('global', DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, paused: true });
+      // `before` compares as canonical JSON: key order does not matter.
+      await s.updateSettingsScope('os', { gates: { pr: false } }, { gates: { pr: false }, paused: true });
+      await s.updateSettingsScope('data', { maxParallel: 1 }, null);
+      expect(await s.getSettings()).toEqual({
+        global: { ...DEFAULT_SETTINGS, paused: true }, repos: { os: { gates: { pr: false }, paused: true } },
+      });
+      const reordered = { paused: true, gates: { spec: true, pr: true, plan: false }, maxCostPerTaskUsd: 5, maxTurnsPerStage: 60, maxParallel: 2 };
+      await s.updateSettingsScope('global', reordered, DEFAULT_SETTINGS);
+      expect((await s.getSettings()).global).toEqual(DEFAULT_SETTINGS);
+    });
+    test('updateSettingsScope refuses a lost update and keeps the first write', async () => {
+      const s = await make();
+      const a = await s.getSettings();
+      const b = await s.getSettings();
+      await s.updateSettingsScope('data', a.repos.data, { maxParallel: 2 });
+      await expect(s.updateSettingsScope('data', b.repos.data, { maxParallel: 3 })).rejects.toBeInstanceOf(VersionConflictError);
+      await s.updateSettingsScope('global', a.global, { ...a.global, maxParallel: 4 });
+      await expect(s.updateSettingsScope('global', b.global, { ...b.global, paused: true })).rejects.toBeInstanceOf(VersionConflictError);
+      // Another scope read in the same old snapshot is not a conflict.
+      await s.updateSettingsScope('os', b.repos.os, { paused: true });
+      expect(await s.getSettings()).toEqual({
+        global: { ...DEFAULT_SETTINGS, maxParallel: 4 }, repos: { data: { maxParallel: 2 }, os: { paused: true } },
+      });
+      await expect(s.updateSettingsScope('data', undefined, null)).rejects.toBeInstanceOf(VersionConflictError);
+      expect((await s.getSettings()).repos.data).toEqual({ maxParallel: 2 });
+    });
     // Run ids are store-specific (MemoryStore: R-<n>; BlocksStore: R-<uuid>), so only the returned id is used.
     test('runs: start, open, finish', async () => {
       const s = await make();

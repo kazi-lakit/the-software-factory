@@ -3,8 +3,8 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from '../limits.js';
 import { DEFAULT_SETTINGS } from '../defaults.js';
 import {
-  CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval,
-  VersionConflictError, type BoardStore, type NewApproval, type StoredSettings,
+  canonicalJson, CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval,
+  settingsConflict, VersionConflictError, type BoardStore, type NewApproval, type StoredSettings,
 } from '../boardStore.js';
 import type {
   Approval, Doc, DocKind, FactoryEvent, Gate, Mode, RepoId, RepoSettings, Run, Settings, Step, Task,
@@ -150,6 +150,16 @@ type Settled = { kind: 'applied' | 'forbidden' } | { kind: 'conflict' | 'unautho
 
 /** A stored version that is not a number (null, a row made outside the factory) cannot take a compare-and-set. */
 const hasVersion = (r: Row): boolean => typeof r.version === 'number';
+
+/**
+ * A settings row's value as getSettings gives it: global is merged over the defaults; a repo scope with a null json
+ * (removed: rows are never deleted) or a malformed one is undefined.
+ */
+function scopeValue(scope: string, json: Value | undefined): Settings | RepoSettings | undefined {
+  const value = parseObject(json) as Partial<Settings> | RepoSettings | undefined;
+  if (scope !== 'global') return value as RepoSettings | undefined;
+  return { ...DEFAULT_SETTINGS, ...value, gates: { ...DEFAULT_SETTINGS.gates, ...value?.gates } } as Settings;
+}
 
 const byStartedAt = (runs: Run[]) => runs.sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0));
 const byAt = <T extends { at: string }>(xs: T[]) => xs.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
@@ -334,16 +344,36 @@ export class BlocksStore implements BoardStore {
 
   async getSettings(): Promise<StoredSettings> {
     const rows = await this.data.list('FactorySettings', {});
-    const global: Settings = { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates } };
+    let global = scopeValue('global', undefined) as Settings;
     const repos: StoredSettings['repos'] = {};
     for (const r of rows) {
-      // A null json is a repo scope that setSettings removed (rows are never deleted); a malformed one is skipped.
-      const value = parseObject(r.json) as Partial<Settings> | RepoSettings | undefined;
-      if (value === undefined) continue;
-      if (r.scope === 'global') Object.assign(global, value, { gates: { ...global.gates, ...value.gates } });
-      else repos[text(r.scope) as RepoId] = value as RepoSettings;
+      const value = scopeValue(text(r.scope), r.json);
+      if (r.scope === 'global') global = value as Settings;
+      else if (value !== undefined) repos[text(r.scope) as RepoId] = value as RepoSettings;
     }
     return { global, repos };
+  }
+
+  async updateSettingsScope(scope: 'global' | RepoId, before: unknown, after: Settings | RepoSettings | null): Promise<void> {
+    this.ownerOnly('updateSettingsScope');
+    if (scope === 'global' && after === null) throw new Error('global settings cannot be removed');
+    const [row] = await this.data.list('FactorySettings', { scope }, ['version', 'json']);
+    if (canonicalJson(scopeValue(scope, row?.json)) !== canonicalJson(before)) throw settingsConflict(scope);
+    const json = after === null ? 'null' : JSON.stringify(after);
+    if (!row) {
+      if (after === null) return;
+      const r = await this.data.insert('FactorySettings', { scope, json, version: 1 });
+      if (r.kind === 'forbidden') throw new BlocksForbiddenError('insertFactorySettings');
+      // Someone created the scope since the read: their value is not the `before` this caller saw.
+      if (r.kind === 'duplicate') throw settingsConflict(scope);
+      return;
+    }
+    if (row.json === json) return;
+    if (!hasVersion(row)) throw new MissingVersionError('FactorySettings', scope);
+    const expected = num(row.version);
+    const outcome = await this.settle('FactorySettings', { scope }, expected, { json });
+    if (outcome.kind === 'conflict') throw settingsConflict(scope);
+    if (outcome.kind !== 'applied') throw this.settleError(outcome, `settings ${scope}`, `settings ${scope}`, expected);
   }
 
   async setSettings(s: StoredSettings): Promise<void> {

@@ -131,6 +131,38 @@ describe('BlocksStore', () => {
     });
   });
 
+  it('updateSettingsScope: an insert that loses the race for a new scope is a VersionConflictError', async () => {
+    const data = new FakeBlocksData('any');
+    const s = new BlocksStore(data, 'owner');
+    const insert = data.insert.bind(data);
+    data.insert = async (schema, row) => {
+      data.insert = insert;
+      await insert('FactorySettings', { scope: 'data', json: '{"maxParallel":5}', version: 1 });
+      return insert(schema, row);
+    };
+    await expect(s.updateSettingsScope('data', undefined, { maxParallel: 1 })).rejects.toBeInstanceOf(VersionConflictError);
+    expect((await s.getSettings()).repos.data).toEqual({ maxParallel: 5 });
+  });
+
+  it('updateSettingsScope: a write between the read and the compare-and-set is a VersionConflictError', async () => {
+    const data = new FakeBlocksData('any');
+    const s = new BlocksStore(data, 'owner');
+    await s.updateSettingsScope('data', undefined, { maxParallel: 1 });
+    const update = data.update.bind(data);
+    data.update = async (schema, filter, input) => {
+      data.update = update;
+      await update('FactorySettings', { scope: 'data' }, { json: '{"maxParallel":7}', version: 2 });
+      return update(schema, filter, input);
+    };
+    await expect(s.updateSettingsScope('data', { maxParallel: 1 }, { maxParallel: 2 })).rejects.toBeInstanceOf(VersionConflictError);
+    expect((await s.getSettings()).repos.data).toEqual({ maxParallel: 7 });
+  });
+
+  it('updateSettingsScope is the owner\'s; the core is refused', async () => {
+    const s = new BlocksStore(new FakeBlocksData('any'), 'core');
+    await expect(s.updateSettingsScope('data', undefined, { maxParallel: 1 })).rejects.toThrow('updateSettingsScope is done on the Board, not by the factory core');
+  });
+
   it('setSettings updates an existing scope with compare-and-set', async () => {
     const data = new FakeBlocksData('any');
     const s = new BlocksStore(data, 'owner');

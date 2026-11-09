@@ -48,8 +48,9 @@ describe('LazyBlocksStore', () => {
       ['addApproval', [{ taskId: 'T-1' }]], ['listApprovals', ['T-1']], ['getSettings', []], ['setSettings', [{}]],
       ['startRun', [{ taskId: 'T-1' }]], ['openRun', ['T-1', 'spec']], ['finishRun', ['R-1', { result: 'done' }]],
       ['addEvents', [[]]], ['listEvents', ['T-1']], ['listDocs', ['T-1', 'spec']], ['listRuns', ['T-1']],
+      ['updateSettingsScope', ['data', undefined, { maxParallel: 1 }]],
     ];
-    expect(cases).toHaveLength(17);
+    expect(cases).toHaveLength(18);
     for (const [name, args] of cases) {
       expect(await (lazy[name] as (...a: unknown[]) => Promise<unknown>)(...args)).toBe(`r:${name}`);
     }
