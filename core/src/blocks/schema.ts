@@ -66,6 +66,12 @@ const OPERATIONS: { key: Operation; number: number; verb: string }[] = [
   { key: 'edit', number: 2, verb: 'edits' }, { key: 'delete', number: 3, verb: 'deletes' },
 ];
 
+/**
+ * FactoryTask fields only factory-owner may change. A column write rule (CLS, EDIT) makes Blocks refuse a core
+ * update that changes one of them. Must stay disjoint from the store's CORE_TASK_FIELDS.
+ */
+export const PROTECTED_TASK_FIELDS: readonly string[] = ['title', 'description', 'repo', 'baseBranch', 'gateOverrides'];
+
 export const collectionOf = (schema: SchemaName): string => `${schema}s`;
 const kebab = (schema: SchemaName) => schema.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
 const tableLabel = (schema: SchemaName) => schema.replace('Factory', '').toLowerCase();
@@ -92,6 +98,20 @@ export function generateRules(): { security: object[]; policies: object[] } {
       }
     }
   }
+  // Column write rule: an allow-list, so exactly one policy for the owner and none for the core.
+  // The security entry sets the fields' EDIT level to Custom (otherwise the rule is ignored).
+  security.push({ schemaName: 'FactoryTask', operation: 2, policyType: 1, accessLevel: 3, fieldNames: [...PROTECTED_TASK_FIELDS] });
+  policies.push({
+    schemaName: 'FactoryTask',
+    policyName: 'factory-task-edit-fields-factory-owner',
+    policyDescription: `Only factory-owner changes ${PROTECTED_TASK_FIELDS.join(', ')}.`,
+    policyType: 1,
+    operation: 2,
+    fieldNames: [...PROTECTED_TASK_FIELDS],
+    ruleGroup: { logicalOperator: 0, nestedGroups: [], rules: [{ leftSource: 0, leftOperand: 'Roles', operator: 6, rightSource: 2, staticValue: ['factory-owner'] }] },
+    priority: 0,
+    isAllowPolicy: true,
+  });
   return { security, policies };
 }
 

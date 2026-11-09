@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { FakeBlocksData, newFakeStorage } from '../../src/blocks/fakeData.js';
+import { PROTECTED_TASK_FIELDS } from '../../src/blocks/schema.js';
 import { BlocksStore } from '../../src/blocks/store.js';
 import { main, ownerLogin, runGate, REFUSAL, STEPS, type GateDeps } from '../../tools/gate-blocks.js';
 
-function setup(over: { onStatus?: (taskId: string) => { code: number; stdout: string }; grantCore?: Parameters<FakeBlocksData['grant']> } = {}) {
+function setup(over: { onStatus?: (taskId: string) => { code: number; stdout: string }; grantCore?: Parameters<FakeBlocksData['grant']>; columnRule?: boolean } = {}) {
   const storage = newFakeStorage();
   const owner = new FakeBlocksData('factory-owner', { storage });
-  const core = new FakeBlocksData('factory-core', { storage });
+  // The column write rule holds unless a test turns it off (a build that does not enforce it).
+  const core = new FakeBlocksData('factory-core', { storage, ...(over.columnRule === false ? {} : { columnRules: { FactoryTask: [...PROTECTED_TASK_FIELDS] } }) });
   if (over.grantCore) core.grant(...over.grantCore);
   const lines: string[] = [];
   const deps: GateDeps = {
@@ -28,7 +30,8 @@ describe('runGate', () => {
   it('passes every step against role-checked fakes sharing one storage', async () => {
     const { deps, lines, owner } = setup();
     expect(await runGate(deps)).toBe(true);
-    expect(lines).toHaveLength(STEPS.length);
+    // Step 11 also prints one indented line per sub-check.
+    expect(lines.filter((l) => !l.startsWith(' '))).toHaveLength(STEPS.length);
     expect(lines.every((l) => l.endsWith(': pass'))).toBe(true);
     const [task] = owner.rows('FactoryTask');
     expect(task).toMatchObject({ taskId: 'GATE-abcd1234', status: 'cancelled', version: 3, writeId: expect.any(String) });
@@ -36,6 +39,22 @@ describe('runGate', () => {
     // The settings row is nulled afterwards so getSettings skips it.
     expect(owner.rows('FactorySettings')[0]).toMatchObject({ json: 'null' });
     expect(await deps.ownerStore.getSettings()).toEqual({ global: expect.anything(), repos: {} });
+  });
+
+  it('step 11 passes when the column rule holds: refusal leaves the row unchanged', async () => {
+    const { deps, lines, owner } = setup();
+    expect(await runGate(deps)).toBe(true);
+    expect(lines.filter((l) => l.startsWith('  11'))).toHaveLength(4);
+    const cols = owner.rows('FactoryTask').find((r) => r.taskId === 'GATE-abcd1234-cols');
+    expect(cols).toMatchObject({ title: 'gate owner title', status: 'inbox' });
+  });
+
+  it('step 11 FAILs with a strip-build hint when core title edits are not refused', async () => {
+    const { deps, lines } = setup({ columnRule: false });
+    expect(await runGate(deps)).toBe(false);
+    expect(lines.filter((l) => l.includes('FAIL') && !l.startsWith(' ')).map((l) => l.split(' ')[0])).toEqual(['11']);
+    expect(lines.find((l) => l.startsWith('  11a'))).toContain('column rule not enforced (strip build?)');
+    expect(lines.filter((l) => l.startsWith('  11') && l.endsWith(': pass')).map((l) => l.trim()[2])).toEqual(['b', 'c', 'd']);
   });
 
   it('prints labels only, never row values', async () => {
@@ -48,7 +67,7 @@ describe('runGate', () => {
     const { deps, lines } = setup({ grantCore: ['FactoryApproval', 'insert'] });
     expect(await runGate(deps)).toBe(false);
     expect(lines.filter((l) => l.includes('FAIL')).map((l) => l[0])).toEqual(['3']);
-    expect(lines.filter((l) => l.endsWith(': pass'))).toHaveLength(STEPS.length - 1);
+    expect(lines.filter((l) => !l.startsWith(' ') && l.endsWith(': pass'))).toHaveLength(STEPS.length - 1);
   });
 
   it('FAILs step 4 when a denied core edit of FactorySettings would land', async () => {

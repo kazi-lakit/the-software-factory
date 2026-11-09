@@ -174,6 +174,53 @@ export const STEPS: Step[] = [
       expect(updated.status === 'cancelled', 'gate task is not cancelled');
     },
   },
+  {
+    label: '11 core edit of protected task fields refused',
+    async run(d, c) {
+      const taskId = `GATE-${c.suffix}-cols`;
+      const ins = await d.owner.insert('FactoryTask', taskRow(taskId, 'inbox'));
+      expect(ins.kind === 'inserted', `owner insert of FactoryTask answered ${ins.kind}`);
+      const read = async () => {
+        const [row] = await d.owner.list('FactoryTask', { taskId }, ['title', 'status', 'version', 'writeId']);
+        expect(row !== undefined && typeof row.version === 'number', 'could not re-read the column-rule task');
+        return row as { title: string; status: string; version: number; writeId: string };
+      };
+      const checks: [string, () => Promise<void>][] = [
+        ['11a core title edit refused, row unchanged', async () => {
+          const before = await read();
+          const r = await d.core.update('FactoryTask', { taskId, version: before.version }, { title: 'gate-core-title', version: before.version + 1, writeId: `gate-${c.suffix}-a` });
+          expect(r.kind !== 'applied', 'column rule not enforced (strip build?)');
+          expect(r.kind === 'forbidden', `core title edit answered ${r.kind}`);
+          const after = await read();
+          expect(after.title === before.title && after.version === before.version && after.writeId === before.writeId, 'refused core title edit changed the row');
+        }],
+        ['11b core status-only edit applied', async () => {
+          const before = await read();
+          const r = await d.core.update('FactoryTask', { taskId, version: before.version }, { status: 'blocked', version: before.version + 1, writeId: `gate-${c.suffix}-b` });
+          expect(r.kind === 'applied', `core status edit was ${r.kind}`);
+          expect((await read()).status === 'blocked', 'core status edit did not land');
+        }],
+        ['11c core unchanged title with status change applied', async () => {
+          const before = await read();
+          const r = await d.core.update('FactoryTask', { taskId, version: before.version }, { title: before.title, status: 'inbox', version: before.version + 1, writeId: `gate-${c.suffix}-c` });
+          expect(r.kind === 'applied', `core edit with unchanged title was ${r.kind}`);
+          const after = await read();
+          expect(after.status === 'inbox' && after.title === before.title, 'core edit with unchanged title did not land as expected');
+        }],
+        ['11d owner title edit applied', async () => {
+          const before = await read();
+          const r = await d.owner.update('FactoryTask', { taskId, version: before.version }, { title: 'gate owner title', version: before.version + 1, writeId: `gate-${c.suffix}-d` });
+          expect(r.kind === 'applied', `owner title edit was ${r.kind}`);
+          expect((await read()).title === 'gate owner title', 'owner title edit did not land');
+        }],
+      ];
+      const failed: string[] = [];
+      for (const [label, check] of checks) {
+        try { await check(); d.log(`  ${label}: pass`); } catch (error) { failed.push(label.split(' ')[0]!); d.log(`  ${label}: FAIL (${firstLine(error)})`); }
+      }
+      expect(failed.length === 0, `sub-checks failed: ${failed.join(', ')}`);
+    },
+  },
 ];
 
 /** Runs every step in order; a FAIL does not stop later steps unless they need it (then they are skipped). Returns true if all passed. */

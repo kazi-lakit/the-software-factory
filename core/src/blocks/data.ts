@@ -39,7 +39,14 @@ const PAGE_SIZE = 100;
 const DUPLICATE = /A record with the same value for '[^']+' already exists/;
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
-type Answer = { kind: 'answer'; payload: Record<string, unknown> } | { kind: 'duplicate' } | { kind: 'forbidden' };
+type Answer = { kind: 'answer'; payload: Record<string, unknown> } | { kind: 'duplicate' } | { kind: 'forbidden' } | { kind: 'column-refused' };
+
+/** A column write rule refusal: GraphQL error code VALIDATION_ERROR with a validationErrors entry of type ColumnAccess. Matched on structure only, never message text. */
+function isColumnRefusal(e: unknown): boolean {
+  if (!isObject(e) || !isObject(e.extensions) || e.extensions.code !== 'VALIDATION_ERROR') return false;
+  const list = e.extensions.validationErrors;
+  return Array.isArray(list) && list.some(v => isObject(v) && v.validationType === 'ColumnAccess');
+}
 
 /** The SDK client has no timeout of its own, so a stalled connection would hang the caller. */
 export function withTimeout(ms: number, fetchImpl: typeof fetch = (input, init) => globalThis.fetch(input, init)): typeof fetch {
@@ -69,6 +76,7 @@ export class SdkBlocksData implements BlocksData {
         if (Array.isArray(errors) ? errors.length : errors) {
           const list = Array.isArray(errors) ? errors : [];
           if (list.some(e => isObject(e) && typeof e.message === 'string' && DUPLICATE.test(e.message))) return { kind: 'duplicate' };
+          if (list.some(isColumnRefusal)) return { kind: 'column-refused' };
           throw new Error(`blocks: ${operationName} GraphQL error`);
         }
         const payload = isObject(answer.data) ? answer.data[operationName] : undefined;
@@ -99,7 +107,7 @@ export class SdkBlocksData implements BlocksData {
     for (let pageNo = 1; pageNo <= MAX_PAGES; pageNo++) {
       const answer = await this.send(operationName, query, { input: { filter: JSON.stringify(filter), pageNo, pageSize: PAGE_SIZE } });
       if (answer.kind === 'forbidden') throw new BlocksForbiddenError(operationName);
-      if (answer.kind === 'duplicate') throw new Error(`blocks: ${operationName} GraphQL error`);
+      if (answer.kind === 'duplicate' || answer.kind === 'column-refused') throw new Error(`blocks: ${operationName} GraphQL error`);
       const { items, totalCount } = answer.payload;
       if (!Array.isArray(items) || typeof totalCount !== 'number' || !items.every(isObject)) throw new Error(`blocks: ${operationName} malformed answer`);
       for (const item of items) {
@@ -117,6 +125,7 @@ export class SdkBlocksData implements BlocksData {
     const operationName = `insert${schema}`;
     const answer = await this.send(operationName, `mutation ${operationName}($input: ${schema}InsertInput!) { ${operationName}(input: $input) { acknowledged itemId totalImpactedData } }`, { input });
     if (answer.kind === 'forbidden') return { kind: 'forbidden' as const };
+    if (answer.kind === 'column-refused') throw new Error(`blocks: ${operationName} GraphQL error`);
     if (answer.kind === 'duplicate') return { kind: 'duplicate' as const };
     const { acknowledged, itemId } = answer.payload;
     if (acknowledged === true && typeof itemId === 'string' && itemId !== '') return { kind: 'inserted' as const, itemId };
@@ -127,7 +136,8 @@ export class SdkBlocksData implements BlocksData {
     const operationName = `update${schema}`;
     try {
       const answer = await this.send(operationName, `mutation ${operationName}($filter: String, $input: ${schema}UpdateInput!) { ${operationName}(filter: $filter, input: $input) { acknowledged itemId totalImpactedData message } }`, { filter: JSON.stringify(filter), input: cleanRow(schema, input) });
-      if (answer.kind === 'forbidden') return { kind: 'forbidden' };
+      // A column refusal is final: nothing was written, so settle must not retry.
+      if (answer.kind === 'forbidden' || answer.kind === 'column-refused') return { kind: 'forbidden' };
       if (answer.kind === 'duplicate') return { kind: 'unknown' };
       const { acknowledged, totalImpactedData } = answer.payload;
       return classifyUpdate({
@@ -146,7 +156,7 @@ export class SdkBlocksData implements BlocksData {
     if (typeof itemId !== 'string' || itemId === '') throw new Error(`blocks: ${operationName} needs an item id`);
     const answer = await this.send(operationName, `mutation ${operationName}($filter: String, $input: ${schema}DeleteInput!) { ${operationName}(filter: $filter, input: $input) { acknowledged itemId totalImpactedData message } }`, { filter: JSON.stringify({ ItemId: itemId }), input: { isHardDelete: true } });
     if (answer.kind === 'forbidden') throw new BlocksForbiddenError(operationName);
-    if (answer.kind === 'duplicate') throw new Error(`blocks: ${operationName} GraphQL error`);
+    if (answer.kind === 'duplicate' || answer.kind === 'column-refused') throw new Error(`blocks: ${operationName} GraphQL error`);
     if (answer.payload.acknowledged === true && answer.payload.totalImpactedData === 1) return;
     throw new Error(`blocks: ${operationName} deleted nothing`);
   }

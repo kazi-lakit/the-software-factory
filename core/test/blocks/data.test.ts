@@ -80,6 +80,24 @@ describe('SdkBlocksData', () => {
     expect(await adapt([{ status: 403, body: {} }]).data.update('FactoryTask', { taskId: 'a' }, { status: 'x' })).toEqual({ kind: 'forbidden' });
     await expect(adapt([{ status: 403, body: {} }]).data.list('FactoryTask', {})).rejects.toBeInstanceOf(BlocksForbiddenError);
   });
+  describe('column write rule refusal', () => {
+    const refusal = (code: string, validationType: string): Answer => ({ body: { errors: [{ message: "You don't have permission to change title on this record.", extensions: { code, validationErrors: [{ field: 'title', message: 'x', validationType }] } }], data: null } });
+    it('VALIDATION_ERROR with a ColumnAccess entry is a final refusal on update', async () => {
+      const t = adapt([refusal('VALIDATION_ERROR', 'ColumnAccess')]);
+      expect(await t.data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'forbidden' });
+      expect(t.seen).toHaveLength(1);
+    });
+    it('other validation errors, other codes and a bare message stay unknown', async () => {
+      expect(await adapt([refusal('VALIDATION_ERROR', 'Required')]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });
+      expect(await adapt([refusal('OTHER', 'ColumnAccess')]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });
+      const textOnly: Answer = { body: { errors: [{ message: "You don't have permission to change title on this record. ColumnAccess VALIDATION_ERROR" }] } };
+      expect(await adapt([textOnly]).data.update('FactoryTask', { taskId: 'a' }, { title: 'x' })).toEqual({ kind: 'unknown' });
+    });
+    it('is not forbidden for list and insert (they throw as any GraphQL error)', async () => {
+      await expect(adapt([refusal('VALIDATION_ERROR', 'ColumnAccess')]).data.list('FactoryTask', {})).rejects.toThrow(/GraphQL error/);
+      await expect(adapt([refusal('VALIDATION_ERROR', 'ColumnAccess')]).data.insert('FactoryTask', { taskId: 'a' })).rejects.toThrow(/GraphQL error/);
+    });
+  });
   it('insert sends only present keys and returns the item id', async () => {
     const t = adapt([{ body: { data: { insertFactoryTask: { acknowledged: true, itemId: 'row-1', totalImpactedData: 1 } } } }]);
     expect(await t.data.insert('FactoryTask', { taskId: 'a', title: 'T', question: null })).toEqual({ kind: 'inserted', itemId: 'row-1' });

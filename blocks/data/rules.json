@@ -195,6 +195,19 @@
       "policyType": 0,
       "accessLevel": 3,
       "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryTask",
+      "operation": 2,
+      "policyType": 1,
+      "accessLevel": 3,
+      "fieldNames": [
+        "title",
+        "description",
+        "repo",
+        "baseBranch",
+        "gateOverrides"
+      ]
     }
   ],
   "policies": [
@@ -841,6 +854,37 @@
             "rightSource": 2,
             "staticValue": [
               "factory-core"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryTask",
+      "policyName": "factory-task-edit-fields-factory-owner",
+      "policyDescription": "Only factory-owner changes title, description, repo, baseBranch, gateOverrides.",
+      "policyType": 1,
+      "operation": 2,
+      "fieldNames": [
+        "title",
+        "description",
+        "repo",
+        "baseBranch",
+        "gateOverrides"
+      ],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-owner"
             ]
           }
         ]

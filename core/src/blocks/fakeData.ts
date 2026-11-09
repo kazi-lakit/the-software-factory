@@ -16,8 +16,15 @@ export class FakeBlocksData implements BlocksData {
 
   private readonly now: () => Date;
 
-  /** `now` stamps CreatedDate (default: real time). */
-  constructor(private readonly role: Role, opts: { now?: () => Date; storage?: FakeStorage } = {}) {
+  private readonly columnRules: Partial<Record<SchemaName, string[]>>;
+
+  /**
+   * `now` stamps CreatedDate (default: real time). `columnRules` is test-only: fields of a table that this fake's role
+   * may not change; an update that changes one is refused as a whole (answer `forbidden`, nothing written), as a Blocks
+   * column write rule does. A value sent back unchanged does not count.
+   */
+  constructor(private readonly role: Role, opts: { now?: () => Date; storage?: FakeStorage; columnRules?: Partial<Record<SchemaName, string[]>> } = {}) {
+    this.columnRules = opts.columnRules ?? {};
     this.storage = opts.storage ?? newFakeStorage();
     this.now = opts.now ?? (() => new Date());
   }
@@ -81,6 +88,8 @@ export class FakeBlocksData implements BlocksData {
     const hits = this.table(schema).filter(r => FakeBlocksData.matches(r, filter));
     if (hits.length > 1) throw new Error(`fake: update on ${schema} matched ${hits.length} rows`);
     if (hits.length === 0) return { kind: 'not-applied' };
+    const refused = this.columnRules[schema] ?? [];
+    if (Object.entries(clean).some(([k, v]) => refused.includes(k) && hits[0]![k] !== v)) return { kind: 'forbidden' };
     Object.assign(hits[0]!, clean);
     if (this.failNext.update) {
       this.failNext.update = false;
