@@ -22,6 +22,22 @@ describe('LazyBlocksStore', () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 
+  test('a failed load clears only itself: a newer load is kept, not loaded again', async () => {
+    const load = vi.fn<() => Promise<BlocksCredential>>().mockRejectedValueOnce(new Error('no keychain')).mockResolvedValue(cred);
+    const lazy = new LazyBlocksStore(load, () => new MemoryStore());
+    const failed = () => 'failed';
+    // A call that arrives after the first load failed but before its handler ran used to attach another failure
+    // handler to it; that stale handler then dropped the load a later call had started, so it loaded a third time.
+    const ticks = async (n: number) => { for (let i = 0; i < n; i++) await Promise.resolve(); };
+    const later = (n: number) => (async () => { await ticks(n); return lazy.listTasks().catch(failed); })();
+    const first = lazy.listTasks().catch(failed);
+    const stale = later(1);
+    const newer = later(0);
+    await Promise.all([first, stale, newer]);
+    await lazy.listTasks();
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
   test('every BoardStore method delegates with the same arguments', async () => {
     const calls: [string, unknown[]][] = [];
     const inner = new Proxy({}, { get: (_t, name: string) => name === 'then' ? undefined : async (...args: unknown[]) => { calls.push([name, args]); return `r:${name}`; } }) as unknown as BoardStore;

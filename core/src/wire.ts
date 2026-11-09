@@ -66,8 +66,12 @@ export class LazyBlocksStore implements BoardStore {
       ),
   ) {}
   private get store(): Promise<BoardStore> {
-    this.inner ??= this.load().then((cred) => this.make(cred));
-    this.inner.catch(() => { this.inner = undefined; });
+    if (!this.inner) {
+      const loading = this.load().then((cred) => this.make(cred));
+      // One handler per load, and it clears only its own load: a newer one started meanwhile is kept.
+      loading.catch(() => { if (this.inner === loading) this.inner = undefined; });
+      this.inner = loading;
+    }
     return this.inner;
   }
   listTasks() { return this.store.then((s) => s.listTasks()); }
