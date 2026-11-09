@@ -10,7 +10,7 @@ import { diffEvents } from './history.js';
 import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
 import type { RepoConfig } from './repoConfig.js';
 import { SecretMissingError } from './secrets.js';
-import { DocTooLargeError, MAX_DOC_BYTES } from './blocks/store.js';
+import { DocTooLargeError, MAX_DOC_BYTES } from './limits.js';
 import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
 import { VersionConflictError, type BoardStore, type StoredSettings } from './store.js';
 import type { AgentStep, DocKind, Gate, Mode, RepoId, Settings, Status, Step, Task } from './types.js';

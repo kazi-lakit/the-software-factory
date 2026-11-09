@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { ClientCredentialsToken } from './blocks/token.js';
-import { loadBlocksCredential } from './blocks/credential.js';
+import { loadBlocksCredential, type BlocksCredential } from './blocks/credential.js';
 import { SdkBlocksData } from './blocks/data.js';
 import { BlocksStore } from './blocks/store.js';
 import { shellExec } from './checks.js';
@@ -18,6 +18,8 @@ export interface WireOptions {
   root: string;
   mode: Mode;
   store: 'file' | 'blocks';
+  /** Test seam: replaces the Keychain credential read for `--store blocks`. */
+  loadCredential?: () => Promise<BlocksCredential>;
   /** Where the engine's operational notes go. */
   log?: (msg: string) => void;
 }
@@ -53,16 +55,18 @@ class LazyGitHub implements GitHub {
 }
 
 /** Builds the Blocks store on the first call (one credential read, a failure is not cached), so file-store commands never touch the Keychain. */
-class LazyBlocksStore implements BoardStore {
+export class LazyBlocksStore implements BoardStore {
   private inner: Promise<BoardStore> | undefined;
+  constructor(
+    private readonly load: () => Promise<BlocksCredential> = () => loadBlocksCredential(),
+    private readonly make: (cred: BlocksCredential) => BoardStore = (cred) =>
+      new BlocksStore(
+        new SdkBlocksData({ apiUrl: cred.apiUrl, projectKey: cred.projectKey, token: new ClientCredentialsToken(cred) }),
+        'core',
+      ),
+  ) {}
   private get store(): Promise<BoardStore> {
-    this.inner ??= loadBlocksCredential().then(
-      (cred) =>
-        new BlocksStore(
-          new SdkBlocksData({ apiUrl: cred.apiUrl, projectKey: cred.projectKey, token: new ClientCredentialsToken(cred) }),
-          'core',
-        ),
-    );
+    this.inner ??= this.load().then((cred) => this.make(cred));
     this.inner.catch(() => { this.inner = undefined; });
     return this.inner;
   }
@@ -84,7 +88,7 @@ class LazyBlocksStore implements BoardStore {
 }
 
 export async function wire(o: WireOptions): Promise<{ engine: Engine; store: BoardStore }> {
-  const store: BoardStore = o.store === 'blocks' ? new LazyBlocksStore() : new FileStore(join(o.root, '.factory', 'board.json'));
+  const store: BoardStore = o.store === 'blocks' ? new LazyBlocksStore(o.loadCredential) : new FileStore(join(o.root, '.factory', 'board.json'));
   const engine = new Engine({
     store,
     git: new LocalGitRepos(o.root),

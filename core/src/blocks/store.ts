@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { DocTooLargeError, MAX_DOC_BYTES } from '../limits.js';
 import { DEFAULT_SETTINGS } from '../defaults.js';
 import { NotFoundError, VersionConflictError, type BoardStore, type StoredSettings } from '../store.js';
 import type {
@@ -8,8 +9,7 @@ import { BlocksForbiddenError, BlocksUnauthorizedError, type BlocksData, type Fi
 import type { SchemaName } from './schema.js';
 import { classifyUpdate, settleConditionalUpdate, type RereadResult, type WriteOutcome } from './update.js';
 
-/** The largest doc body, in UTF-8 bytes, a Blocks String field is known to hold (ACR's proven size; Task 8 re-measures it). */
-export const MAX_DOC_BYTES = 262_144;
+export { DocTooLargeError, MAX_DOC_BYTES };
 
 /** Task fields the factory core may change; everything else is the owner's, on the Board. */
 export const CORE_TASK_FIELDS: readonly (keyof Task)[] = [
@@ -20,13 +20,6 @@ export class OwnerOnlyError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'OwnerOnlyError';
-  }
-}
-
-export class DocTooLargeError extends Error {
-  constructor(bytes: number) {
-    super(`doc body is ${bytes} bytes; the limit is ${MAX_DOC_BYTES}`);
-    this.name = 'DocTooLargeError';
   }
 }
 
