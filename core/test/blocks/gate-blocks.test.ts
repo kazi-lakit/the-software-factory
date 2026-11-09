@@ -33,7 +33,9 @@ describe('runGate', () => {
     const [task] = owner.rows('FactoryTask');
     expect(task).toMatchObject({ taskId: 'GATE-abcd1234', status: 'cancelled', version: 3, writeId: expect.any(String) });
     // Rows the gate inserts directly can be updated: version 1, empty writeId.
-    expect(owner.rows('FactorySettings')[0]).toMatchObject({ version: 1 });
+    // The settings row is nulled afterwards so getSettings skips it.
+    expect(owner.rows('FactorySettings')[0]).toMatchObject({ json: 'null' });
+    expect(await deps.ownerStore.getSettings()).toEqual({ global: expect.anything(), repos: {} });
   });
 
   it('prints labels only, never row values', async () => {
@@ -49,12 +51,24 @@ describe('runGate', () => {
     expect(lines.filter((l) => l.endsWith(': pass'))).toHaveLength(STEPS.length - 1);
   });
 
+  it('FAILs step 4 when a denied core edit of FactorySettings would land', async () => {
+    const { deps, lines } = setup({ grantCore: ['FactorySettings', 'edit'] });
+    expect(await runGate(deps)).toBe(false);
+    expect(lines.filter((l) => l.includes('FAIL')).map((l) => l.split(' ')[0])).toEqual(['4']);
+  });
+
+  it('FAILs step 5 when a denied core edit of FactoryEvent would land', async () => {
+    const { deps, lines } = setup({ grantCore: ['FactoryEvent', 'edit'] });
+    expect(await runGate(deps)).toBe(false);
+    expect(lines.filter((l) => l.includes('FAIL')).map((l) => l.split(' ')[0])).toEqual(['5']);
+  });
+
   it('skips steps that need a failed step, and still runs independent ones', async () => {
     const { deps, lines } = setup();
     deps.owner.insert = async () => ({ kind: 'forbidden' });
     expect(await runGate(deps)).toBe(false);
     expect(lines[0]).toContain('FAIL');
-    expect(lines.filter((l) => l.endsWith(': skipped')).map((l) => l[0])).toEqual(['7', '8', '9', '1']);
+    expect(lines.filter((l) => l.endsWith(': skipped')).map((l) => l.split(' ')[0])).toEqual(['7', '8', '9', '10']);
   });
 
   it('FAILs step 9 when the status output omits the gate task', async () => {
@@ -66,6 +80,11 @@ describe('runGate', () => {
 });
 
 describe('main / ownerLogin', () => {
+  it('terminalAsk is exported for the CLI and rejects on EOF', async () => {
+    const { terminalAsk } = await import('../../tools/gate-blocks.js');
+    expect(typeof terminalAsk).toBe('function');
+  });
+
   it('refuses without the confirm flag', async () => {
     const lines: string[] = [];
     expect(await main([], (l) => lines.push(l))).toBe(2);

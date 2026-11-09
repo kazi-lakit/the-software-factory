@@ -43,16 +43,21 @@ export async function runSpike(data: BlocksData, opts: { sizes?: number[]; log: 
     let problem: string | undefined;
     try {
       const r = await data.insert('FactorySpike', { spikeKey, body, bodySha256 });
-      if (r.kind !== 'inserted') throw new Error(`insert answered ${r.kind}`);
-      itemId = r.itemId;
+      if (r.kind === 'inserted') itemId = r.itemId;
+      else throw new Error(`insert answered ${r.kind}`);
       const [row, ...more] = await data.list('FactorySpike', { spikeKey }, ['body']);
       if (!row || more.length) throw new Error('read-back found no single row');
       if (sha256(String(row.body ?? '')) !== bodySha256) throw new Error('read-back body differs (sha256 mismatch)');
     } catch (error) {
       problem = firstLine(error);
     } finally {
-      if (itemId !== undefined) {
-        try { await data.hardDelete('FactorySpike', itemId); } catch (error) { problem ??= `delete failed: ${firstLine(error)}`; }
+      // An insert that threw or answered duplicate may still have stored a row: find it by key.
+      try {
+        const ids = itemId !== undefined ? [itemId] : (await data.list('FactorySpike', { spikeKey }, [])).map((r) => String(r.ItemId));
+        for (const id of ids) await data.hardDelete('FactorySpike', id);
+      } catch (error) {
+        opts.log(`cleanup needed: spikeKey ${spikeKey}`);
+        problem ??= `delete failed: ${firstLine(error)}`;
       }
     }
     if (problem !== undefined) {

@@ -104,6 +104,9 @@ export const STEPS: Step[] = [
       await expectDeniedUpdate(d.core, d.owner, 'FactorySettings', { scope }, 'json', 'core');
       const edit = await d.owner.update('FactorySettings', { scope }, { json: '{"gate":true}' });
       expect(edit.kind === 'applied', `owner edit of FactorySettings was ${edit.kind}`);
+      // Rows cannot be deleted: a null json makes getSettings skip this scope.
+      const cleared = await d.owner.update('FactorySettings', { scope }, { json: 'null' });
+      expect(cleared.kind === 'applied', `owner clearing of the gate settings row was ${cleared.kind}`);
     },
   },
   {
@@ -220,11 +223,14 @@ export async function ownerLogin(cred: BlocksCredential, ask: Ask, fetchImpl?: t
 }
 
 /** Reads one line from the terminal; with `hidden` nothing is echoed. */
-export const terminalAsk: Ask = (question, { hidden }) => new Promise((resolve) => {
+export const terminalAsk: Ask = (question, { hidden }) => new Promise((resolve, reject) => {
   let muted = false;
+  let answered = false;
   const out = new Writable({ write(chunk, _enc, done) { if (!muted) process.stdout.write(chunk); done(); } });
   const rl = createInterface({ input: process.stdin, output: out, terminal: true });
+  rl.on('close', () => { if (!answered) reject(new Error('no input')); });
   rl.question(question, (answer) => {
+    answered = true;
     rl.close();
     if (hidden) process.stdout.write('\n');
     resolve(answer);
@@ -237,7 +243,7 @@ const factoryRoot = fileURLToPath(new URL('../../', import.meta.url));
 /** Runs the factory CLI against the blocks store as a child process (it reads the Keychain itself). */
 export const realStatusRunner: StatusRunner = () => new Promise((resolve) => {
   execFile(`${factoryRoot}core/node_modules/.bin/tsx`, ['core/src/cli.ts', '--store', 'blocks', 'status', '--json'],
-    { cwd: factoryRoot, env: { ...process.env, FACTORY_ROOT: factoryRoot }, maxBuffer: 16 * 1024 * 1024 },
+    { cwd: factoryRoot, env: { ...process.env, FACTORY_ROOT: factoryRoot }, maxBuffer: 16 * 1024 * 1024, timeout: 60_000 },
     (error, stdout) => resolve({ code: error ? (typeof error.code === 'number' ? error.code : 1) : 0, stdout: String(stdout) }));
 });
 
