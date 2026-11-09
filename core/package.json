@@ -12,6 +12,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "blocks:resources": "tsx tools/blocks-resources.ts",
+    "blocks:save-credential": "tsx tools/save-blocks-credential.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
