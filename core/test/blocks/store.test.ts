@@ -28,7 +28,7 @@ const event = { taskId: 'T-1', actor: 'core', action: 'move' as const, field: 's
 describe('BlocksStore', () => {
   it('exports the core task fields and the proven doc size', () => {
     expect(CORE_TASK_FIELDS).toEqual(['status', 'stage', 'branch', 'prUrl', 'attempt', 'blockedReason', 'question', 'answer', 'claimBy', 'claimUntil', 'costUsd']);
-    expect(MAX_DOC_BYTES).toBe(262_144);
+    expect(MAX_DOC_BYTES).toBe(4 * 1024 * 1024);
   });
 
   it('core identity: owner-only methods throw OwnerOnlyError before any data call', async () => {
@@ -206,11 +206,11 @@ describe('BlocksStore', () => {
   it(`a body over MAX_DOC_BYTES UTF-8 bytes throws DocTooLargeError before any call`, async () => {
     const data = counting(new FakeBlocksData('factory-core'));
     const s = new BlocksStore(data, 'core');
-    await expect(s.addDoc('T-1', 'spec', 'x'.repeat(262_145), 'me')).rejects.toBeInstanceOf(DocTooLargeError);
-    // Counted in bytes, not characters: 131,073 two-byte characters are 262,146 bytes.
-    await expect(s.addDoc('T-1', 'spec', 'é'.repeat(131_073), 'me')).rejects.toBeInstanceOf(DocTooLargeError);
+    await expect(s.addDoc('T-1', 'spec', 'x'.repeat(MAX_DOC_BYTES + 1), 'me')).rejects.toBeInstanceOf(DocTooLargeError);
+    // Counted in bytes, not characters: (MAX_DOC_BYTES / 2 + 1) two-byte characters are MAX_DOC_BYTES + 2 bytes.
+    await expect(s.addDoc('T-1', 'spec', 'é'.repeat(MAX_DOC_BYTES / 2 + 1), 'me')).rejects.toBeInstanceOf(DocTooLargeError);
     expect(data.calls).toBe(0);
-    expect((await s.addDoc('T-1', 'spec', 'x'.repeat(262_144), 'me')).version).toBe(1);
+    expect((await s.addDoc('T-1', 'spec', 'x'.repeat(MAX_DOC_BYTES), 'me')).version).toBe(1);
   });
 
   it('createTask retries a duplicate id after re-reading', async () => {

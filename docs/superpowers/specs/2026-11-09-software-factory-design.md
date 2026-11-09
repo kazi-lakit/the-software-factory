@@ -229,7 +229,7 @@ The factory clones each repo into `.clones/<repo>` and makes one worktree per ta
 
 ## 12. Open checks before or during the build *(new: needs your OK)*
 
-1. **Doc size spike:** how much text one Blocks Data field holds. If long specs don't fit, `body` moves to Blocks Storage and the row stores the file reference.
+1. **Doc size spike (done):** measured 2026-11-10. 256 KiB, 1 MiB, 4 MiB and 8 MiB all round-trip in a Blocks Data String field. Docs are capped at 4 MiB (`MAX_DOC_BYTES`). No Blocks Storage needed.
 2. **Agent SDK:** the exact option names (working directory, allowed tools, plugin dir, max turns, cost reporting), and whether it can bill to your Claude subscription or needs an API key. This decides who pays and whether mode 1 is affordable.
 3. **Starting limits:** `maxTurnsPerStage` and `maxCostPerTaskUsd` get starting values after check 2. You can change them in Settings.
 4. **Repo:** `the-software-factory` isn't a git repo yet. Creating it (and choosing whether it has a remote) is your call.
