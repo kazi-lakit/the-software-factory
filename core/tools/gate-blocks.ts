@@ -230,6 +230,35 @@ export const STEPS: Step[] = [
       expect(failed.length === 0, `sub-checks failed: ${failed.join(', ')}`);
     },
   },
+  {
+    label: '12 core clears a task field to null',
+    async run(d, c) {
+      // The engine clears answer, claimBy and claimUntil with null; Blocks must store the null, not skip the field.
+      const taskId = `GATE-${c.suffix}-null`;
+      const ins = await d.owner.insert('FactoryTask', taskRow(taskId, 'inbox'));
+      expect(ins.kind === 'inserted', `owner insert of FactoryTask answered ${ins.kind}`);
+      let failure: unknown;
+      try {
+        const set = await d.coreStore.updateTask(taskId, 1, { question: 'gate-null-check' });
+        expect(set.question !== null, 'core could not set the question');
+        await d.coreStore.updateTask(taskId, set.version, { question: null });
+        const [row] = await d.owner.list('FactoryTask', { taskId }, ['question']);
+        expect(row !== undefined && row.question === null, 'question was not cleared to null');
+      } catch (error) {
+        failure = error;
+      }
+      // The row cannot be deleted: cancel it so no live task is left on the Board.
+      try {
+        const [row] = await d.owner.list('FactoryTask', { taskId }, ['version']);
+        const version = Number(row?.version);
+        const r = await d.owner.update('FactoryTask', { taskId, version }, { status: 'cancelled', version: version + 1, writeId: `gate-${c.suffix}-n` });
+        if (r.kind !== 'applied') throw new Error(`owner cancel was ${r.kind}`);
+      } catch (error) {
+        failure ??= new Error(`cleanup (cancel the null-check task) failed: ${firstLine(error)}`);
+      }
+      if (failure !== undefined) throw failure;
+    },
+  },
 ];
 
 /** Runs every step in order; a FAIL does not stop later steps unless they need it (then they are skipped). Returns true if all passed. */
