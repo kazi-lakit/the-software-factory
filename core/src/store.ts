@@ -20,6 +20,38 @@ export class VersionConflictError extends Error {
   }
 }
 
+/** The store refused the write (an access or column rule): nothing was written, and the same call is refused again. */
+export class ForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ForbiddenError';
+  }
+}
+
+/** The caller's identity may not do this at all (the owner does it on the Board). */
+export class OwnerOnlyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OwnerOnlyError';
+  }
+}
+
+/** The factory core tried to change a task field that is the owner's. */
+export class CoreFieldError extends Error {
+  constructor(readonly field: string) {
+    super(`factory core may not change ${field}`);
+    this.name = 'CoreFieldError';
+  }
+}
+
+/** A row without a version cannot take a compare-and-set update. */
+export class MissingVersionError extends Error {
+  constructor(table: string, key: string) {
+    super(`${table} row ${key} has no version; rows made outside the factory must set version 1`);
+    this.name = 'MissingVersionError';
+  }
+}
+
 export interface StoredSettings {
   global: Settings;
   repos: Partial<Record<RepoId, RepoSettings>>;

@@ -1,7 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { DocTooLargeError, MAX_DOC_BYTES } from '../limits.js';
 import { DEFAULT_SETTINGS } from '../defaults.js';
-import { NotFoundError, VersionConflictError, type BoardStore, type StoredSettings } from '../store.js';
+import {
+  CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, VersionConflictError,
+  type BoardStore, type StoredSettings,
+} from '../store.js';
 import type {
   Approval, Doc, DocKind, FactoryEvent, Gate, Mode, RepoId, RepoSettings, Run, Settings, Step, Task,
 } from '../types.js';
@@ -9,19 +12,12 @@ import { BlocksForbiddenError, BlocksUnauthorizedError, type BlocksData, type Fi
 import type { SchemaName } from './schema.js';
 import { classifyUpdate, settleConditionalUpdate, type RereadResult, type WriteOutcome } from './update.js';
 
-export { DocTooLargeError, MAX_DOC_BYTES };
+export { DocTooLargeError, MAX_DOC_BYTES, OwnerOnlyError };
 
 /** Task fields the factory core may change; everything else is the owner's, on the Board. */
 export const CORE_TASK_FIELDS: readonly (keyof Task)[] = [
   'status', 'stage', 'branch', 'prUrl', 'attempt', 'blockedReason', 'question', 'answer', 'claimBy', 'claimUntil', 'costUsd',
 ];
-
-export class OwnerOnlyError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'OwnerOnlyError';
-  }
-}
 
 type Value = string | number | null;
 const TASK_KEYS = new Set<string>([
@@ -119,7 +115,10 @@ const taskNumber = (id: Value) => {
 };
 
 /** A settled update; `seenVersion` is the version the last re-read found (NaN if none). */
-type Settled = { kind: 'applied' } | { kind: 'conflict' | 'unauthorized' | 'reconcile'; seenVersion: number };
+type Settled = { kind: 'applied' | 'forbidden' } | { kind: 'conflict' | 'unauthorized' | 'reconcile'; seenVersion: number };
+
+/** A stored version that is not a number (null, a row made outside the factory) cannot take a compare-and-set. */
+const hasVersion = (r: Row): boolean => typeof r.version === 'number';
 
 const byAt = <T extends { at: string }>(xs: T[]) => xs.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 
@@ -190,9 +189,14 @@ export class BlocksStore implements BoardStore {
     if ('taskId' in patch || 'version' in patch) throw new Error('patch must not change taskId or version');
     const input: Record<string, Value> = {};
     for (const [key, value] of Object.entries(patch) as [keyof Task, Task[keyof Task] | undefined][]) {
-      if (this.identity === 'core' && !CORE_TASK_FIELDS.includes(key)) throw new Error(`factory core may not change ${key}`);
+      if (this.identity === 'core' && !CORE_TASK_FIELDS.includes(key)) throw new CoreFieldError(key);
       if (!TASK_KEYS.has(key)) throw new Error(`unknown task field ${key}`);
       if (value !== undefined) input[key] = encodeTaskValue(key, value);
+    }
+    // getTask reads a null version as 0; no factory row has version 0, so only then is the row checked.
+    if (!(expectedVersion >= 1)) {
+      const [row] = await this.data.list('FactoryTask', { taskId: id }, ['version']);
+      if (row && !hasVersion(row)) throw new MissingVersionError('FactoryTask', id);
     }
     const outcome = await this.settle('FactoryTask', { taskId: id }, expectedVersion, input);
     if (outcome.kind === 'applied') return this.getTask(id);
@@ -281,6 +285,7 @@ export class BlocksStore implements BoardStore {
       return this.writeSettings(scope, json, true);
     }
     if (row.json === json) return;
+    if (!hasVersion(row)) throw new MissingVersionError('FactorySettings', scope);
     const expected = num(row.version);
     const outcome = await this.settle('FactorySettings', { scope }, expected, { json });
     if (outcome.kind !== 'applied') throw this.settleError(outcome, `settings ${scope}`, `settings ${scope}`, expected);
@@ -306,6 +311,7 @@ export class BlocksStore implements BoardStore {
   async finishRun(runId: string, p: { result: string; turns: number | null; costUsd: number | null }): Promise<void> {
     const [row] = await this.data.list('FactoryRun', { runId }, ['version']);
     if (!row) throw new NotFoundError(`run ${runId}`);
+    if (!hasVersion(row)) throw new MissingVersionError('FactoryRun', runId);
     const expected = num(row.version);
     const outcome = await this.settle('FactoryRun', { runId }, expected, {
       result: p.result, turns: p.turns, costUsd: decimalText(p.costUsd), endedAt: this.now().toISOString(),
@@ -319,7 +325,7 @@ export class BlocksStore implements BoardStore {
         eventId: eventId(e), taskId: e.taskId, actor: e.actor, action: e.action, field: e.field, from: e.from, to: e.to, reason: e.reason, at: e.at,
       });
       // A duplicate is an event an earlier, lost-reply call already wrote.
-      if (r.kind === 'forbidden') throw new Error('factory core may not write events');
+      if (r.kind === 'forbidden') throw new ForbiddenError(`${this.identity === 'core' ? 'factory core' : 'owner'} may not write events`);
     }
   }
 
@@ -332,11 +338,10 @@ export class BlocksStore implements BoardStore {
     let seenVersion = Number.NaN;
     const outcome = await settleConditionalUpdate({
       expectedVersion,
-      // Must never reject: a rejection is an unknown outcome, and forbidden is settled by the re-read.
-      send: async (writeId): Promise<WriteOutcome> => {
+      // Must never reject: a rejection is an unknown outcome. Forbidden (a 403 or a column refusal) is final.
+      send: async (writeId): Promise<WriteOutcome | { kind: 'forbidden' }> => {
         try {
-          const r = await this.data.update(schema, { ...key, version: expectedVersion }, { ...input, version: expectedVersion + 1, writeId });
-          return r.kind === 'forbidden' ? { kind: 'not-applied' } : r;
+          return await this.data.update(schema, { ...key, version: expectedVersion }, { ...input, version: expectedVersion + 1, writeId });
         } catch (error) {
           return classifyUpdate(error instanceof Error ? error : new Error(String(error)));
         }
@@ -353,13 +358,14 @@ export class BlocksStore implements BoardStore {
         }
       },
     });
-    return outcome.kind === 'applied' ? { kind: 'applied' } : { kind: outcome.kind, seenVersion };
+    return outcome.kind === 'applied' || outcome.kind === 'forbidden' ? { kind: outcome.kind } : { kind: outcome.kind, seenVersion };
   }
 
   private settleError(
     outcome: Exclude<Settled, { kind: 'applied' }>,
     what: string, conflictId: string, expectedVersion: number,
   ): Error {
+    if (outcome.kind === 'forbidden') return new ForbiddenError(`${what} update forbidden`);
     if (outcome.kind === 'conflict') return new VersionConflictError(conflictId, expectedVersion, outcome.seenVersion);
     if (outcome.kind === 'unauthorized') return new NotFoundError(what);
     return new Error(`${what} update outcome unknown; re-read before retrying`);

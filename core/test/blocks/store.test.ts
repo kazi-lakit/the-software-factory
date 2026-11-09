@@ -1,23 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { BlocksForbiddenError, BlocksUnauthorizedError, type BlocksData } from '../../src/blocks/data.js';
-import { FakeBlocksData } from '../../src/blocks/fakeData.js';
+import { FakeBlocksData, newFakeStorage } from '../../src/blocks/fakeData.js';
 import {
   BlocksStore, CORE_TASK_FIELDS, DocTooLargeError, MAX_DOC_BYTES, OwnerOnlyError,
 } from '../../src/blocks/store.js';
 import { DEFAULT_SETTINGS } from '../../src/defaults.js';
-import { NotFoundError, VersionConflictError } from '../../src/store.js';
+import { CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, VersionConflictError } from '../../src/store.js';
+import { PROTECTED_TASK_FIELDS } from '../../src/blocks/schema.js';
 import { runStoreContract } from '../storeContract.js';
 
 // R1: the contract suite runs on role 'any' (owner identity, no access checks).
 runStoreContract('BlocksStore', () => new BlocksStore(new FakeBlocksData('any'), 'owner'));
 
-/** Counts every BlocksData call. */
-function counting(inner: BlocksData): BlocksData & { calls: number } {
+/** Counts every BlocksData call, and updates on their own. */
+function counting(inner: BlocksData): BlocksData & { calls: number; updates: number } {
   const c = {
     calls: 0,
+    updates: 0,
     list: (...a: Parameters<BlocksData['list']>) => (c.calls++, inner.list(...a)),
     insert: (...a: Parameters<BlocksData['insert']>) => (c.calls++, inner.insert(...a)),
-    update: (...a: Parameters<BlocksData['update']>) => (c.calls++, inner.update(...a)),
+    update: (...a: Parameters<BlocksData['update']>) => (c.calls++, c.updates++, inner.update(...a)),
     hardDelete: (...a: Parameters<BlocksData['hardDelete']>) => (c.calls++, inner.hardDelete(...a)),
   };
   return c;
@@ -45,6 +47,7 @@ describe('BlocksStore', () => {
   it('core identity: a patch outside CORE_TASK_FIELDS throws before any data call', async () => {
     const data = counting(new FakeBlocksData('factory-core'));
     const s = new BlocksStore(data, 'core');
+    await expect(s.updateTask('T-1', 1, { title: 'x' })).rejects.toThrow(new CoreFieldError('title'));
     await expect(s.updateTask('T-1', 1, { title: 'x' })).rejects.toThrow('factory core may not change title');
     await expect(s.updateTask('T-1', 1, { status: 'ready', gateOverrides: {} })).rejects.toThrow('factory core may not change gateOverrides');
     expect(data.calls).toBe(0);
@@ -93,6 +96,56 @@ describe('BlocksStore', () => {
     await s.setSettings({ global: { ...DEFAULT_SETTINGS, paused: true }, repos: {} });
     expect(data.rows('FactorySettings')).toHaveLength(1);
     expect(data.rows('FactorySettings')[0]).toMatchObject({ scope: 'global', version: 2 });
+  });
+
+  it('a column refusal is final: ForbiddenError after exactly one send, row unchanged', async () => {
+    const storage = newFakeStorage();
+    await new BlocksStore(new FakeBlocksData('factory-owner', { storage }), 'owner').createTask({ title: 't', description: '', repo: 'data' });
+    // Owner identity over the core role: the store lets the title through, so the column rule must refuse it.
+    const data = counting(new FakeBlocksData('factory-core', { storage, columnRules: { FactoryTask: [...PROTECTED_TASK_FIELDS] } }));
+    await expect(new BlocksStore(data, 'owner').updateTask('T-1', 1, { title: 'x', status: 'ready' })).rejects.toBeInstanceOf(ForbiddenError);
+    expect(data.updates).toBe(1);
+    expect(storage.tables.get('FactoryTask')![0]).toMatchObject({ title: 't', status: 'inbox', version: 1 });
+  });
+
+  it('a row-level 403 on finishRun is ForbiddenError after one send', async () => {
+    // FactoryRun edit is the core's alone: the owner's update is refused by the row rule.
+    const fake = new FakeBlocksData('factory-owner');
+    fake.seed('FactoryRun', { runId: 'R-1', taskId: 'T-1', step: 'spec', version: 1 });
+    const data = counting(fake);
+    await expect(new BlocksStore(data, 'owner').finishRun('R-1', { result: 'done', turns: null, costUsd: null })).rejects.toThrow(new ForbiddenError('run R-1 update forbidden'));
+    expect(data.updates).toBe(1);
+    expect(fake.rows('FactoryRun')[0]).toMatchObject({ endedAt: null, version: 1 });
+  });
+
+  it('a row with a null version is refused before any update is sent', async () => {
+    const fake = new FakeBlocksData('any');
+    fake.seed('FactoryTask', { taskId: 'T-1', title: 't', status: 'inbox' });
+    fake.seed('FactorySettings', { scope: 'global', json: '{}' });
+    fake.seed('FactoryRun', { runId: 'R-1', taskId: 'T-1', step: 'spec' });
+    const data = counting(fake);
+    const s = new BlocksStore(data, 'owner');
+    const t = await s.getTask('T-1');
+    await expect(s.updateTask('T-1', t.version, { status: 'ready' })).rejects.toThrow(
+      new MissingVersionError('FactoryTask', 'T-1'),
+    );
+    await expect(s.updateTask('T-1', t.version, { status: 'ready' })).rejects.toThrow(
+      'FactoryTask row T-1 has no version; rows made outside the factory must set version 1',
+    );
+    await expect(s.setSettings({ global: { ...DEFAULT_SETTINGS, paused: true }, repos: {} })).rejects.toThrow('FactorySettings row global has no version');
+    await expect(s.finishRun('R-1', { result: 'done', turns: null, costUsd: null })).rejects.toThrow('FactoryRun row R-1 has no version');
+    expect(data.updates).toBe(0);
+  });
+
+  it('an events refusal names the identity that was refused', async () => {
+    const data: BlocksData = {
+      list: async () => [],
+      insert: async () => ({ kind: 'forbidden' }),
+      update: async () => ({ kind: 'forbidden' }),
+      hardDelete: async () => { throw new Error('unused'); },
+    };
+    await expect(new BlocksStore(data, 'owner').addEvents([event])).rejects.toThrow(new ForbiddenError('owner may not write events'));
+    await expect(new BlocksStore(data, 'core').addEvents([event])).rejects.toThrow(new ForbiddenError('factory core may not write events'));
   });
 
   it('lost reply: addEvents retried writes one row', async () => {
@@ -236,8 +289,12 @@ describe('BlocksStore', () => {
       hardDelete: async () => { throw new Error('unused'); },
     });
 
-    it('forbidden update + forbidden re-read → NotFoundError', async () => {
-      const s = new BlocksStore(stub({ update: { kind: 'forbidden' }, list: async () => { throw new BlocksForbiddenError('getFactoryTasks'); } }), 'core');
+    it('forbidden update → ForbiddenError, without a re-read', async () => {
+      const s = new BlocksStore(stub({ update: { kind: 'forbidden' }, list: async () => { throw new Error('no re-read expected'); } }), 'core');
+      await expect(s.updateTask('T-1', 1, { status: 'ready' })).rejects.toThrow(new ForbiddenError('task T-1 update forbidden'));
+    });
+    it('not applied + forbidden re-read → NotFoundError', async () => {
+      const s = new BlocksStore(stub({ update: { kind: 'not-applied' }, list: async () => { throw new BlocksForbiddenError('getFactoryTasks'); } }), 'core');
       await expect(s.updateTask('T-1', 1, { status: 'ready' })).rejects.toBeInstanceOf(NotFoundError);
     });
     it('not applied + unauthorized-after-refresh re-read → NotFoundError', async () => {

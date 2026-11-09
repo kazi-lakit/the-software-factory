@@ -109,6 +109,14 @@ describe('settleConditionalUpdate', () => {
     const result = await settleConditionalUpdate({ expectedVersion: 3, newWriteId: ids('w1'), send: sequence<WriteOutcome>(unknown), reread: sequence<RereadResult>({ rows: [{ version: 4, writeId: 'someone-else' }] }) });
     expect(result).toEqual({ kind: 'conflict' });
   });
+  it('stops at a forbidden answer: no re-read, no second send', async () => {
+    const send = vi.fn(async (_writeId: string) => ({ kind: 'forbidden' as const }));
+    const reread = vi.fn();
+    const result = await settleConditionalUpdate({ expectedVersion: 3, newWriteId: ids('w1', 'w2'), send, reread });
+    expect(result).toEqual({ kind: 'forbidden' });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(reread).not.toHaveBeenCalled();
+  });
   it('keeps the pending writeId when the outcome cannot be reconciled now', async () => {
     const result = await settleConditionalUpdate({ expectedVersion: 3, newWriteId: ids('w1'), send: async () => unknown, reread: async () => ({ error: 'failed' }) });
     expect(result).toEqual({ kind: 'reconcile', pendingWriteIds: ['w1'] });

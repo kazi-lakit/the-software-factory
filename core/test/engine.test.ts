@@ -11,7 +11,10 @@ import type { RepoConfig } from '../src/repoConfig.js';
 import { SecretMissingError } from '../src/secrets.js';
 import { BlocksStore, DocTooLargeError, MAX_DOC_BYTES } from '../src/blocks/store.js';
 import { FakeBlocksData } from '../src/blocks/fakeData.js';
-import { MemoryStore, VersionConflictError, type BoardStore } from '../src/store.js';
+import { PROTECTED_TASK_FIELDS } from '../src/blocks/schema.js';
+import {
+  CoreFieldError, ForbiddenError, MemoryStore, MissingVersionError, NotFoundError, OwnerOnlyError, VersionConflictError, type BoardStore,
+} from '../src/store.js';
 import type { RepoId, Task } from '../src/types.js';
 
 const ROOT = join(tmpdir(), 'factory-engine-test');
@@ -367,7 +370,8 @@ describe('on BlocksStore', () => {
   test('the core identity on role factory-core drives a task from ready through spec to plan', async () => {
     let data!: FakeBlocksData;
     const { store, engine } = setup({
-      store: (now) => new BlocksStore((data = new FakeBlocksData('factory-core', { now })), 'core', { now }),
+      // The fake enforces the column rule too, as the deployed rules do.
+      store: (now) => new BlocksStore((data = new FakeBlocksData('factory-core', { now, columnRules: { FactoryTask: [...PROTECTED_TASK_FIELDS] } })), 'core', { now }),
     });
     // The owner's rows, seeded directly: factory-core may not insert tasks or approvals.
     data.seed('FactoryTask', {
@@ -912,6 +916,18 @@ describe('withRetry', () => {
   test('never retries a SecretMissingError', async () => {
     const fn = vi.fn().mockRejectedValue(new SecretMissingError('github-pat not found in Keychain'));
     await expect(withRetry(fn, { tries: 3, baseMs: 500 })).rejects.toBeInstanceOf(SecretMissingError);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    ['NotFoundError', new NotFoundError('task T-9')],
+    ['OwnerOnlyError', new OwnerOnlyError('createTask is done on the Board, not by the factory core')],
+    ['CoreFieldError', new CoreFieldError('title')],
+    ['ForbiddenError', new ForbiddenError('task T-1 update forbidden')],
+    ['MissingVersionError', new MissingVersionError('FactoryTask', 'T-1')],
+  ])('never retries a %s', async (_name, error) => {
+    const fn = vi.fn().mockRejectedValue(error);
+    await expect(withRetry(fn, { tries: 3, baseMs: 500 })).rejects.toBe(error);
     expect(fn).toHaveBeenCalledTimes(1);
   });
 

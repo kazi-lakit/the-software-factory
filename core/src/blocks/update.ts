@@ -38,18 +38,20 @@ export function reconcileUpdate(reread: RereadResult, attempt: { expectedVersion
   return { outcome: 'failed', code: 'RECONCILE_REQUIRED' };
 }
 
-export type SettleResult = { kind: 'applied' } | { kind: 'conflict' } | { kind: 'unauthorized' } | { kind: 'reconcile'; pendingWriteIds: string[] };
+export type SettleResult =
+  | { kind: 'applied' } | { kind: 'conflict' } | { kind: 'unauthorized' } | { kind: 'forbidden' } | { kind: 'reconcile'; pendingWriteIds: string[] };
 
 /**
  * Runs one expected-version update to a settled outcome: applied, conflict (the caller must reload),
- * unauthorized, or reconcile (outcome unknown for now). Retries at most once, with a fresh writeId, and
+ * unauthorized, forbidden (the store refused the write: final, no re-read, no second send), or reconcile
+ * (outcome unknown for now). Retries at most once, with a fresh writeId, and
  * only when the re-read proves the version did not move. Writes whose answer was unknown may still land
  * later (while the version is unmoved, at most one of them can); their ids are returned as
  * `pendingWriteIds` whenever the outcome is `reconcile`.
  */
 export async function settleConditionalUpdate(p: {
   expectedVersion: number;
-  send: (writeId: string) => Promise<WriteOutcome>;
+  send: (writeId: string) => Promise<WriteOutcome | { kind: 'forbidden' }>;
   reread: () => Promise<RereadResult>;
   newWriteId?: () => string;
 }): Promise<SettleResult> {
@@ -62,6 +64,8 @@ export async function settleConditionalUpdate(p: {
     sent.push(writeId);
     const answer = await p.send(writeId);
     if (answer.kind === 'applied') return { kind: 'applied' };
+    // A refusal wrote nothing and would be refused again. Only an earlier write whose answer was lost can still count.
+    if (answer.kind === 'forbidden') return unknown.length ? reconcile() : { kind: 'forbidden' };
     if (answer.kind === 'unknown') unknown.push(writeId);
     const reread = await p.reread();
     const settled = reconcileUpdate(reread, { expectedVersion: p.expectedVersion, writeIds: sent, isRetry });

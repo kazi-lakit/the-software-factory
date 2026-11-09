@@ -12,7 +12,10 @@ import type { RepoConfig } from './repoConfig.js';
 import { SecretMissingError } from './secrets.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from './limits.js';
 import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
-import { VersionConflictError, type BoardStore, type StoredSettings } from './store.js';
+import {
+  CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, VersionConflictError,
+  type BoardStore, type StoredSettings,
+} from './store.js';
 import type { AgentStep, DocKind, FactoryEvent, Gate, Mode, RepoId, Settings, Status, Step, Task } from './types.js';
 
 export interface EngineDeps {
@@ -62,7 +65,10 @@ export class StageError extends Error {
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /** Errors that the same call would hit again: retrying only delays them. */
-const FINAL_ERRORS = [VersionConflictError, SecretMissingError, ProtectedBranchError, PrBaseMismatchError, DocTooLargeError];
+const FINAL_ERRORS = [
+  VersionConflictError, SecretMissingError, ProtectedBranchError, PrBaseMismatchError, DocTooLargeError,
+  NotFoundError, OwnerOnlyError, CoreFieldError, ForbiddenError, MissingVersionError,
+];
 
 /** Retries `fn` with doubling waits (baseMs, 2·baseMs, …) between tries. FINAL_ERRORS are rethrown at once. */
 export async function withRetry<T>(fn: () => Promise<T>, opts: { tries: number; baseMs: number }): Promise<T> {
