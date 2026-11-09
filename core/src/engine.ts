@@ -1,0 +1,335 @@
+import { parseAgentResult } from './agentResult.js';
+import { assertPushAllowed, branchName } from './branchGuard.js';
+import { formatReport, runChecks, type Exec } from './checks.js';
+import { claim, claimExpired } from './claims.js';
+import { AGENT_FOR } from './defaults.js';
+import { resolveGates, resolveSettings, shouldMerge, validApproval } from './gates.js';
+import type { GitRepos } from './git.js';
+import type { GitHub } from './github.js';
+import { diffEvents } from './history.js';
+import { decide, type Decision, type Input } from './machine.js';
+import type { RepoConfig } from './repoConfig.js';
+import { assertMove, TERMINAL } from './status.js';
+import { VersionConflictError, type BoardStore, type StoredSettings } from './store.js';
+import type { AgentStep, DocKind, Gate, Mode, RepoId, Settings, Status, Step, Task } from './types.js';
+
+export interface EngineDeps {
+  store: BoardStore;
+  git: GitRepos;
+  github: GitHub;
+  repos: Record<RepoId, RepoConfig>;
+  exec: Exec;
+  now: () => Date;
+  mode: Mode;
+  claimant: string;
+}
+
+export interface Ticket {
+  taskId: string;
+  step: Step;
+  worktree: string;
+  runId: string | null;
+  context: { task: Task; spec?: string; plan?: string; feedback?: string; checks?: string };
+}
+
+export interface EngineStatus {
+  paused: boolean;
+  active: { taskId: string; step: Step | null; claimBy: string | null; claimUntil: string | null }[];
+  counts: Partial<Record<Status, number>>;
+}
+
+export class ClaimError extends Error {
+  constructor(taskId: string, claimant: string) {
+    super(`${taskId} is not claimed by ${claimant}`);
+    this.name = 'ClaimError';
+  }
+}
+
+export class StageError extends Error {
+  constructor(taskId: string, step: Step, stage: Step | null) {
+    super(`${taskId} is at stage ${stage ?? '-'}, not ${step}`);
+    this.name = 'StageError';
+  }
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** Retries `fn` with doubling waits (baseMs, 2·baseMs, …) between tries. A VersionConflictError is rethrown at once. */
+export async function withRetry<T>(fn: () => Promise<T>, opts: { tries: number; baseMs: number }): Promise<T> {
+  for (let i = 0; ; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      if (e instanceof VersionConflictError || i + 1 >= opts.tries) throw e;
+      await sleep(opts.baseMs * 2 ** i);
+    }
+  }
+}
+
+const RETRY = { tries: 3, baseMs: 500 };
+const retry = <T>(fn: () => Promise<T>) => withRetry(fn, RETRY);
+
+/** Doc kind whose current version an approval at each gate must match (R1). */
+const GATE_DOC: Record<Gate, DocKind> = { spec: 'spec', plan: 'plan', pr: 'review' };
+const AGENT_STEPS: ReadonlySet<Step> = new Set<Step>(['spec', 'plan', 'build', 'verify', 'review']);
+const WORKING: ReadonlySet<Status> = new Set<Status>(['spec', 'plan', 'build', 'verify', 'review']);
+const taskNum = (id: string) => Number(id.slice(id.indexOf('-') + 1)) || 0;
+
+export class Engine {
+  constructor(private readonly deps: EngineDeps) {}
+
+  private get coreActor() {
+    return `core · ${this.deps.mode}`;
+  }
+
+  async sync(): Promise<void> {
+    const { store } = this.deps;
+    const stored = await retry(() => store.getSettings());
+    for (const task of await retry(() => store.listTasks())) {
+      try {
+        const settings = this.settingsFor(stored, task);
+        const moved = await this.syncGate(task, settings);
+        const t = moved ?? task;
+        if (t.stage !== null && t.status !== 'blocked' && !TERMINAL.has(t.status) && t.costUsd > settings.maxCostPerTaskUsd) {
+          await this.apply(t, this.decideFor(t, { kind: 'limit', reason: costReason(t.costUsd, settings) }, settings), this.coreActor);
+        }
+      } catch {
+        // Version conflicts and outages that outlast the retries: skip this task for this pass.
+      }
+    }
+  }
+
+  async next(taskId?: string): Promise<Ticket | null> {
+    const { store, now, claimant } = this.deps;
+    const stored = await retry(() => store.getSettings());
+    if (stored.global.paused) return null;
+    await this.sync();
+
+    const tasks = await retry(() => store.listTasks());
+    const active = tasks.filter((t) => !claimExpired(t, now())).length;
+    if (active >= stored.global.maxParallel) return null;
+
+    const workable = (t: Task) => t.status === 'ready' || (t.stage !== null && WORKING.has(t.status));
+    const candidates = tasks
+      .filter((t) => (taskId === undefined ? workable(t) && claimExpired(t, now()) : t.taskId === taskId && workable(t)))
+      .sort((a, b) => taskNum(a.taskId) - taskNum(b.taskId));
+
+    for (const candidate of candidates) {
+      let claimed: Task | null;
+      try {
+        claimed = await retry(() => claim(store, candidate, claimant, now()));
+      } catch {
+        continue; // outage on this task: skip it this pass
+      }
+      if (claimed) return this.ticket(claimed, this.settingsFor(stored, claimed));
+    }
+    return null;
+  }
+
+  async complete(taskId: string, step: AgentStep, raw: string | undefined): Promise<Task> {
+    const { store, mode } = this.deps;
+    const task = await this.claimedAt(taskId, step);
+    const result = parseAgentResult(raw, step);
+    const run = await retry(() => store.openRun(taskId, step));
+    if (!run) throw new Error(`no open ${step} run for ${taskId}`);
+    const actor = `${AGENT_FOR[step]} · ${mode} · run ${run.runId}`;
+
+    if (result.status === 'done' && result.doc !== undefined && step !== 'build') {
+      const doc = result.doc;
+      await retry(() => store.addDoc(taskId, step, doc, actor));
+    }
+    await retry(() =>
+      store.finishRun(run.runId, { result: result.status, turns: result.turns ?? null, costUsd: result.costUsd ?? null }),
+    );
+
+    const costUsd = task.costUsd + (result.costUsd ?? 0);
+    const settings = this.settingsFor(await retry(() => store.getSettings()), task);
+    const input: Input =
+      costUsd > settings.maxCostPerTaskUsd
+        ? { kind: 'limit', reason: costReason(costUsd, settings) }
+        : { kind: 'agent', step, result };
+    const decision = this.decideFor(task, input, settings);
+    return this.apply(task, { ...decision, patch: { ...decision.patch, costUsd } }, actor);
+  }
+
+  async check(taskId: string): Promise<Task> {
+    const { store, exec } = this.deps;
+    const task = await this.claimedAt(taskId, 'check');
+    const cfg = this.repo(task);
+    const worktree = await this.deps.git.worktree(cfg, taskId, requireBranch(task));
+    const report = await runChecks(cfg, worktree, exec);
+    const settings = this.settingsFor(await retry(() => store.getSettings()), task);
+    await retry(() => store.addDoc(taskId, 'verify', formatReport(report), 'core · checks'));
+    const summary = report.steps
+      .filter((s) => s.exitCode !== 0)
+      .map((s) => s.name)
+      .join(', ');
+    return this.apply(task, this.decideFor(task, { kind: 'checks', passed: report.passed, summary }, settings), this.coreActor);
+  }
+
+  async ship(taskId: string): Promise<Task> {
+    const { store, github } = this.deps;
+    const task = await this.claimedAt(taskId, 'ship');
+    const cfg = this.repo(task);
+    const branch = requireBranch(task);
+    assertPushAllowed(branch);
+    const worktree = await this.deps.git.worktree(cfg, taskId, branch);
+    await this.deps.git.push(worktree, branch);
+
+    const spec = (await retry(() => store.currentDoc(taskId, 'spec')))?.body ?? '';
+    const pr = await retry(() =>
+      github.openPr({
+        remote: cfg.remote,
+        head: branch,
+        base: task.baseBranch,
+        title: `[${taskId}] ${task.title}`,
+        body: `Factory task ${taskId}\n\n${spec.slice(0, 3000)}`,
+      }),
+    );
+
+    const settings = this.settingsFor(await retry(() => store.getSettings()), task);
+    const merged = shouldMerge(task.baseBranch, resolveGates(settings, task.gateOverrides).pr);
+    if (merged) await retry(() => github.mergePr(pr.url, task.baseBranch));
+    return this.apply(task, this.decideFor(task, { kind: 'shipped', prUrl: pr.url, merged }, settings), this.coreActor);
+  }
+
+  async status(): Promise<EngineStatus> {
+    const { store, now } = this.deps;
+    const stored = await retry(() => store.getSettings());
+    const tasks = await retry(() => store.listTasks());
+    const counts: Partial<Record<Status, number>> = {};
+    for (const t of tasks) counts[t.status] = (counts[t.status] ?? 0) + 1;
+    const active = tasks
+      .filter((t) => !claimExpired(t, now()))
+      .map((t) => ({ taskId: t.taskId, step: t.stage, claimBy: t.claimBy, claimUntil: t.claimUntil }));
+    return { paused: stored.global.paused, active, counts };
+  }
+
+  /** The only way a task changes status: checks the move, writes with the task's version, clears the claim, logs events. */
+  private async apply(task: Task, decision: Decision, actor: string, reason = decision.reason): Promise<Task> {
+    const { store, now } = this.deps;
+    if (decision.status !== task.status) assertMove(task.status, decision.status, 'core');
+    const updated = await retry(() =>
+      store.updateTask(task.taskId, task.version, {
+        ...decision.patch,
+        status: decision.status,
+        stage: decision.stage,
+        claimBy: null,
+        claimUntil: null,
+      }),
+    );
+    await retry(() => store.addEvents(diffEvents(task, updated, actor, reason, now().toISOString())));
+    return updated;
+  }
+
+  /** Approval, PR and answer moves for one task; returns the moved task, or undefined if nothing moved. */
+  private async syncGate(task: Task, settings: Settings): Promise<Task | undefined> {
+    const { store, github } = this.deps;
+    const approval = async (gate: Gate) => {
+      const doc = await retry(() => store.currentDoc(task.taskId, GATE_DOC[gate]));
+      return validApproval(await retry(() => store.listApprovals(task.taskId)), gate, doc?.version);
+    };
+
+    switch (task.status) {
+      case 'spec_review':
+      case 'plan_review': {
+        const a = await approval(task.status === 'spec_review' ? 'spec' : 'plan');
+        return a ? this.apply(task, this.decideFor(task, { kind: 'approval', approval: a }, settings), this.coreActor) : undefined;
+      }
+      case 'pr_open': {
+        const url = task.prUrl;
+        if (url) {
+          const state = await retry(() => github.prState(url));
+          if (state !== 'open') return this.apply(task, this.decideFor(task, { kind: 'pr', state }, settings), this.coreActor);
+        }
+        const a = await approval('pr');
+        if (a?.decision === 'changes') {
+          return this.apply(task, this.decideFor(task, { kind: 'approval', approval: a }, settings), this.coreActor);
+        }
+        if (a?.decision === 'approve' && url && shouldMerge(task.baseBranch, false)) {
+          await retry(() => github.mergePr(url, task.baseBranch));
+          return this.apply(task, this.decideFor(task, { kind: 'pr', state: 'merged' }, settings), this.coreActor);
+        }
+        return undefined;
+      }
+      case 'blocked':
+        if (task.answer && task.stage !== null) {
+          return this.apply(task, this.decideFor(task, { kind: 'answered' }, settings), this.coreActor);
+        }
+        return undefined;
+      default:
+        return undefined;
+    }
+  }
+
+  /** Builds the ticket for a task this claimant just claimed, moving a ready task to spec first. */
+  private async ticket(claimed: Task, settings: Settings): Promise<Ticket | null> {
+    const { store, git, now, claimant, mode } = this.deps;
+    const cfg = this.repo(claimed);
+    let task = claimed;
+    let worktree: string;
+    if (task.status === 'ready') {
+      const branch = branchName(task.taskId, task.title);
+      await git.ensureClone(cfg);
+      worktree = await git.worktree(cfg, task.taskId, branch);
+      const d = this.decideFor(task, { kind: 'claimed' }, settings);
+      const moved = await this.apply(task, { ...d, patch: { ...d.patch, branch } }, this.coreActor);
+      const reclaimed = await retry(() => claim(store, moved, claimant, now()));
+      if (!reclaimed) return null;
+      task = reclaimed;
+    } else {
+      worktree = await git.worktree(cfg, task.taskId, requireBranch(task));
+    }
+
+    const step = task.stage!;
+    let runId: string | null = null;
+    if (AGENT_STEPS.has(step)) {
+      const agentStep = step as AgentStep;
+      runId = (await retry(() => store.startRun({ taskId: task.taskId, step, mode, agent: AGENT_FOR[agentStep] }))).runId;
+    }
+
+    const body = async (kind: DocKind) => (await retry(() => store.currentDoc(task.taskId, kind)))?.body;
+    const context: Ticket['context'] = { task };
+    const values = {
+      spec: await body('spec'),
+      plan: await body('plan'),
+      feedback: task.answer ?? undefined,
+      checks: await body('verify'),
+    };
+    for (const [k, v] of Object.entries(values) as [keyof typeof values, string | undefined][]) {
+      if (v !== undefined) context[k] = v;
+    }
+    return { taskId: task.taskId, step, worktree, runId, context };
+  }
+
+  /** Reads the task and checks this claimant holds it at `step`. A lapsed claim nobody re-claimed still counts. */
+  private async claimedAt(taskId: string, step: Step): Promise<Task> {
+    const task = await retry(() => this.deps.store.getTask(taskId));
+    if (task.claimBy !== this.deps.claimant) throw new ClaimError(taskId, this.deps.claimant);
+    if (task.stage !== step) throw new StageError(taskId, step, task.stage);
+    return task;
+  }
+
+  private decideFor(task: Task, input: Input, settings: Settings): Decision {
+    return decide(task, input, resolveGates(settings, task.gateOverrides));
+  }
+
+  private settingsFor(stored: StoredSettings, task: Task): Settings {
+    return resolveSettings(stored.global, stored.repos[task.repo]);
+  }
+
+  private repo(task: Task): RepoConfig {
+    const cfg = this.deps.repos[task.repo];
+    if (!cfg) throw new Error(`no repo config for ${task.repo}`);
+    return cfg;
+  }
+}
+
+function requireBranch(task: Task): string {
+  if (!task.branch) throw new Error(`${task.taskId} has no branch`);
+  return task.branch;
+}
+
+function costReason(cost: number, s: Settings): string {
+  return `cost limit reached ($${cost.toFixed(2)} > $${s.maxCostPerTaskUsd})`;
+}
