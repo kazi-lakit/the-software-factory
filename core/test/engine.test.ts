@@ -193,16 +193,39 @@ describe('next', () => {
     expect(await store.openRun('T-1', 'check')).toBeUndefined();
   });
 
-  test('releases the claim and rethrows when work after the claim fails', async () => {
-    class BrokenGit extends FakeGit {
-      override async worktree(): Promise<string> {
-        throw new Error('worktree add failed');
-      }
+  class BrokenGit extends FakeGit {
+    constructor(private readonly broken: string) {
+      super();
     }
-    const { store, engine } = setup({ git: new BrokenGit() });
+    override async worktree(c: RepoConfig, taskId: string, branch: string): Promise<string> {
+      if (taskId === this.broken) throw new Error('worktree add failed\nfatal: details');
+      return super.worktree(c, taskId, branch);
+    }
+  }
+
+  test('an explicit task: releases the claim and rethrows when work after the claim fails', async () => {
+    const { store, engine } = setup({ git: new BrokenGit('T-1') });
     await put(store, { status: 'ready' });
-    await expect(engine.next()).rejects.toThrow('worktree add failed');
+    await expect(engine.next('T-1')).rejects.toThrow('worktree add failed');
     expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', claimBy: null, claimUntil: null });
+  });
+
+  test('a setup failure releases the task, records it and moves on to the next candidate', async () => {
+    const { store, engine } = setup({ git: new BrokenGit('T-1') });
+    await put(store, { status: 'ready' });
+    await put(store, { status: 'ready' });
+    expect(await engine.next()).toMatchObject({ taskId: 'T-2', step: 'spec' });
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', claimBy: null, claimUntil: null });
+    expect(await store.listEvents('T-1')).toContainEqual(
+      expect.objectContaining({ actor: 'core · session', action: 'set', field: 'setupError', to: 'worktree add failed', reason: 'setup failed' }),
+    );
+  });
+
+  test('a setup failure on the only candidate gives null', async () => {
+    const { store, engine } = setup({ git: new BrokenGit('T-1') });
+    await put(store, { status: 'ready' });
+    expect(await engine.next()).toBeNull();
+    expect((await store.getTask('T-1')).claimBy).toBeNull();
   });
 
   test('reuses the open run for the step instead of starting a new one', async () => {

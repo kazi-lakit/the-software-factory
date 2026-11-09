@@ -24,6 +24,15 @@ async function git(cwd: string | undefined, args: string[]): Promise<string> {
   }
 }
 
+async function branchExists(clone: string, branch: string): Promise<boolean> {
+  try {
+    await execFileP('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { cwd: clone });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class LocalGitRepos implements GitRepos {
   constructor(private readonly root: string) {}
 
@@ -48,7 +57,13 @@ export class LocalGitRepos implements GitRepos {
     if (existsSync(path)) return path;
     const clone = await this.ensureClone(cfg);
     mkdirSync(join(this.root, '.clones', 'worktrees'), { recursive: true });
-    await git(clone, ['worktree', 'add', '-b', branch, path, `origin/${cfg.baseBranch}`]);
+    // A worktree folder deleted by hand still holds its branch until pruned.
+    await git(clone, ['worktree', 'prune']);
+    if (await branchExists(clone, branch)) {
+      await git(clone, ['worktree', 'add', path, branch]);
+    } else {
+      await git(clone, ['worktree', 'add', '-b', branch, path, `origin/${cfg.baseBranch}`]);
+    }
     return path;
   }
 

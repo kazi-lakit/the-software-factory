@@ -131,7 +131,9 @@ export class Engine {
         return await this.ticket(claimed, this.settingsFor(stored, claimed));
       } catch (e) {
         await this.releaseOwnClaim(claimed.taskId);
-        throw e;
+        if (taskId !== undefined) throw e;
+        // One task that cannot be set up must not stop the queue: note why and try the next one.
+        await this.noteSetupError(claimed.taskId, e);
       }
     }
     return null;
@@ -361,6 +363,23 @@ export class Engine {
       if (v !== undefined) context[k] = v;
     }
     return { taskId: task.taskId, step, worktree, runId, context };
+  }
+
+  /** Best effort: records a setup failure on the task's history; errors are ignored. */
+  private async noteSetupError(taskId: string, e: unknown): Promise<void> {
+    const message = (e instanceof Error ? e.message : String(e)).split('\n')[0] ?? '';
+    try {
+      await retry(() =>
+        this.deps.store.addEvents([
+          {
+            taskId, actor: this.coreActor, action: 'set', field: 'setupError', from: null, to: message,
+            reason: 'setup failed', at: this.deps.now().toISOString(),
+          },
+        ]),
+      );
+    } catch {
+      // The next pass tries again.
+    }
   }
 
   /** Best effort: drops this claimant's claim on the fresh task; errors are ignored. */

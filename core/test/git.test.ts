@@ -51,6 +51,18 @@ describe('LocalGitRepos', () => {
     expect(await repos.worktree(cfg, 'T-1', branch)).toBe(wt);
   });
 
+  test('worktree reuses an existing local branch when its worktree folder is gone', async () => {
+    const branch = 'factory/T-2-y';
+    const wt = await repos.worktree(cfg, 'T-2', branch);
+    git(wt, 'commit', '--allow-empty', '-m', 'kept work');
+    const head = git(wt, 'rev-parse', 'HEAD').trim();
+    rmSync(wt, { recursive: true, force: true }); // the folder was deleted; git still lists the worktree
+    const again = await repos.worktree(cfg, 'T-2', branch);
+    expect(again).toBe(wt);
+    expect(git(again, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(branch);
+    expect(git(again, 'rev-parse', 'HEAD').trim()).toBe(head);
+  });
+
   test('isClean reflects uncommitted files', async () => {
     const wt = await repos.worktree(cfg, 'T-1', 'factory/T-1-x');
     expect(await repos.isClean(wt)).toBe(true);
