@@ -66,6 +66,18 @@ describe('FakeBlocksData', () => {
     expect(f.rows('FactoryTask')).toHaveLength(1);
     expect(await f.insert('FactoryTask', { taskId: 'b' })).toMatchObject({ kind: 'inserted' });
   });
+  it('an update that sets a field to null is applied but leaves it unchanged, as live Blocks does', async () => {
+    const f = new FakeBlocksData('any');
+    await f.insert('FactoryTask', { taskId: 'a', question: 'q' });
+    expect(await f.update('FactoryTask', { taskId: 'a' }, { question: null, status: 'x' })).toEqual({ kind: 'applied' });
+    expect(f.rows('FactoryTask')[0]).toMatchObject({ question: 'q', status: 'x' });
+    expect(await f.update('FactoryTask', { taskId: 'a' }, { question: '' })).toEqual({ kind: 'applied' });
+    expect(f.rows('FactoryTask')[0]!.question).toBe('');
+    const clears = new FakeBlocksData('any', { storeNullUpdates: true });
+    await clears.insert('FactoryTask', { taskId: 'a', question: 'q' });
+    await clears.update('FactoryTask', { taskId: 'a' }, { question: null });
+    expect(clears.rows('FactoryTask')[0]!.question).toBeNull();
+  });
   it('failNextReply(insert, schema) fails only an insert into that table', async () => {
     const f = new FakeBlocksData('any');
     f.failNextReply('insert', 'FactoryRun');

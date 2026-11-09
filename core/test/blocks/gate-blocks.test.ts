@@ -59,17 +59,19 @@ describe('runGate', () => {
     expect(owner.rows('FactoryTask').find((r) => r.taskId === 'GATE-abcd1234-cols')).toMatchObject({ status: 'cancelled' });
   });
 
-  it('step 12 passes when a null clears the field, and cancels its task', async () => {
+  it('step 12 passes through BlocksStore although the gateway ignores null: the clear is stored as empty text', async () => {
+    // The fakes ignore a null in an update, as live Blocks does.
     const { deps, lines, owner } = setup();
     expect(await runGate(deps)).toBe(true);
     expect(lines).toContain('12 core clears a task field to null: pass');
-    expect(owner.rows('FactoryTask').find((r) => r.taskId === 'GATE-abcd1234-null')).toMatchObject({ question: null, status: 'cancelled' });
+    expect(owner.rows('FactoryTask').find((r) => r.taskId === 'GATE-abcd1234-null')).toMatchObject({ question: '', status: 'cancelled' });
   });
 
-  it('step 12 FAILs when Blocks drops null values from an update, and still cancels its task', async () => {
+  it('step 12 FAILs when the clear does not reach the row, and still cancels its task', async () => {
     const { deps, lines, owner } = setup();
+    // A gateway that keeps the old value for an empty text too.
     const update = deps.core.update.bind(deps.core);
-    deps.core.update = (schema, filter, input) => update(schema, filter, Object.fromEntries(Object.entries(input).filter(([, v]) => v !== null)));
+    deps.core.update = (schema, filter, input) => update(schema, filter, Object.fromEntries(Object.entries(input).filter(([, v]) => v !== '')));
     expect(await runGate(deps)).toBe(false);
     expect(lines.filter((l) => l.includes('FAIL') && !l.startsWith(' ')).map((l) => l.split(' ')[0])).toEqual(['12']);
     expect(lines.find((l) => l.startsWith('12 '))).toContain('question was not cleared to null');

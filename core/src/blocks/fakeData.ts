@@ -19,13 +19,21 @@ export class FakeBlocksData implements BlocksData {
 
   private readonly columnRules: Partial<Record<SchemaName, string[]>>;
 
+  private readonly storeNullUpdates: boolean;
+
   /**
    * `now` stamps CreatedDate (default: real time). `columnRules` is test-only: fields of a table that this fake's role
    * may not change; an update that changes one is refused as a whole (answer `forbidden`, nothing written), as a Blocks
    * column write rule does. A value sent back unchanged does not count.
+   * As the live gateway does (seen 2026-11-10), an update that sets a field to null is acknowledged but leaves the
+   * stored value unchanged; `storeNullUpdates: true` stores the null instead (a gateway that would clear).
    */
-  constructor(private readonly role: Role, opts: { now?: () => Date; storage?: FakeStorage; columnRules?: Partial<Record<SchemaName, string[]>> } = {}) {
+  constructor(
+    private readonly role: Role,
+    opts: { now?: () => Date; storage?: FakeStorage; columnRules?: Partial<Record<SchemaName, string[]>>; storeNullUpdates?: boolean } = {},
+  ) {
     this.columnRules = opts.columnRules ?? {};
+    this.storeNullUpdates = opts.storeNullUpdates ?? false;
     this.storage = opts.storage ?? newFakeStorage();
     this.now = opts.now ?? (() => new Date());
   }
@@ -98,7 +106,7 @@ export class FakeBlocksData implements BlocksData {
     if (hits.length === 0) return { kind: 'not-applied' };
     const refused = this.columnRules[schema] ?? [];
     if (Object.entries(clean).some(([k, v]) => refused.includes(k) && hits[0]![k] !== v)) return { kind: 'forbidden' };
-    Object.assign(hits[0]!, clean);
+    Object.assign(hits[0]!, this.storeNullUpdates ? clean : Object.fromEntries(Object.entries(clean).filter(([, v]) => v !== null)));
     if (this.takeFail('update', schema)) {
       return { kind: 'unknown' };
     }

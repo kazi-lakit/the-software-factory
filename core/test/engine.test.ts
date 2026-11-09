@@ -434,6 +434,36 @@ describe('on BlocksStore', () => {
     expect((await store.listEvents('T-1')).filter((e) => e.field === 'setupError')).toHaveLength(1);
   });
 
+  test('a released claim reads back as null', async () => {
+    const git = new FakeGit();
+    git.worktree = async () => { throw new Error('disk full'); };
+    const { store, engine } = setup({
+      git,
+      store: (now) => new BlocksStore(new FakeBlocksData('any', { now }), 'owner', { now }),
+    });
+    await put(store, { status: 'spec', stage: 'spec', branch: 'b' });
+    expect(await engine.next()).toBeNull();
+    expect(await store.getTask('T-1')).toMatchObject({ claimBy: null, claimUntil: null });
+  });
+
+  test('a forward move clears the answer and the claim', async () => {
+    const { store, engine } = setup({
+      store: (now) => new BlocksStore(new FakeBlocksData('any', { now }), 'owner', { now }),
+    });
+    await put(store, { status: 'ready' });
+    await engine.next();
+    await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'v1' }));
+    await store.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'changes', comment: 'drop the cache idea' });
+    expect(await engine.next()).toMatchObject({ step: 'spec', context: { feedback: 'drop the cache idea' } });
+    const t = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'v2' }));
+    expect(t).toMatchObject({ status: 'spec_review', answer: null, claimBy: null, claimUntil: null });
+    expect(await store.getTask('T-1')).toMatchObject({ answer: null, claimBy: null, claimUntil: null });
+    await store.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 2, decision: 'approve', comment: '' });
+    const plan = await engine.next();
+    expect(plan!.step).toBe('plan');
+    expect(plan!.context.feedback).toBeUndefined();
+  });
+
   test('the core identity on role factory-core drives a task from ready through spec to plan', async () => {
     let data!: FakeBlocksData;
     const { store, engine } = setup({

@@ -233,7 +233,8 @@ export const STEPS: Step[] = [
   {
     label: '12 core clears a task field to null',
     async run(d, c) {
-      // The engine clears answer, claimBy and claimUntil with null; Blocks must store the null, not skip the field.
+      // The engine clears answer, claimBy, claimUntil… with null. Blocks ignores a null in an update, so BlocksStore
+      // sends '' and reads '' back as null; this proves that end to end, as the core and then as the owner.
       const taskId = `GATE-${c.suffix}-null`;
       const ins = await d.owner.insert('FactoryTask', taskRow(taskId, 'inbox'));
       expect(ins.kind === 'inserted', `owner insert of FactoryTask answered ${ins.kind}`);
@@ -241,9 +242,9 @@ export const STEPS: Step[] = [
       try {
         const set = await d.coreStore.updateTask(taskId, 1, { question: 'gate-null-check' });
         expect(set.question !== null, 'core could not set the question');
-        await d.coreStore.updateTask(taskId, set.version, { question: null });
-        const [row] = await d.owner.list('FactoryTask', { taskId }, ['question']);
-        expect(row !== undefined && row.question === null, 'question was not cleared to null');
+        const cleared = await d.coreStore.updateTask(taskId, set.version, { question: null });
+        expect(cleared.question === null, 'question was not cleared to null');
+        expect((await d.ownerStore.getTask(taskId)).question === null, 'question was not cleared to null (owner re-read)');
       } catch (error) {
         failure = error;
       }

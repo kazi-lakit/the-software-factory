@@ -79,6 +79,26 @@ describe('BlocksStore', () => {
     expect(a).not.toHaveProperty('approvalId');
   });
 
+  it('a clear is sent as empty text and read back as null; a null Int is refused before any update', async () => {
+    const fake = new FakeBlocksData('any');
+    const data = counting(fake);
+    const s = new BlocksStore(data, 'owner');
+    const t = await s.createTask({ title: 't', description: '', repo: 'data' });
+    const u = await s.updateTask(t.taskId, 1, { question: 'q', claimBy: 'w' });
+    expect(await s.updateTask(t.taskId, u.version, { question: null, claimBy: null })).toMatchObject({ question: null, claimBy: null });
+    expect(fake.rows('FactoryTask')[0]).toMatchObject({ question: '', claimBy: '', title: 't' });
+    const updates = data.updates;
+    await expect(s.updateTask(t.taskId, 3, { attempt: null as unknown as number })).rejects.toThrow(
+      'FactoryTask.attempt (Int) cannot be cleared: Blocks ignores null in an update',
+    );
+    expect(data.updates).toBe(updates);
+    // finishRun with unknown turns leaves the Int out; unknown cost is a clear.
+    const run = await s.startRun({ taskId: 'T-1', step: 'spec', mode: 'sdk', agent: 'x' });
+    await s.finishRun(run.runId, { result: 'done', turns: null, costUsd: null });
+    expect(fake.rows('FactoryRun')[0]).toMatchObject({ turns: null, costUsd: '', result: 'done' });
+    expect(await s.openRun('T-1', 'spec')).toBeUndefined();
+  });
+
   it('getSettings merges a partial stored global over DEFAULT_SETTINGS', async () => {
     const data = new FakeBlocksData('any');
     await data.insert('FactorySettings', { scope: 'global', json: '{"paused":true,"gates":{"plan":true}}', version: 1 });

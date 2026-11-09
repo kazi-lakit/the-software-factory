@@ -9,7 +9,7 @@ import type {
   Approval, Doc, DocKind, FactoryEvent, Gate, Mode, RepoId, RepoSettings, Run, Settings, Step, Task,
 } from '../types.js';
 import { BlocksForbiddenError, BlocksUnauthorizedError, type BlocksData, type Filter, type Row } from './data.js';
-import type { SchemaName } from './schema.js';
+import { FIELDS, type SchemaName } from './schema.js';
 import { classifyUpdate, settleConditionalUpdate, type RereadResult, type WriteOutcome } from './update.js';
 
 export { DocTooLargeError, MAX_DOC_BYTES, OwnerOnlyError };
@@ -48,8 +48,33 @@ const parseUtc = (v: Value | undefined): number => {
   return Date.parse(ZONED.test(s) ? s : `${s}Z`);
 };
 
+/**
+ * Nullable String fields. The live gateway acknowledges an update that sets a field to null but keeps the old value
+ * (seen 2026-11-10), so a clear is sent as '' and '' reads back as null. Inserts still send null; both read as null.
+ */
+export const CLEARABLE_FIELDS: Partial<Record<SchemaName, readonly string[]>> = {
+  FactoryTask: ['stage', 'branch', 'prUrl', 'blockedReason', 'question', 'answer', 'claimBy', 'claimUntil'],
+  FactoryRun: ['endedAt', 'result', 'costUsd'],
+};
+
+/** An update input with every clear as ''. A null for any other field (an Int, a required String) cannot be stored. */
+function encodeUpdate(schema: SchemaName, input: Record<string, Value>): Record<string, Value> {
+  const out: Record<string, Value> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value !== null) out[key] = value;
+    else if (CLEARABLE_FIELDS[schema]?.includes(key)) out[key] = '';
+    else {
+      const type = FIELDS[schema].find((f) => f.name === key)?.type ?? 'unknown';
+      throw new Error(`${schema}.${key} (${type}) cannot be cleared: Blocks ignores null in an update`);
+    }
+  }
+  return out;
+}
+
 const sha256 = (s: string) => createHash('sha256').update(s, 'utf8').digest('hex');
 const str = (v: Value | undefined): string | null => (v === null || v === undefined ? null : String(v));
+/** A clearable field: '' is how a clear is stored. */
+const opt = (v: Value | undefined): string | null => (v === '' ? null : str(v));
 const text = (v: Value | undefined): string => String(v ?? '');
 const num = (v: Value | undefined): number => Number(v ?? 0);
 const decimalText = (n: number | null): string | null => (n === null ? null : String(n));
@@ -68,16 +93,16 @@ function decodeTask(r: Row): Task {
     repo: text(r.repo) as RepoId,
     baseBranch: text(r.baseBranch),
     status: text(r.status) as Task['status'],
-    stage: str(r.stage) as Step | null,
-    branch: str(r.branch),
-    prUrl: str(r.prUrl),
+    stage: opt(r.stage) as Step | null,
+    branch: opt(r.branch),
+    prUrl: opt(r.prUrl),
     attempt: num(r.attempt),
-    blockedReason: str(r.blockedReason),
-    question: str(r.question),
-    answer: str(r.answer),
+    blockedReason: opt(r.blockedReason),
+    question: opt(r.question),
+    answer: opt(r.answer),
     gateOverrides: (parseObject(r.gateOverrides) ?? {}) as Task['gateOverrides'],
-    claimBy: str(r.claimBy),
-    claimUntil: str(r.claimUntil),
+    claimBy: opt(r.claimBy),
+    claimUntil: opt(r.claimUntil),
     costUsd: num(r.costUsd),
     version: num(r.version),
   };
@@ -94,9 +119,9 @@ const decodeApproval = (r: Row): Approval => ({
 
 const decodeRun = (r: Row): Run => ({
   runId: text(r.runId), taskId: text(r.taskId), step: text(r.step) as Step, mode: text(r.mode) as Mode, agent: text(r.agent),
-  startedAt: text(r.startedAt), endedAt: str(r.endedAt), result: str(r.result),
+  startedAt: text(r.startedAt), endedAt: opt(r.endedAt), result: opt(r.result),
   turns: r.turns === null || r.turns === undefined ? null : Number(r.turns),
-  costUsd: r.costUsd === null || r.costUsd === undefined ? null : Number(r.costUsd),
+  costUsd: opt(r.costUsd) === null ? null : Number(r.costUsd),
 });
 
 const decodeEvent = (r: Row): FactoryEvent => ({
@@ -359,8 +384,9 @@ export class BlocksStore implements BoardStore {
     if (!row) throw new NotFoundError(`run ${runId}`);
     if (!hasVersion(row)) throw new MissingVersionError('FactoryRun', runId);
     const expected = num(row.version);
+    // turns is an Int (cannot be cleared) and still null from startRun: unknown turns are left out.
     const outcome = await this.settle('FactoryRun', { runId }, expected, {
-      result: p.result, turns: p.turns, costUsd: decimalText(p.costUsd), endedAt: this.now().toISOString(),
+      result: p.result, ...(p.turns === null ? {} : { turns: p.turns }), costUsd: decimalText(p.costUsd), endedAt: this.now().toISOString(),
     });
     if (outcome.kind !== 'applied') throw this.settleError(outcome, `run ${runId}`, runId, expected);
   }
@@ -381,6 +407,7 @@ export class BlocksStore implements BoardStore {
 
   /** One compare-and-set update keyed by `key` plus the row version; bumps the version and stamps a writeId. */
   private async settle(schema: SchemaName, key: Filter, expectedVersion: number, input: Record<string, Value>): Promise<Settled> {
+    const encoded = encodeUpdate(schema, input);
     let seenVersion = Number.NaN;
     const slot = JSON.stringify([schema, key, expectedVersion]);
     const outcome = await settleConditionalUpdate({
@@ -389,7 +416,7 @@ export class BlocksStore implements BoardStore {
       // Must never reject: a rejection is an unknown outcome. Forbidden (a 403 or a column refusal) is final.
       send: async (writeId): Promise<WriteOutcome | { kind: 'forbidden' }> => {
         try {
-          return await this.data.update(schema, { ...key, version: expectedVersion }, { ...input, version: expectedVersion + 1, writeId });
+          return await this.data.update(schema, { ...key, version: expectedVersion }, { ...encoded, version: expectedVersion + 1, writeId });
         } catch (error) {
           return classifyUpdate(error instanceof Error ? error : new Error(String(error)));
         }

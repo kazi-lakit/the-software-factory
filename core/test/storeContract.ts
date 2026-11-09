@@ -41,6 +41,15 @@ export function runStoreContract(name: string, make: () => BoardStore | Promise<
       expect(u).toMatchObject(patch);
       expect(await s.getTask(t.taskId)).toEqual(u);
     });
+    test('updateTask clears nullable fields with null', async () => {
+      const s = await make();
+      const t = await mk(s);
+      const set = { stage: 'build' as const, branch: 'b', prUrl: 'u', blockedReason: 'r', question: 'q', answer: 'a', claimBy: 'w', claimUntil: '2026-01-01T00:00:00.000Z' };
+      const u = await s.updateTask(t.taskId, 1, set);
+      const cleared = Object.fromEntries(Object.keys(set).map((k) => [k, null]));
+      expect(await s.updateTask(t.taskId, u.version, cleared)).toMatchObject(cleared);
+      expect(await s.getTask(t.taskId)).toMatchObject(cleared);
+    });
     test('updateTask rejects taskId/version in patch', async () => {
       const s = await make();
       const t = await mk(s);
