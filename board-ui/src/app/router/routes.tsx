@@ -1,15 +1,25 @@
 import { useEffect, useState } from "react";
 import { AppShell } from "../layout/AppShell";
-import { RedirectIfAuthenticated, RequireAuth } from "./guards";
-import { CallbackPage } from "../../features/auth/CallbackPage";
+import { RedirectIfAuthenticated, RequireAuth, RequireOwner } from "./guards";
 import { ErrorPage } from "../../features/auth/ErrorPage";
-import { LoginPage } from "../../features/auth/LoginPage";
 import { NotFoundPage } from "../../features/auth/NotFoundPage";
 import { ProfilePage } from "../../features/profile/ProfilePage";
+import { CallbackPage } from "../../pages/Callback";
+import { LoginPage } from "../../pages/Login";
+
+// Placeholder until the Board view lands.
+function BoardHome() {
+  return (
+    <section>
+      <h2>Board</h2>
+    </section>
+  );
+}
 
 const protectedRoutes = {
-  "/": ProfilePage,
-  "/error": ErrorPage
+  "/": BoardHome,
+  "/error": ErrorPage,
+  "/profile": ProfilePage
 };
 
 export function AppRouter() {
@@ -32,6 +42,7 @@ export function AppRouter() {
     setSearch(queryString ? `?${queryString}` : "");
   }
 
+  // Never behind RequireAuth: the session does not exist until this page completes it.
   if (path === "/login/callback") {
     return <CallbackPage onNavigate={navigate} />;
   }
@@ -52,9 +63,11 @@ export function AppRouter() {
 
   return (
     <RequireAuth currentPath={path} onNavigate={navigate}>
-      <AppShell activePath={path} onNavigate={navigate}>
-        <Page />
-      </AppShell>
+      <RequireOwner onNavigate={navigate}>
+        <AppShell activePath={path} onNavigate={navigate}>
+          <Page />
+        </AppShell>
+      </RequireOwner>
     </RequireAuth>
   );
 }

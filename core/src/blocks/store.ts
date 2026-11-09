@@ -140,7 +140,7 @@ const eventId = (e: FactoryEvent) =>
 const highest = (rows: Row[]): Row | undefined =>
   rows.reduce<Row | undefined>((top, r) => (top === undefined || num(r.version) > num(top.version) ? r : top), undefined);
 
-const taskNumber = (id: Value) => {
+const taskNumber = (id: Value | undefined) => {
   const m = /^T-(\d+)$/.exec(text(id));
   return m ? Number(m[1]) : 0;
 };

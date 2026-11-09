@@ -1,21 +1,17 @@
 import { createBlocksClient } from "@seliseblocks/client";
 import { blocksConfig } from "./config";
-import { forceRefreshAccessToken, getValidAccessToken } from "./auth";
+import { handleUnauthorized } from "./auth";
 
-// Single Blocks API entry point for this app -- every Auth, IAM, Data, and
-// Localization call goes through this client, never a hand-written fetch().
-// `accessToken` is a caller-owned resolver: the SDK reads it before each
-// protected call but never stores/refreshes/clears it itself, so the actual
-// session lifecycle (storage, refresh-before-expiry) lives in ./auth.ts.
-// `onUnauthorized` is the reactive counterpart: it only fires when a call
-// comes back 401 despite a locally-valid-looking token (server-side
-// revocation, clock skew), and shares the same in-flight refresh as the
-// proactive path so concurrent 401s resolve one refresh, not one each.
+// Single Blocks API entry point for this app's Auth, IAM and Localization
+// calls (Board data goes through core's SdkBlocksData, see ../board.ts).
+// Cookie mode only: no `accessToken` resolver, so the SDK never sends an
+// Authorization header and the browser sends the httpOnly session cookie
+// (`credentials: "include"`). `onUnauthorized` renews that cookie after a
+// 401 (ported from ACR origin/main apps/web/src/lib/blocks/client.ts).
 export const blocksClient = createBlocksClient({
-  accessToken: () => getValidAccessToken(),
   apiUrl: blocksConfig.apiUrl,
   appDomain: blocksConfig.appDomain,
-  onUnauthorized: () => forceRefreshAccessToken(),
+  onUnauthorized: () => handleUnauthorized(),
   oidc: {
     clientId: blocksConfig.oidcClientId,
     scope: blocksConfig.oidcScope,

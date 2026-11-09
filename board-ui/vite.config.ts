@@ -1,6 +1,12 @@
 import react from "@vitejs/plugin-react";
 import fs from "node:fs";
-import { defineConfig, loadEnv } from "vite";
+import { fileURLToPath } from "node:url";
+import { defineConfig, loadEnv, searchForWorkspaceRoot } from "vite";
+
+// The Board imports shared factory logic from core's browser-safe entry only
+// (never core's index: that one reaches the factory credential).
+const coreDir = fileURLToPath(new URL("../core", import.meta.url));
+const coreBrowserEntry = fileURLToPath(new URL("../core/src/browser.ts", import.meta.url));
 
 // VITE_BLOCKS_DEV_HOST: set this in .env to your project's real domain
 // (from Project/Gets -> applications[].domain) to test OIDC login locally
@@ -20,7 +26,15 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    resolve: {
+      alias: { "@factory/core": coreBrowserEntry },
+      // core's own files resolve their packages from core/node_modules; one SDK
+      // copy for the app and core keeps the bundle small and instanceof checks sound.
+      dedupe: ["@seliseblocks/client"]
+    },
     server: {
+      // Let the dev server read core's sources and core's installed packages.
+      fs: { allow: [searchForWorkspaceRoot(process.cwd()), `${coreDir}/src`, `${coreDir}/node_modules`] },
       // Vite blocks unrecognized Host headers by default (DNS-rebinding
       // protection) -- without this, a custom domain 404s with "Blocked
       // request. This host is not allowed" even once hosts + cert are set.

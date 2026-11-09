@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+// Renewal timing ported from ACR origin/main apps/web/src/app/providers/AuthProvider.tsx (commit 9082852).
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { fetchSessionClaims, logout as endSession, onSessionExpired, startLogin } from "../../lib/blocks/auth";
+import { fetchSessionClaims, logout as endSession, onSessionExpired, renewSession, startLogin } from "../../lib/blocks/auth";
 
 type AuthStatus = "authenticated" | "loading" | "unauthenticated";
 
@@ -17,26 +18,49 @@ const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 // few seconds would hit IAM constantly even while the tab sits idle in the
 // background. Regaining focus (below) is what actually needs to be prompt,
 // e.g. after signing out in another tab or the session expiring meanwhile.
+// Each tick while signed in also renews the session cookie, so this must
+// stay well under the access cookie's lifetime (15 minutes in ACR).
 const STATUS_POLL_MS = 5 * 60_000;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("loading");
   const [claims, setClaims] = useState<Record<string, unknown> | undefined>();
+  // Read by the timer and the checks below without re-creating them.
+  const statusRef = useRef<AuthStatus>("loading");
 
-  // The session's source of truth is IAM's GET /iam/v4/auth/me
-  // (blocksClient.auth.userInfo()), not a token this app can inspect --
-  // the default hosted login flow sets the session as a Secure, httpOnly
-  // cookie that never reaches this app's JS, so a successful call here is
-  // what "signed in" means, not the presence of a cached access token.
+  const signOutLocally = useCallback(() => {
+    statusRef.current = "unauthenticated";
+    setClaims(undefined);
+    setStatus("unauthenticated");
+  }, []);
+
+  // The session's source of truth is IAM's GET /iam/v4/auth/me (see
+  // fetchSessionClaims), not a token this app can inspect -- hosted login
+  // keeps the session in Secure, httpOnly cookies that never reach this
+  // app's JS, so a successful check is what "signed in" means.
   const refresh = useCallback(async () => {
-    const sessionClaims = await fetchSessionClaims();
+    let sessionClaims = await fetchSessionClaims();
+    if (!sessionClaims && statusRef.current !== "unauthenticated") {
+      // The access cookie may have run out while the refresh cookie still
+      // holds (a sleeping laptop, a long-hidden tab): renew once before
+      // calling the session over. Once signed out there is nothing to renew.
+      const renewal = await renewSession();
+      if (renewal === "renewed") sessionClaims = await fetchSessionClaims();
+      // A renewal that could not reach IAM says nothing about the session:
+      // keep a signed-in user signed in until a check gets an answer.
+      else if (renewal === "unavailable" && statusRef.current === "authenticated") return;
+    }
+    statusRef.current = sessionClaims ? "authenticated" : "unauthenticated";
     setClaims(sessionClaims);
-    setStatus(sessionClaims ? "authenticated" : "unauthenticated");
+    setStatus(statusRef.current);
   }, []);
 
   useEffect(() => {
     void refresh();
-    const id = window.setInterval(refresh, STATUS_POLL_MS);
+    const id = window.setInterval(async () => {
+      if (statusRef.current === "authenticated") await renewSession();
+      await refresh();
+    }, STATUS_POLL_MS);
 
     function onVisible() {
       if (document.visibilityState === "visible") void refresh();
@@ -49,19 +73,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [refresh]);
 
-  // Fires when a reactive 401 forced a refresh and IAM rejected the refresh
-  // token outright (invalid_grant) -- blocks/auth.ts already ended the
-  // session server-side, this just gets the UI to notice and redirect.
-  useEffect(() => onSessionExpired(() => void refresh()), [refresh]);
+  // Fires when a 401 forced a renewal and IAM rejected the refresh cookie
+  // outright -- the session is over, so flip to signed out and let
+  // RequireAuth redirect to /login.
+  useEffect(() => onSessionExpired(signOutLocally), [signOutLocally]);
 
   const login = useCallback(async (returnTo?: string) => {
     await startLogin(returnTo);
   }, []);
 
+  // Signed out locally once IAM was asked to end the session; renewing the
+  // cookie that sign-out just cleared would only cost a request.
   const logout = useCallback(async () => {
     await endSession();
-    await refresh();
-  }, [refresh]);
+    signOutLocally();
+  }, [signOutLocally]);
 
   const value = useMemo<AuthContextValue>(() => ({
     claims,

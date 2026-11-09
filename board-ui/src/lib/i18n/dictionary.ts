@@ -1,5 +1,6 @@
 export const defaultDictionary = {
   "app.name": "Blocks App",
+  "nav.board": "Board",
   "nav.profile": "Profile",
   "nav.logout": "Log out",
   "auth.welcome": "Welcome back",

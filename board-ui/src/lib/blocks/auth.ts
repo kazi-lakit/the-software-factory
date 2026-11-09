@@ -1,26 +1,20 @@
+// Ported from ACR origin/main apps/web/src/lib/blocks/auth.ts (renewal fix, commit 9082852), cookie flow only:
+// the bearer branch (persistTokens, sessionStorage tokens, jwt.ts) is gone.
 import { blocksClient } from "./client";
 import { blocksConfig } from "./config";
-import { isJwtExpired } from "./jwt";
 
-// IAM's hosted IdP flow sets the session as a Secure, httpOnly cookie by
-// default -- this app never sees that token and must not try to. Bearer
-// tokens below are only populated when a tenant's OIDC config explicitly
-// opts into returning tokens in the response body instead of a cookie; in
-// the default cookie flow every function below simply no-ops around them.
-const TOKEN_KEY = "blocks-app:access-token";
-const REFRESH_TOKEN_KEY = "blocks-app:refresh-token";
+// The Board's OIDC client keeps both tokens in Secure, httpOnly cookies
+// (useTokensCookie). This module never reads, stores or refreshes a token in
+// JavaScript: the SDK sends every request with `credentials: "include"` and
+// the browser attaches the cookies. Only the page to return to after sign-in
+// is kept in sessionStorage, and it is not a secret.
 const RETURN_KEY = "blocks-app:oidc-return-to";
 
 export type CallbackResult = { ok: true; returnTo: string } | { ok: false; message: string };
 
-let cachedAccessToken: string | undefined;
-let cachedRefreshToken: string | undefined;
-let refreshInFlight: Promise<string | undefined> | undefined;
-
 // AuthProvider subscribes to this to learn the session died out-of-band (a
-// refresh came back invalid_grant) so it can flip status to unauthenticated
-// and let RequireAuth redirect to /login -- this module has no router access
-// of its own to do that navigation directly.
+// renewal came back rejected) so it can flip status to unauthenticated and
+// let RequireAuth redirect to /login -- this module has no router access.
 const sessionExpiredListeners = new Set<() => void>();
 
 export function onSessionExpired(listener: () => void): () => void {
@@ -28,136 +22,83 @@ export function onSessionExpired(listener: () => void): () => void {
   return () => sessionExpiredListeners.delete(listener);
 }
 
-function notifySessionExpired(): void {
+export function notifySessionExpired(): void {
   for (const listener of sessionExpiredListeners) listener();
 }
 
-function getAccessToken(): string | undefined {
-  if (cachedAccessToken && !isJwtExpired(cachedAccessToken)) return cachedAccessToken;
+export type RenewOutcome = "renewed" | "rejected" | "unavailable";
 
-  const stored = sessionStorage.getItem(TOKEN_KEY);
-  if (stored && !isJwtExpired(stored)) {
-    cachedAccessToken = stored;
-    return stored;
+let renewInFlight: Promise<RenewOutcome> | undefined;
+
+// The access cookie lasts only minutes (the project's
+// accessTokenValidForNumberMinutes). IAM renews it from the refresh cookie
+// when the token endpoint is called with no refresh token in the body
+// (`POST /iam/v4/oidc/token`, grant_type=refresh_token, client_id),
+// answering `cookie_set` and setting fresh cookies. Without this the session
+// ends when the first access cookie expires, however active the person is.
+// "rejected" means IAM refused the refresh cookie (gone, expired or revoked);
+// "unavailable" says nothing about the session (a network failure or an
+// answer that is neither), so it must never sign anyone out. One renewal is
+// in flight at a time; concurrent callers share it. This function never
+// ends the session itself: callers decide what a "rejected" means for them.
+export function renewSession(): Promise<RenewOutcome> {
+  if (!renewInFlight) {
+    renewInFlight = renewCookieSession().finally(() => {
+      renewInFlight = undefined;
+    });
+  }
+  return renewInFlight;
+}
+
+async function renewCookieSession(): Promise<RenewOutcome> {
+  let response: Awaited<ReturnType<typeof blocksClient.auth.oidc.refreshToken>> | undefined;
+  try {
+    response = await blocksClient.auth.oidc.refreshToken({});
+  } catch {
+    return "unavailable";
   }
 
+  // The SDK does not throw on IAM's 400: a refused cookie comes back as an
+  // `error` body ("refresh token not found", invalid_grant).
+  if (typeof response?.error === "string") return "rejected";
+  if (response?.cookie_set === true || typeof response?.expires_in === "number") return "renewed";
+  return "unavailable";
+}
+
+// Passed to createBlocksClient as `onUnauthorized`: a 401 on an IAM/Data call
+// renews the cookie so the next call carries a fresh one. There is no bearer
+// token to hand back, so the SDK does not retry this request itself; a
+// refused cookie means the session really is over.
+export async function handleUnauthorized(): Promise<undefined> {
+  if (await renewSession() === "rejected") notifySessionExpired();
   return undefined;
 }
 
-// Never written to storage by this app, deliberately: a refresh token is
-// long-lived, and anything readable from JS is readable by an XSS payload.
-// The access token is short-lived, so that one is persisted to keep a
-// reload from bouncing the user, and IAM's httpOnly session cookie
-// re-establishes the session once it expires.
-//
-// The stored value is still *read* as a fallback, for a host that can
-// re-establish a session but cannot reach this module's variables -- a
-// build running inside blocks-studio's preview is the case that matters:
-// the session lives in an httpOnly cookie the page cannot see, and there
-// is no reload-surviving cookie flow to fall back on, so the host seeds a
-// non-secret marker here to say "ask for a refresh". Reading it is safe
-// precisely because this app never puts a real token there.
-function getRefreshToken(): string | undefined {
-  if (cachedRefreshToken) return cachedRefreshToken;
-
-  const seeded = sessionStorage.getItem(REFRESH_TOKEN_KEY);
-  return seeded ?? undefined;
-}
-
-function persistTokens(accessToken: string, refreshToken?: string): void {
-  cachedAccessToken = accessToken;
-  sessionStorage.setItem(TOKEN_KEY, accessToken);
-
-  if (refreshToken) cachedRefreshToken = refreshToken;
-}
-
-function clearLocalTokens(): void {
-  cachedAccessToken = undefined;
-  cachedRefreshToken = undefined;
-  sessionStorage.removeItem(TOKEN_KEY);
-  // This app never writes that key, but a host may have seeded it (see
-  // getRefreshToken) and an earlier build of this app may have persisted a
-  // real token there -- either way it must not survive a sign-out.
-  sessionStorage.removeItem(REFRESH_TOKEN_KEY);
-}
-
-// Passed to createBlocksClient as the `accessToken` resolver: returns the
-// cached token when it's still fresh, otherwise refreshes it through
-// blocksClient.auth.oidc.refreshToken() -- concurrent callers share one
-// in-flight refresh instead of racing duplicate requests. Resolves to
-// undefined in the default cookie flow (nothing cached, nothing to
-// refresh); the SDK still sends the session cookie on every request, so
-// protected calls keep working without an Authorization header.
-export async function getValidAccessToken(): Promise<string | undefined> {
-  const current = getAccessToken();
-  if (current) return current;
-  return forceRefreshAccessToken();
-}
-
-// Passed to createBlocksClient as `onUnauthorized`: unlike getValidAccessToken,
-// this skips the "is the cached token still fresh" check and always goes
-// straight to refreshAccessToken() -- a 401 means the server already
-// disagreed with our local judgment of freshness, so re-checking it would
-// just resend the same rejected token. Still funnels through the same
-// refreshInFlight guard, so a burst of concurrent 401s (and any proactive
-// caller racing them) share one refresh call instead of firing one each.
-export async function forceRefreshAccessToken(): Promise<string | undefined> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return undefined;
-
-  if (!refreshInFlight) {
-    refreshInFlight = refreshAccessToken(refreshToken).finally(() => {
-      refreshInFlight = undefined;
-    });
-  }
-
-  return refreshInFlight;
-}
-
-async function refreshAccessToken(refreshToken: string): Promise<string | undefined> {
-  let response: Awaited<ReturnType<typeof blocksClient.auth.oidc.refreshToken>>;
-  try {
-    response = await blocksClient.auth.oidc.refreshToken({ refreshToken });
-  } catch {
-    // A network/transport failure here says nothing about whether the
-    // refresh token itself is still valid -- keep it cached so the next
-    // attempt can still use it, instead of forcing a fresh sign-in over a
-    // transient blip (e.g. the dev server restarting mid-session).
-    return undefined;
-  }
-
-  const accessToken = response.access_token ?? response.accessToken;
-  if (!accessToken) {
-    // IAM answered but explicitly rejected the grant (e.g. invalid_grant --
-    // the refresh token expired or was already rotated away) -- now it
-    // really is dead, so this is a full sign-out, not just a cache clear.
-    // Clear local state before the logout call so its own accessToken
-    // lookup finds nothing to refresh and doesn't loop back into us.
-    clearLocalTokens();
-    await blocksClient.auth.logout({ refreshToken }).catch(() => undefined);
-    notifySessionExpired();
-    return undefined;
-  }
-
-  // The identity provider may not rotate the refresh token on every call --
-  // keep the previous one instead of overwriting a working token with undefined.
-  const nextRefreshToken = response.refresh_token ?? response.refreshToken ?? refreshToken;
-  persistTokens(accessToken, nextRefreshToken);
-  return accessToken;
-}
-
-// The session's source of truth is IAM, not a token this app can inspect --
-// `GET /iam/v4/auth/me` (blocksClient.auth.userInfo()) validates the
-// httpOnly session cookie (or bearer token, if one is cached) and returns
-// its claims in one round trip. `iam.me()` is a different, heavier call --
-// the full IAM user profile with roles/permissions -- and is used
-// separately on the Profile page; it is not a substitute for this check.
+// The session's source of truth is IAM, not a token this app can inspect.
+// `auth.isAuthenticated()` checks the status of `GET /iam/v4/auth/me`;
+// `auth.userInfo()` alone cannot decide it, because the SDK returns the
+// error body of a 401 instead of throwing. The claims are informational: a
+// live session whose claims cannot be read is still signed in.
+// `iam.me()` is a different, heavier call -- the full IAM profile with roles --
+// and is what the owner check reads.
 export async function fetchSessionClaims(): Promise<Record<string, unknown> | undefined> {
   try {
-    return await blocksClient.auth.userInfo();
+    if (!(await blocksClient.auth.isAuthenticated())) return undefined;
   } catch {
     return undefined;
   }
+  try {
+    const claims = await blocksClient.auth.userInfo();
+    return typeof claims === "object" && claims !== null && !Array.isArray(claims) ? claims : {};
+  } catch {
+    return {};
+  }
+}
+
+// Only a path on this site: anything else (another origin, `//host`, a
+// scheme) would make the post-sign-in navigation leave the app or throw.
+function safeReturnTo(value: string | null | undefined): string {
+  return value && value.startsWith("/") && !value.startsWith("//") && !value.startsWith("/\\") ? value : "/";
 }
 
 export async function startLogin(returnTo?: string): Promise<void> {
@@ -165,35 +106,28 @@ export async function startLogin(returnTo?: string): Promise<void> {
     throw new Error("Login is not configured. Set VITE_BLOCKS_OIDC_CLIENT_ID in .env.");
   }
 
-  sessionStorage.setItem(RETURN_KEY, returnTo || "/");
+  sessionStorage.setItem(RETURN_KEY, safeReturnTo(returnTo));
   await blocksClient.auth.idp.redirectToProvider();
 }
 
 export async function completeLogin(callbackUrl: string): Promise<CallbackResult> {
-  const returnTo = sessionStorage.getItem(RETURN_KEY) || "/";
+  const returnTo = safeReturnTo(sessionStorage.getItem(RETURN_KEY));
 
   sessionStorage.removeItem(RETURN_KEY);
 
   const data = await blocksClient.auth.idp.callback(callbackUrl);
 
-  if (data.error) {
+  if (data?.error) {
     return { message: data.error_description || data.error, ok: false };
   }
 
-  // In the default cookie flow IAM sets the session via Set-Cookie on this
-  // same response and returns no token in the body -- that's success, not
-  // a failure. Only cache a token here if a non-default OIDC config made
-  // IAM return one.
-  const accessToken = data.access_token ?? data.accessToken;
-  if (accessToken) persistTokens(accessToken, data.refresh_token ?? data.refreshToken);
-
+  // IAM sets the session via Set-Cookie on this same response. Any token in
+  // the body is ignored: this app never keeps one in JavaScript.
   return { ok: true, returnTo };
 }
 
 export async function logout(): Promise<void> {
-  // Ask IAM to end the session (clears the httpOnly cookie server-side)
-  // before dropping any locally cached bearer token; best-effort so a
-  // network failure never blocks the user from leaving a protected page.
-  await blocksClient.auth.logout({ refreshToken: getRefreshToken() }).catch(() => undefined);
-  clearLocalTokens();
+  // Ask IAM to end the session (clears the httpOnly cookies server-side);
+  // best-effort so a network failure never blocks the user from leaving.
+  await blocksClient.auth.logout({}).catch(() => undefined);
 }

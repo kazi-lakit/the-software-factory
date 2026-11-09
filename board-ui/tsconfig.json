@@ -5,16 +5,25 @@
     "moduleResolution": "Bundler",
     "noFallthroughCasesInSwitch": true,
     "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
     "strict": true,
     "target": "ES2022",
     "types": [
       "vite/client"
     ],
-    "useDefineForClassFields": true
+    "useDefineForClassFields": true,
+    "paths": {
+      "@factory/core": [
+        "../core/src/browser.ts"
+      ]
+    },
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": [
     "src",
     "tailwind.config.ts",
-    "vite.config.ts"
+    "vite.config.ts",
+    "vitest.config.ts"
   ]
 }

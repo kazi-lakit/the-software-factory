@@ -1,9 +1,9 @@
 import { Activity, LogIn } from "lucide-react";
 import { useState } from "react";
-import { useAuth } from "../../app/providers/AuthProvider";
-import { isLoginConfigured } from "../../lib/blocks/config";
-import { useT } from "../../lib/i18n/LocalizationProvider";
-import { Alert } from "../../shared/ui/Alert";
+import { useAuth } from "../app/providers/AuthProvider";
+import { isLoginConfigured } from "../lib/blocks/config";
+import { useT } from "../lib/i18n/LocalizationProvider";
+import { Alert } from "../shared/ui/Alert";
 
 export function LoginPage({ returnTo }: { returnTo?: string }) {
   const { login } = useAuth();
