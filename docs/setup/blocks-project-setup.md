@@ -5,7 +5,7 @@ Run these yourself in a terminal on the Mac, signed in to the Blocks CLI with yo
 ```bash
 export BLOCKS_STRICT_FLAGS=1
 cd ~/scratchpad/selise/the-software-factory
-blocks auth status
+blocks auth status        # if the account tokens say "missing": blocks login   (device-code sign-in in the browser)
 ```
 
 ## 1. Project
