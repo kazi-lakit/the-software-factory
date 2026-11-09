@@ -66,6 +66,13 @@ describe('FakeBlocksData', () => {
     expect(f.rows('FactoryTask')).toHaveLength(1);
     expect(await f.insert('FactoryTask', { taskId: 'b' })).toMatchObject({ kind: 'inserted' });
   });
+  it('failNextReply(insert, schema) fails only an insert into that table', async () => {
+    const f = new FakeBlocksData('any');
+    f.failNextReply('insert', 'FactoryRun');
+    expect(await f.insert('FactoryEvent', { eventId: 'e' })).toMatchObject({ kind: 'inserted' });
+    await expect(f.insert('FactoryRun', { runId: 'r' })).rejects.toThrow();
+    expect(await f.insert('FactoryRun', { runId: 'r2' })).toMatchObject({ kind: 'inserted' });
+  });
   it('failNextReply(update) applies the write and returns unknown', async () => {
     const f = new FakeBlocksData('factory-owner');
     await f.insert('FactoryTask', { taskId: 'a', status: 'x' });

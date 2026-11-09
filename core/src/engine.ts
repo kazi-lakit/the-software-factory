@@ -13,7 +13,7 @@ import { SecretMissingError } from './secrets.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from './limits.js';
 import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
 import { VersionConflictError, type BoardStore, type StoredSettings } from './store.js';
-import type { AgentStep, DocKind, Gate, Mode, RepoId, Settings, Status, Step, Task } from './types.js';
+import type { AgentStep, DocKind, FactoryEvent, Gate, Mode, RepoId, Settings, Status, Step, Task } from './types.js';
 
 export interface EngineDeps {
   store: BoardStore;
@@ -276,7 +276,9 @@ export class Engine {
         claimUntil: null,
       }),
     );
-    await retry(() => store.addEvents(diffEvents(task, updated, actor, reason, now().toISOString())));
+    // Built once: a retry must send the same events (same time, same eventId), or a lost reply makes duplicates.
+    const events = diffEvents(task, updated, actor, reason, now().toISOString());
+    await retry(() => store.addEvents(events));
     return updated;
   }
 
@@ -284,7 +286,8 @@ export class Engine {
   private async record(task: Task, patch: Partial<Task>, reason: string): Promise<Task> {
     const { store, now } = this.deps;
     const updated = await retry(() => store.updateTask(task.taskId, task.version, patch));
-    await retry(() => store.addEvents(diffEvents(task, updated, this.coreActor, reason, now().toISOString())));
+    const events = diffEvents(task, updated, this.coreActor, reason, now().toISOString());
+    await retry(() => store.addEvents(events));
     return updated;
   }
 
@@ -382,16 +385,14 @@ export class Engine {
 
   /** Best effort: records a setup failure on the task's history; errors are ignored. */
   private async noteSetupError(taskId: string, e: unknown): Promise<void> {
-    const message = firstLine(e);
+    const events: FactoryEvent[] = [
+      {
+        taskId, actor: this.coreActor, action: 'set', field: 'setupError', from: null, to: firstLine(e),
+        reason: 'setup failed', at: this.deps.now().toISOString(),
+      },
+    ];
     try {
-      await retry(() =>
-        this.deps.store.addEvents([
-          {
-            taskId, actor: this.coreActor, action: 'set', field: 'setupError', from: null, to: message,
-            reason: 'setup failed', at: this.deps.now().toISOString(),
-          },
-        ]),
-      );
+      await retry(() => this.deps.store.addEvents(events));
     } catch {
       // The next pass tries again.
     }

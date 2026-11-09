@@ -321,6 +321,49 @@ describe('on BlocksStore', () => {
     expect((await store.getTask('T-1')).status).toBe('spec_review');
   });
 
+  test('a lost event reply is retried with the same events, so a moving clock makes no duplicates', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    let data!: FakeBlocksData;
+    const { store, engine, clock } = setup({
+      store: (now) => new BlocksStore((data = new FakeBlocksData('any', { now })), 'owner', { now }),
+    });
+    await put(store, { status: 'ready' });
+    // Every event write takes a second, as real time passes between retries.
+    const insert = data.insert.bind(data);
+    data.insert = async (schema, row) => {
+      if (schema === 'FactoryEvent') clock.t = new Date(clock.t.getTime() + 1000);
+      return insert(schema, row);
+    };
+    data.failNextReply('insert', 'FactoryEvent');
+    const p = engine.next();
+    await vi.runAllTimersAsync();
+    expect(await p).toMatchObject({ step: 'spec' });
+    const moves = (await store.listEvents('T-1')).filter((e) => e.field === 'status');
+    expect(moves).toEqual([expect.objectContaining({ from: 'ready', to: 'spec' })]);
+  });
+
+  test('a setup error note is retried with the same event', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    let data!: FakeBlocksData;
+    const git = new FakeGit();
+    git.worktree = async () => { throw new Error('disk full'); };
+    const { store, engine, clock } = setup({
+      git,
+      store: (now) => new BlocksStore((data = new FakeBlocksData('any', { now })), 'owner', { now }),
+    });
+    await put(store, { status: 'spec', stage: 'spec', branch: 'b' });
+    const insert = data.insert.bind(data);
+    data.insert = async (schema, row) => {
+      if (schema === 'FactoryEvent') clock.t = new Date(clock.t.getTime() + 1000);
+      return insert(schema, row);
+    };
+    data.failNextReply('insert', 'FactoryEvent');
+    const p = engine.next();
+    await vi.runAllTimersAsync();
+    expect(await p).toBeNull();
+    expect((await store.listEvents('T-1')).filter((e) => e.field === 'setupError')).toHaveLength(1);
+  });
+
   test('the core identity on role factory-core drives a task from ready through spec to plan', async () => {
     let data!: FakeBlocksData;
     const { store, engine } = setup({

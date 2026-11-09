@@ -12,7 +12,8 @@ export const newFakeStorage = (): FakeStorage => ({ tables: new Map(), counter: 
 export class FakeBlocksData implements BlocksData {
   private readonly storage: FakeStorage;
   private readonly extra = new Set<string>();
-  private failNext: { insert: boolean; update: boolean } = { insert: false, update: false };
+  /** Pending lost replies: true for any table, or the one table named. */
+  private failNext: Record<'insert' | 'update', SchemaName | boolean> = { insert: false, update: false };
 
   private readonly now: () => Date;
 
@@ -32,7 +33,15 @@ export class FakeBlocksData implements BlocksData {
   /** Test setup: lets this role do `op` on `schema` although the access matrix says no (proves a gate can fail). */
   grant(schema: SchemaName, op: Operation): void { this.extra.add(`${schema}:${op}`); }
 
-  failNextReply(op: 'insert' | 'update'): void { this.failNext[op] = true; }
+  /** The next `op` (on `schema`, if given) is done, but its reply is lost: insert throws, update answers unknown. */
+  failNextReply(op: 'insert' | 'update', schema?: SchemaName): void { this.failNext[op] = schema ?? true; }
+
+  private takeFail(op: 'insert' | 'update', schema: SchemaName): boolean {
+    const f = this.failNext[op];
+    if (f !== true && f !== schema) return false;
+    this.failNext[op] = false;
+    return true;
+  }
 
   /** Test setup: stores a row as given (system keys allowed), with no access or unique checks. */
   seed(schema: SchemaName, row: Row): void {
@@ -75,8 +84,7 @@ export class FakeBlocksData implements BlocksData {
       CreatedBy: this.role === 'factory-core' ? '' : this.role === 'factory-owner' ? 'owner-user' : 'any',
     });
     table.push(stored);
-    if (this.failNext.insert) {
-      this.failNext.insert = false;
+    if (this.takeFail('insert', schema)) {
       throw new Error('fake: insert reply lost');
     }
     return { kind: 'inserted' as const, itemId: stored.ItemId as string };
@@ -91,8 +99,7 @@ export class FakeBlocksData implements BlocksData {
     const refused = this.columnRules[schema] ?? [];
     if (Object.entries(clean).some(([k, v]) => refused.includes(k) && hits[0]![k] !== v)) return { kind: 'forbidden' };
     Object.assign(hits[0]!, clean);
-    if (this.failNext.update) {
-      this.failNext.update = false;
+    if (this.takeFail('update', schema)) {
       return { kind: 'unknown' };
     }
     return { kind: 'applied' };
