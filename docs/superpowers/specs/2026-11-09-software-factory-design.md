@@ -74,7 +74,7 @@ There are six tables in the factory's own Blocks project.
 
 | Table | You (signed in) | Factory credential |
 |---|---|---|
-| Task | create, edit, cancel | status, claim and result fields only |
+| Task | create, edit, cancel | status, claim and result fields only (title, description, repo, base branch and gate overrides are owner-only through a Blocks column write rule, checked live 2026-11-10; the core also checks this in code) |
 | Doc | read | insert new versions only |
 | Approval | insert | read |
 | Settings | edit | read |
