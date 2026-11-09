@@ -2,9 +2,9 @@ import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
-import type { RepoId } from './types.js';
+import { REPO_IDS, type RepoId } from './types.js';
 
-export const REPO_IDS: readonly RepoId[] = ['os', 'iam', 'monitor', 'logic', 'data', 'localization', 'release'];
+export { REPO_IDS };
 
 export class RepoConfigError extends Error {
   constructor(message: string) {

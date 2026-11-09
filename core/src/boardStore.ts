@@ -79,6 +79,8 @@ export interface BoardStore {
   updateTask(id: string, expectedVersion: number, patch: Partial<Task>): Promise<Task>;
   addDoc(taskId: string, kind: DocKind, body: string, author: string): Promise<Doc>;
   currentDoc(taskId: string, kind: DocKind): Promise<Doc | undefined>;
+  /** Every version of a task's doc, ascending; the highest is 'current', the rest 'superseded'. */
+  listDocs(taskId: string, kind: DocKind): Promise<Doc[]>;
   /** A caller-supplied `approvalId` makes a retry safe: the same id returns the approval already stored. */
   addApproval(a: NewApproval): Promise<Approval>;
   listApprovals(taskId: string): Promise<Approval[]>;
@@ -88,6 +90,8 @@ export interface BoardStore {
   startRun(r: { taskId: string; step: Step; mode: Mode; agent: string }): Promise<Run>;
   openRun(taskId: string, step: Step): Promise<Run | undefined>;
   finishRun(runId: string, p: { result: string; turns: number | null; costUsd: number | null }): Promise<void>;
+  /** A task's runs, finished or not, by start time ascending. */
+  listRuns(taskId: string): Promise<Run[]>;
   addEvents(e: FactoryEvent[]): Promise<void>;
   listEvents(taskId?: string): Promise<FactoryEvent[]>;
 }

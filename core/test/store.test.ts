@@ -8,6 +8,7 @@ import { runStoreContract } from './storeContract.js';
 const mk = (s: MemoryStore, title = 'a') => s.createTask({ title, description: '', repo: 'data' });
 
 runStoreContract('MemoryStore', () => new MemoryStore());
+runStoreContract('FileStore', () => new FileStore(join(mkdtempSync(join(tmpdir(), 'fs-contract-')), 'board.json')));
 
 describe('updateHeld', () => {
   test('a write that landed but could not be read back is the held task plus the patch', async () => {

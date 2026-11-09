@@ -69,6 +69,18 @@ export function runStoreContract(name: string, make: () => BoardStore | Promise<
       expect(await s.currentDoc('T-1', 'spec')).toEqual({ taskId: 'T-1', kind: 'spec', version: 2, body: 'two', author: 'me', status: 'current' });
       expect(await s.currentDoc('T-1', 'plan')).toBeUndefined();
     });
+    test('listDocs lists every version ascending; only the highest is current', async () => {
+      const s = await make();
+      await s.addDoc('T-1', 'spec', 'one', 'me');
+      await s.addDoc('T-1', 'plan', 'p', 'me');
+      await s.addDoc('T-1', 'spec', 'two', 'you');
+      await s.addDoc('T-2', 'spec', 'other', 'me');
+      expect(await s.listDocs('T-1', 'spec')).toEqual([
+        { taskId: 'T-1', kind: 'spec', version: 1, body: 'one', author: 'me', status: 'superseded' },
+        { taskId: 'T-1', kind: 'spec', version: 2, body: 'two', author: 'you', status: 'current' },
+      ]);
+      expect(await s.listDocs('T-1', 'review')).toEqual([]);
+    });
     test('approvals get a timestamp', async () => {
       const s = await make();
       const a = await s.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'approve', comment: '' });
@@ -106,6 +118,22 @@ export function runStoreContract(name: string, make: () => BoardStore | Promise<
       expect(await s.openRun('T-1', 'spec')).toBeUndefined();
       await s.finishRun(r.runId, { result: 'done', turns: 3, costUsd: 0.5 });
       expect(await s.openRun('T-1', 'build')).toBeUndefined();
+    });
+    test('listRuns lists a task\'s runs by start time, finished ones too', async () => {
+      const s = await make();
+      const a = await s.startRun({ taskId: 'T-1', step: 'spec', mode: 'sdk', agent: 'spec-writer' });
+      await new Promise((r) => setTimeout(r, 5));
+      const other = await s.startRun({ taskId: 'T-2', step: 'spec', mode: 'sdk', agent: 'spec-writer' });
+      await new Promise((r) => setTimeout(r, 5));
+      const b = await s.startRun({ taskId: 'T-1', step: 'plan', mode: 'loop', agent: 'planner' });
+      await s.finishRun(a.runId, { result: 'done', turns: 4, costUsd: 0.25 });
+      const runs = await s.listRuns('T-1');
+      expect(runs.map((r) => r.runId)).toEqual([a.runId, b.runId]);
+      expect(runs[0]).toMatchObject({ step: 'spec', result: 'done', turns: 4, costUsd: 0.25 });
+      expect(runs[0]!.endedAt).toMatch(/^\d{4}-/);
+      expect(runs[1]).toEqual(b);
+      expect((await s.listRuns('T-2')).map((r) => r.runId)).toEqual([other.runId]);
+      expect(await s.listRuns('T-3')).toEqual([]);
     });
     test('finishRun on a missing run throws NotFoundError', async () => {
       await expect((await make()).finishRun('R-missing', { result: 'done', turns: null, costUsd: null })).rejects.toBeInstanceOf(NotFoundError);

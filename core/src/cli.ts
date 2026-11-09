@@ -4,9 +4,8 @@ import { pathToFileURL } from 'node:url';
 import { Command, CommanderError } from 'commander';
 import type { Engine } from './engine.js';
 import { GATE_DOC } from './gates.js';
-import { diffEvents } from './history.js';
+import * as owner from './owner.js';
 import { REPO_IDS } from './repoConfig.js';
-import { assertMove } from './status.js';
 import type { BoardStore } from './store.js';
 import type { AgentStep, Gate, Mode, RepoId } from './types.js';
 import { findRoot, wire, type WireOptions } from './wire.js';
@@ -128,7 +127,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') throw new CliExit('dev commands need --store file', 1);
     return (await open(cmd)).store;
   };
-  const at = () => new Date().toISOString();
+  const now = () => new Date();
 
   dev
     .command('add')
@@ -139,23 +138,16 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .action(async (o: { repo: string; title: string; description: string; base?: string }, cmd: Command) => {
       const repo = choice<RepoId>('--repo', o.repo, REPO_IDS);
       const store = await openDev(cmd);
-      const t = await store.createTask({
+      const t = await owner.createTask(store, now, {
         title: o.title, description: o.description, repo, ...(o.base ? { baseBranch: o.base } : {}),
       });
-      await store.addEvents([
-        { taskId: t.taskId, actor: 'you', action: 'create', field: null, from: null, to: t.status, reason: 'created', at: at() },
-      ]);
       io.out(t.taskId);
     });
 
   dev
     .command('ready <task>')
     .action(async (id: string, _o: object, cmd: Command) => {
-      const store = await openDev(cmd);
-      const task = await store.getTask(id);
-      assertMove(task.status, 'ready', 'you');
-      const updated = await store.updateTask(id, task.version, { status: 'ready' });
-      await store.addEvents(diffEvents(task, updated, 'you', 'marked ready', at()));
+      await owner.markReady(await openDev(cmd), now, id);
       io.out(`${id} ready`);
     });
 
@@ -170,35 +162,21 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       const doc = await store.currentDoc(id, kind);
       if (!doc) throw new CliExit(`no current ${kind} doc for ${id}`, 1);
       const decision = o.changes === undefined ? 'approve' : 'changes';
-      await store.addApproval({ taskId: id, gate: g, docVersion: doc.version, decision, comment: o.changes ?? '' });
-      await store.addEvents([
-        {
-          taskId: id, actor: 'you', action: 'set', field: 'approval', from: null,
-          to: `${g}:${decision}@v${doc.version}`, reason: o.changes ?? 'approved', at: at(),
-        },
-      ]);
+      await owner.decideGate(store, now, id, g, decision, doc.version, o.changes ?? '');
       io.out(`${id} ${g} ${decision} v${doc.version}`);
     });
 
   dev
     .command('answer <task> <text>')
     .action(async (id: string, text: string, _o: object, cmd: Command) => {
-      const store = await openDev(cmd);
-      const task = await store.getTask(id);
-      if (task.status !== 'blocked') throw new CliExit(`${id} is not blocked`, 1);
-      const updated = await store.updateTask(id, task.version, { answer: text });
-      await store.addEvents(diffEvents(task, updated, 'you', 'answered', at()));
+      await owner.answerTask(await openDev(cmd), now, id, text);
       io.out(`${id} answered`);
     });
 
   dev
     .command('cancel <task>')
     .action(async (id: string, _o: object, cmd: Command) => {
-      const store = await openDev(cmd);
-      const task = await store.getTask(id);
-      assertMove(task.status, 'cancelled', 'you');
-      const updated = await store.updateTask(id, task.version, { status: 'cancelled', claimBy: null, claimUntil: null });
-      await store.addEvents(diffEvents(task, updated, 'you', 'cancelled', at()));
+      await owner.cancelTask(await openDev(cmd), now, id);
       io.out(`${id} cancelled`);
     });
 

@@ -89,6 +89,8 @@ export class LazyBlocksStore implements BoardStore {
   finishRun(runId: string, p: Parameters<BoardStore['finishRun']>[1]) { return this.store.then((s) => s.finishRun(runId, p)); }
   addEvents(e: Parameters<BoardStore['addEvents']>[0]) { return this.store.then((s) => s.addEvents(e)); }
   listEvents(taskId?: string) { return this.store.then((s) => s.listEvents(taskId)); }
+  listDocs(taskId: string, kind: Parameters<BoardStore['listDocs']>[1]) { return this.store.then((s) => s.listDocs(taskId, kind)); }
+  listRuns(taskId: string) { return this.store.then((s) => s.listRuns(taskId)); }
 }
 
 export async function wire(o: WireOptions): Promise<{ engine: Engine; store: BoardStore }> {

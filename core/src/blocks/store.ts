@@ -151,6 +151,7 @@ type Settled = { kind: 'applied' | 'forbidden' } | { kind: 'conflict' | 'unautho
 /** A stored version that is not a number (null, a row made outside the factory) cannot take a compare-and-set. */
 const hasVersion = (r: Row): boolean => typeof r.version === 'number';
 
+const byStartedAt = (runs: Run[]) => runs.sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0));
 const byAt = <T extends { at: string }>(xs: T[]) => xs.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
 
 /**
@@ -294,6 +295,12 @@ export class BlocksStore implements BoardStore {
     return row ? decodeDoc(row) : undefined;
   }
 
+  /** No status is stored: the highest version is current. */
+  async listDocs(taskId: string, kind: DocKind): Promise<Doc[]> {
+    const docs = (await this.data.list('FactoryDoc', { taskId, kind })).map(decodeDoc).sort((a, b) => a.version - b.version);
+    return docs.map((d, i) => ({ ...d, status: i === docs.length - 1 ? 'current' : 'superseded' }));
+  }
+
   async addApproval(a: NewApproval): Promise<Approval> {
     this.ownerOnly('addApproval');
     const approvalId = a.approvalId ?? randomUUID();
@@ -378,8 +385,7 @@ export class BlocksStore implements BoardStore {
   }
 
   async openRun(taskId: string, step: Step): Promise<Run | undefined> {
-    const open = (await this.data.list('FactoryRun', { taskId, step })).map(decodeRun).filter((r) => r.endedAt === null);
-    open.sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0));
+    const open = byStartedAt((await this.data.list('FactoryRun', { taskId, step })).map(decodeRun).filter((r) => r.endedAt === null));
     return open[open.length - 1];
   }
 
@@ -393,6 +399,10 @@ export class BlocksStore implements BoardStore {
       result: p.result, ...(p.turns === null ? {} : { turns: p.turns }), costUsd: decimalText(p.costUsd), endedAt: this.now().toISOString(),
     });
     if (outcome.kind !== 'applied') throw this.settleError(outcome, `run ${runId}`, runId, expected);
+  }
+
+  async listRuns(taskId: string): Promise<Run[]> {
+    return byStartedAt((await this.data.list('FactoryRun', { taskId })).map(decodeRun));
   }
 
   async addEvents(events: FactoryEvent[]): Promise<void> {

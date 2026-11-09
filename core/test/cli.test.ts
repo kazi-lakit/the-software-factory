@@ -161,6 +161,32 @@ describe('factory cli', () => {
     expect(out.length).toBeGreaterThan(0);
   });
 
+  test('dev commands keep the owner rules: a blank title, a task not at the gate and a blank answer exit 1', async () => {
+    const { store, err, go } = setup();
+    expect(await go('dev', 'add', '--repo', 'data', '--title', ' ')).toBe(1);
+    expect(err.at(-1)).toBe('error: title must not be blank');
+    expect(await store.listTasks()).toEqual([]);
+
+    await put(store, { status: 'plan_review', stage: 'plan' });
+    await store.addDoc('T-1', 'spec', 'S', 'a');
+    expect(await go('dev', 'approve', 'T-1', 'spec')).toBe(1);
+    expect(err.at(-1)).toBe('error: T-1 is not waiting at the spec gate');
+    expect(await store.listApprovals('T-1')).toEqual([]);
+
+    await store.updateTask('T-1', (await store.getTask('T-1')).version, { status: 'blocked' });
+    expect(await go('dev', 'answer', 'T-1', ' ')).toBe(1);
+    expect(err.at(-1)).toBe('error: answer must not be blank');
+  });
+
+  test('dev approve --changes records the comment as the event reason', async () => {
+    const { store, out, go } = setup();
+    await put(store, { status: 'plan_review', stage: 'plan' });
+    await store.addDoc('T-1', 'plan', 'P', 'a');
+    expect(await go('dev', 'approve', 'T-1', 'plan', '--changes', 'split step 3')).toBe(0);
+    expect(out).toEqual(['T-1 plan changes v1']);
+    expect((await store.listEvents('T-1')).find((e) => e.field === 'approval')).toMatchObject({ to: 'plan:changes@v1', reason: 'split step 3' });
+  });
+
   test('renew extends the held claim and prints the new claimUntil', async () => {
     const { store, out, go } = setup();
     await put(store, { status: 'build', stage: 'build', branch: 'b', claimBy: 'me', claimUntil: new Date(Date.now() + 1000).toISOString() });

@@ -30,6 +30,7 @@ const emptyState = (): State => ({ tasks: [], docs: [], approvals: [], settings:
 const clone = <T>(v: T): T => structuredClone(v);
 const num = (id: string) => Number(id.slice(id.indexOf('-') + 1)) || 0;
 const publicApproval = ({ approvalId: _id, ...a }: Approval & { approvalId?: string }): Approval => clone(a);
+const byStart = (a: Run, b: Run) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0);
 const nextId = (prefix: string, ids: string[]) => `${prefix}-${1 + Math.max(0, ...ids.map(num))}`;
 
 export class MemoryStore implements BoardStore {
@@ -116,6 +117,13 @@ export class MemoryStore implements BoardStore {
     });
   }
 
+  listDocs(taskId: string, kind: DocKind) {
+    return this.read(() => {
+      const docs = this.state.docs.filter((d) => d.taskId === taskId && d.kind === kind).sort((a, b) => a.version - b.version);
+      return docs.map((d, i): Doc => ({ ...clone(d), status: i === docs.length - 1 ? 'current' : 'superseded' }));
+    });
+  }
+
   addApproval({ approvalId, ...a }: NewApproval) {
     return this.write(() => {
       const stored = approvalId === undefined ? undefined : this.state.approvals.find((x) => x.approvalId === approvalId);
@@ -173,6 +181,10 @@ export class MemoryStore implements BoardStore {
       if (!run) throw new NotFoundError(`run ${runId}`);
       Object.assign(run, p, { endedAt: new Date().toISOString() });
     });
+  }
+
+  listRuns(taskId: string) {
+    return this.read(() => clone(this.state.runs.filter((r) => r.taskId === taskId).sort(byStart)));
   }
 
   addEvents(e: FactoryEvent[]) {
