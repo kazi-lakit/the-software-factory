@@ -23,6 +23,11 @@ vi.mock("../../lib/blocks/auth", () => ({
   startLogin: vi.fn(async () => undefined)
 }));
 
+// The shell reads the settings for its pause indicator; no test reaches Blocks Data.
+vi.mock("../../lib/board", () => ({
+  boardStore: { getSettings: vi.fn(async () => ({ global: { gates: { spec: true, plan: true, pr: true }, maxParallel: 1, maxTurnsPerStage: 1, maxCostPerTaskUsd: 1, paused: false }, repos: {} })) }
+}));
+
 const me = vi.mocked(blocksClient.iam.me);
 const claims = vi.mocked(fetchSessionClaims);
 
@@ -98,6 +103,17 @@ describe("the owner check", () => {
     expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.queryByText("This account doesn't have the factory-owner role.")).not.toBeInTheDocument();
     expect(screen.queryByText("Board")).not.toBeInTheDocument();
+  });
+});
+
+describe("the owner views", () => {
+  it.each([["/history", "History"], ["/settings", "Settings"]])("renders_%s_in_the_shell", async (path, heading) => {
+    claims.mockResolvedValue({ sub: "me" });
+    me.mockResolvedValue({ data: { roles: ["factory-owner"] } } as never);
+    renderAt(path);
+    expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: heading })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   });
 });
 

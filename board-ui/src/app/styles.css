@@ -62,42 +62,10 @@ button { cursor: pointer; font: inherit; }
 h1, h2, h3 { letter-spacing: -0.01em; }
 :focus-visible { border-radius: 4px; outline: 2px solid hsl(var(--primary)); outline-offset: 2px; }
 
-/* Thin scrollbars for the sidebar nav and main content */
-nav, main { scrollbar-color: hsl(var(--border)) transparent; scrollbar-width: thin; }
-nav::-webkit-scrollbar, main::-webkit-scrollbar { width: 8px; }
-nav::-webkit-scrollbar-thumb, main::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 999px; }
-
-/* App shell: collapsible sidebar (own header) + topbar + content */
-.shell { display: flex; height: 100vh; position: relative; }
-aside { background: hsl(var(--background)); border-right: 1px solid hsl(var(--border)); display: flex; flex: 0 0 240px; flex-direction: column; transition: width 0.2s ease; width: 240px; }
-aside.collapsed { flex-basis: 56px; width: 56px; }
-.sidebar-header { align-items: center; border-bottom: 1px solid hsl(var(--border)); display: flex; flex-shrink: 0; height: 60px; justify-content: space-between; padding: 0 12px; }
-.sidebar-header .brand { align-items: center; display: flex; font-weight: 700; gap: 10px; overflow: hidden; }
-.brand-mark { align-items: center; background: hsl(var(--primary)); border-radius: 8px; color: hsl(var(--primary-foreground)); display: grid; flex-shrink: 0; height: 30px; place-items: center; width: 30px; }
-aside.collapsed .sidebar-header { justify-content: center; padding: 0; }
-
-nav { display: grid; gap: 2px; overflow-x: hidden; overflow-y: auto; padding: 8px; }
-nav a { align-items: center; border-radius: var(--radius); color: hsl(var(--low-emphasis)); display: flex; gap: 12px; height: 40px; padding: 0 12px; position: relative; transition: background-color 0.15s ease, color 0.15s ease; }
-nav a:hover { background: hsl(var(--secondary)); color: hsl(var(--high-emphasis)); }
-nav a.active { background: hsl(var(--secondary)); color: hsl(var(--primary)); font-weight: 600; }
-nav a.active::after { background: hsl(var(--primary)); border-radius: 6px; content: ""; height: 20px; position: absolute; right: 4px; top: 10px; width: 3px; }
-aside.collapsed nav a { justify-content: center; padding: 0; }
-aside.collapsed nav a.active::after { display: none; }
-aside.collapsed nav a:hover::after { display: none; }
-aside.collapsed nav a { position: relative; }
-aside.collapsed nav a:hover::before {
-  background: hsl(var(--foreground)); border-radius: 6px; box-shadow: 0 6px 16px rgba(15, 23, 42, 0.18); color: hsl(var(--background));
-  content: attr(data-tooltip); font-size: 12px; left: calc(100% + 10px); padding: 5px 9px;
-  position: absolute; top: 50%; transform: translateY(-50%); white-space: nowrap; z-index: 50;
-}
-
-.content { display: flex; flex: 1; flex-direction: column; min-width: 0; }
-.topbar { align-items: center; background: hsl(var(--background) / 0.92); backdrop-filter: blur(8px); border-bottom: 1px solid hsl(var(--border)); display: flex; flex-shrink: 0; gap: 10px; height: 60px; padding: 0 20px; position: sticky; top: 0; z-index: 20; }
-.breadcrumb { align-items: center; color: hsl(var(--foreground)); display: flex; font-weight: 600; gap: 8px; }
-.breadcrumb svg { color: hsl(var(--muted-foreground)); }
-.topbar-spacer { flex: 1; }
-main { flex: 1; min-height: 0; overflow-y: auto; padding: 32px; }
-section { margin: 0 auto; max-width: 1100px; width: 100%; }
+/* The signed-in shell is AppShell.tsx + board.css (sf-* classes). The
+   scaffold's sidebar layout and its bare aside/nav/main/section rules are gone:
+   they styled every such element on the page. */
+.brand-mark { align-items: center; background: hsl(var(--primary)); border-radius: 8px; color: hsl(var(--primary-foreground)); display: flex; flex-shrink: 0; height: 30px; justify-content: center; width: 30px; }
 
 .page-header { align-items: flex-start; display: flex; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .page-header h2 { font-size: 28px; font-weight: 700; margin: 0 0 6px; }
@@ -109,7 +77,7 @@ section { margin: 0 auto; max-width: 1100px; width: 100%; }
 .muted { align-items: center; display: inline-flex; gap: 6px; }
 .metric strong { font-size: 22px; font-weight: 700; }
 .metric small { color: hsl(var(--muted-foreground)); }
-.grid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 12px; }
+.profile-panels { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 12px; }
 .panel { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: var(--radius); box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04); display: grid; gap: 10px; margin-bottom: 12px; padding: 16px; position: relative; }
 .panel-title { align-items: center; color: hsl(var(--muted-foreground)); display: flex; font-size: 13px; font-weight: 600; gap: 8px; }
 .panel strong { overflow-wrap: anywhere; }
@@ -155,9 +123,6 @@ pre { background: hsl(var(--foreground)); border-radius: var(--radius); color: h
 .icon-button:hover:not(:disabled) { background: hsl(var(--secondary)); }
 .icon-button:active:not(:disabled) { transform: translateY(1px); }
 .icon-button:disabled { cursor: not-allowed; opacity: 0.5; }
-
-/* User menu trigger -- the dropdown itself is Radix (see shared/ui/dropdown-menu.tsx) */
-.user-menu-trigger { background: transparent; border: 0; border-radius: 999px; padding: 0; }
 
 @keyframes blocks-menu-in { from { opacity: 0; transform: scale(0.96) translateY(-4px); } to { opacity: 1; transform: scale(1) translateY(0); } }
 
@@ -232,11 +197,6 @@ tbody tr:last-child td { border-bottom: 0; }
 .not-found p { color: hsl(var(--muted-foreground)); margin: 8px 0 20px; }
 
 @media (max-width: 880px) {
-  /* The sidebar is forced into its collapsed icon rail on mobile (see
-     AppShell.tsx) instead of an overlay drawer, so the toggle that would
-     expand it back has nothing to do here. */
-  .sidebar-collapse-toggle { display: none; }
-  main { padding: 20px; }
   .page-header { align-items: stretch; flex-direction: column; }
   .profile-card { flex-direction: column; text-align: center; }
   .form-grid, .filter-grid { grid-template-columns: 1fr; }

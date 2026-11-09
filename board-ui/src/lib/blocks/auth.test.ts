@@ -150,7 +150,7 @@ describe("hosted sign-in", () => {
 
   it("returns_only_to_a_path_on_this_site", async () => {
     callback.mockResolvedValue({});
-    for (const unsafe of ["https://evil.test/x", "https://evil.test", "//evil.test/x", "//evil.test", "/\t/evil.test", "/\n/evil.test", "/\\evil.test", "javascript:alert(1)", "board", ""]) {
+    for (const unsafe of ["https://evil.test/x", "https://evil.test", "//evil.test/x", "//evil.test", "/\t/evil.test", "/\n/evil.test", "/\\evil.test", "/.//evil.test", "/..//evil.test", "/x/..//evil.test", "javascript:alert(1)", "board", ""]) {
       sessionStorage.setItem("blocks-app:oidc-return-to", unsafe);
       await expect(completeLogin("https://app.test/login/callback?code=c")).resolves.toEqual({ ok: true, returnTo: "/" });
     }

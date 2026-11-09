@@ -1,0 +1,176 @@
+/* The Board's design tokens and shell. Calm and dense: one neutral palette for
+   the queue, one accent for what needs the owner (spec_review, plan_review,
+   pr_open, blocked, and the paused factory), muted tones for done and
+   cancelled. Light and dark follow prefers-color-scheme through the tokens.
+   Names are sf-* so they never meet the scaffold's tokens or Tailwind's
+   utilities; never use .grid, .outline or a bare aside here (board.css.test.ts). */
+
+:root {
+  --sf-bg: #f2f3f5;
+  --sf-surface: #ffffff;
+  --sf-surface-sunk: #e9ebee;
+  --sf-text: #1b1f27;
+  --sf-muted: #5c6370;
+  --sf-border: #d9dce2;
+  --sf-accent: #5236c9;
+  --sf-accent-soft: #ece8fc;
+  --sf-on-accent: #ffffff;
+  --sf-done: #616773;
+  --sf-done-soft: #e6e8eb;
+  --sf-focus: #1b1f27;
+
+  --sf-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --sf-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sf-size: 14px;
+  --sf-size-small: 12px;
+  --sf-radius: 6px;
+  --sf-bar-height: 44px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --sf-bg: #121418;
+    --sf-surface: #1a1d23;
+    --sf-surface-sunk: #0e1013;
+    --sf-text: #e4e6eb;
+    --sf-muted: #9aa1ad;
+    --sf-border: #2c3038;
+    --sf-accent: #a797ff;
+    --sf-accent-soft: #29244a;
+    --sf-on-accent: #14111f;
+    --sf-done: #8a909b;
+    --sf-done-soft: #20232a;
+    --sf-focus: #e4e6eb;
+  }
+}
+
+body {
+  background: var(--sf-bg);
+  color: var(--sf-text);
+  font-family: var(--sf-font);
+  font-size: var(--sf-size);
+  line-height: 1.45;
+}
+
+/* One ring for every interactive element, in both themes. */
+:focus-visible {
+  border-radius: 3px;
+  outline: 2px solid var(--sf-focus);
+  outline-offset: 2px;
+}
+
+/* Ids, branches, versions and costs. */
+.sf-mono {
+  font-family: var(--sf-mono);
+  font-size: 0.93em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Shell */
+.sf-app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.sf-topbar {
+  align-items: center;
+  background: var(--sf-surface);
+  border-bottom: 1px solid var(--sf-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  min-height: var(--sf-bar-height);
+  padding: 0 16px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.sf-project {
+  font-family: var(--sf-mono);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.sf-views {
+  align-items: stretch;
+  align-self: stretch;
+  display: flex;
+  gap: 2px;
+}
+
+.sf-view-link {
+  align-items: center;
+  border-bottom: 2px solid transparent;
+  color: var(--sf-muted);
+  display: flex;
+  padding: 0 10px;
+  text-decoration: none;
+}
+
+.sf-view-link:hover {
+  color: var(--sf-text);
+}
+
+/* The current view: text weight and a rule in the text colour, not the accent. */
+.sf-view-link[aria-current="page"] {
+  border-bottom-color: var(--sf-text);
+  color: var(--sf-text);
+  font-weight: 600;
+}
+
+.sf-view-link:focus-visible {
+  outline-offset: -2px;
+}
+
+.sf-topbar-end {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.sf-paused {
+  background: var(--sf-accent-soft);
+  border: 1px solid var(--sf-accent);
+  border-radius: var(--sf-radius);
+  color: var(--sf-accent);
+  font-size: var(--sf-size-small);
+  font-weight: 600;
+  padding: 2px 8px;
+  white-space: nowrap;
+}
+
+.sf-user {
+  color: var(--sf-muted);
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sf-button {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
+  font: inherit;
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+.sf-button:hover:not(:disabled) {
+  background: var(--sf-surface-sunk);
+}
+
+.sf-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.sf-main {
+  flex: 1;
+  padding: 16px;
+}

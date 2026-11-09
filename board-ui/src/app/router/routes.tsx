@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AppShell } from "../layout/AppShell";
+import { AppShell } from "../AppShell";
 import { RedirectIfAuthenticated, RequireAuth, RequireOwner } from "./guards";
 import { ErrorPage } from "../../features/auth/ErrorPage";
 import { NotFoundPage } from "../../features/auth/NotFoundPage";
@@ -7,19 +7,23 @@ import { ProfilePage } from "../../features/profile/ProfilePage";
 import { CallbackPage } from "../../pages/Callback";
 import { LoginPage } from "../../pages/Login";
 
-// Placeholder until the Board view lands.
-function BoardHome() {
-  return (
-    <section>
-      <h2>Board</h2>
-    </section>
-  );
+// Placeholders until the Board, History and Settings views land.
+function placeholder(title: string) {
+  return function PlaceholderView() {
+    return (
+      <section>
+        <h2>{title}</h2>
+      </section>
+    );
+  };
 }
 
 const protectedRoutes = {
-  "/": BoardHome,
+  "/": placeholder("Board"),
   "/error": ErrorPage,
-  "/profile": ProfilePage
+  "/history": placeholder("History"),
+  "/profile": ProfilePage,
+  "/settings": placeholder("Settings")
 };
 
 export function AppRouter() {

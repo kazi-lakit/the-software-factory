@@ -106,7 +106,10 @@ function safeReturnTo(value: string | null | undefined): string {
   } catch {
     return "/";
   }
-  return url.origin === window.location.origin ? `${url.pathname}${url.search}${url.hash}` : "/";
+  // Dot segments can normalize to a path that starts with "//" ("/.//evil.test"
+  // becomes "//evil.test"), which the browser reads as another host.
+  if (url.origin !== window.location.origin || url.pathname.startsWith("//")) return "/";
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 export async function startLogin(returnTo?: string): Promise<void> {
