@@ -1,4 +1,4 @@
-import { BlocksForbiddenError, cleanRow, type BlocksData, type Filter, type Row } from './data.js';
+import { BlocksForbiddenError, cleanRow, listNames, type BlocksData, type Filter, type Row } from './data.js';
 import { ACCESS, FIELDS, UNIQUE, type Operation, type SchemaName } from './schema.js';
 import type { WriteOutcome } from './update.js';
 
@@ -30,7 +30,7 @@ export class FakeBlocksData implements BlocksData {
 
   async list(schema: SchemaName, filter: Filter, fields?: string[]): Promise<Row[]> {
     if (!this.allowed(schema, 'read')) throw new BlocksForbiddenError(`get${schema}s`);
-    const names = ['ItemId', 'CreatedBy', 'CreatedDate', ...(fields ?? FIELDS[schema].map(f => f.name))];
+    const names = listNames(schema, fields);
     return this.table(schema).filter(r => FakeBlocksData.matches(r, filter)).map(r => Object.fromEntries(names.map(n => [n, r[n] ?? null])));
   }
 
@@ -73,6 +73,7 @@ export class FakeBlocksData implements BlocksData {
     if (!this.allowed(schema, 'delete')) throw new BlocksForbiddenError(`delete${schema}`);
     const table = this.table(schema);
     const at = table.findIndex(r => r.ItemId === itemId);
-    if (at >= 0) table.splice(at, 1);
+    if (at < 0) throw new Error(`fake: delete on ${schema} deleted nothing`);
+    table.splice(at, 1);
   }
 }

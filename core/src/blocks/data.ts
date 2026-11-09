@@ -51,7 +51,8 @@ export class SdkBlocksData implements BlocksData {
   private async send(operationName: string, query: string, variables: Record<string, unknown>): Promise<Answer> {
     for (const retry of [false, true]) {
       // A client per attempt: a retry after invalidate() must send the new token.
-      const token = await this.p.token.get();
+      let token: string;
+      try { token = await this.p.token.get(); } catch { throw new Error(`blocks: ${operationName} token unavailable`); }
       const client = createBlocksClient({ apiUrl: this.p.apiUrl, xBlocksKey: this.p.projectKey, accessToken: () => token, fetch: this.fetchImpl });
       try {
         const answer = await client.data.graphql({ operationName, query, variables });
@@ -84,7 +85,7 @@ export class SdkBlocksData implements BlocksData {
 
   async list(schema: SchemaName, filter: Filter, fields?: string[]): Promise<Row[]> {
     const operationName = `get${collectionOf(schema)}`;
-    const names = ['ItemId', 'CreatedBy', 'CreatedDate', ...(fields ?? FIELDS[schema].map(f => f.name))];
+    const names = listNames(schema, fields);
     const query = `query ${operationName}($input: DynamicQueryInput) { ${operationName}(input: $input) { items { ${names.join(' ')} } totalCount } }`;
     const rows: Row[] = [];
     for (let pageNo = 1; pageNo <= MAX_PAGES; pageNo++) {
@@ -143,13 +144,22 @@ export class SdkBlocksData implements BlocksData {
   }
 }
 
-/** Keeps only keys that are present; an unknown key is a programming error. */
+/** Keeps only keys that are present; an unknown or system-assigned key (ItemId, CreatedBy, CreatedDate) is a programming error. */
 export function cleanRow(schema: SchemaName, row: Record<string, string | number | null | undefined>): Record<string, string | number | null> {
-  const known = new Set(['ItemId', ...FIELDS[schema].map(f => f.name)]);
+  const known = new Set(FIELDS[schema].map(f => f.name));
   const out: Record<string, string | number | null> = {};
   for (const [key, value] of Object.entries(row)) {
     if (!known.has(key)) throw new Error(`blocks: unknown field '${key}' for ${schema}`);
     if (value !== undefined) out[key] = value;
   }
   return out;
+}
+
+/** ItemId, CreatedBy and CreatedDate are always selected; any requested name must be one of them or a schema field. */
+export function listNames(schema: SchemaName, fields?: string[]): string[] {
+  const base = ['ItemId', 'CreatedBy', 'CreatedDate'];
+  const known = new Set([...base, ...FIELDS[schema].map(f => f.name)]);
+  const names = fields ?? FIELDS[schema].map(f => f.name);
+  for (const n of names) if (!known.has(n)) throw new Error(`blocks: unknown field '${n}' for ${schema}`);
+  return [...new Set([...base, ...names])];
 }

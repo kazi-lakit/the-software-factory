@@ -77,4 +77,12 @@ describe('FakeBlocksData', () => {
     const owner = new FakeBlocksData('factory-owner');
     await expect(owner.hardDelete('FactorySpike', 'I-1')).rejects.toBeInstanceOf(BlocksForbiddenError);
   });
+  it('list rejects unknown field names; hardDelete of a missing id throws; write paths reject system keys', async () => {
+    const f = new FakeBlocksData('any');
+    await expect(f.list('FactoryTask', {}, ['bogus'])).rejects.toThrow(/unknown/i);
+    await expect(f.hardDelete('FactorySpike', 'I-404')).rejects.toThrow('fake: delete on FactorySpike deleted nothing');
+    for (const k of ['ItemId', 'CreatedBy', 'CreatedDate']) await expect(f.insert('FactoryTask', { [k]: 'x' })).rejects.toThrow(/unknown/i);
+    await f.insert('FactoryTask', { taskId: 'a' });
+    await expect(f.update('FactoryTask', { taskId: 'a' }, { ItemId: 'x' })).rejects.toThrow(/unknown/i);
+  });
 });

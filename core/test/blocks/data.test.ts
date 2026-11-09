@@ -138,4 +138,35 @@ describe('SdkBlocksData', () => {
     await expect(t.data.list('FactoryTask', {})).rejects.toThrow(/getFactoryTasks/);
     expect(await t.data.update('FactoryTask', { taskId: 'a' }, { status: 'x' })).toEqual({ kind: 'unknown' });
   });
+  it('list rejects an unknown requested field before sending', async () => {
+    const t = adapt([]);
+    await expect(t.data.list('FactoryTask', {}, ['taskId', 'bogus'])).rejects.toThrow(/unknown/i);
+    expect(t.seen).toHaveLength(0);
+    await adapt([page([], 0)]).data.list('FactoryTask', {}, ['ItemId', 'taskId']);
+  });
+  it('insert and update reject ItemId, CreatedBy and CreatedDate keys', async () => {
+    const t = adapt([]);
+    for (const k of ['ItemId', 'CreatedBy', 'CreatedDate']) {
+      await expect(t.data.insert('FactoryTask', { [k]: 'x' })).rejects.toThrow(/unknown/i);
+    }
+    expect(await t.data.update('FactoryTask', { taskId: 'a' }, { ItemId: 'x' })).toEqual({ kind: 'unknown' });
+    expect(t.seen).toHaveLength(0);
+  });
+  it('a token source failure never leaks its message', async () => {
+    const token = { get: vi.fn(async () => { throw new Error('keychain says hunter2'); }), invalidate: vi.fn() };
+    const t = adapt([], { token });
+    for (const op of [t.data.list('FactoryTask', {}), t.data.insert('FactoryTask', { taskId: 'a' }), t.data.hardDelete('FactorySpike', 'x')]) {
+      const e = await op.catch(e => e as Error);
+      expect((e as Error).message).toMatch(/^blocks: \w+ token unavailable$/);
+      expect((e as Error).message).not.toContain('hunter2');
+    }
+    expect(await t.data.update('FactoryTask', { taskId: 'a' }, { status: 'x' })).toEqual({ kind: 'unknown' });
+  });
+  it('duplicate text on update is unknown', async () => {
+    const dup = { body: { errors: [{ message: "A record with the same value for 'taskId' already exists." }] } };
+    expect(await adapt([dup]).data.update('FactoryTask', { taskId: 'a' }, { status: 'x' })).toEqual({ kind: 'unknown' });
+  });
+  it('hardDelete with totalImpactedData 0 throws', async () => {
+    await expect(adapt([{ body: { data: { deleteFactorySpike: { acknowledged: true, itemId: 'r', totalImpactedData: 0 } } } }]).data.hardDelete('FactorySpike', 'x')).rejects.toThrow(/deleteFactorySpike/);
+  });
 });
