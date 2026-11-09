@@ -1,0 +1,12 @@
+#!/bin/sh
+# factory: nothing reaches dev, stg or main except through a PR.
+# git feeds "<local ref> <local sha> <remote ref> <remote sha>" lines on stdin.
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  case "$remote_ref" in
+    refs/heads/dev|refs/heads/stg|refs/heads/main)
+      echo "factory: push to ${remote_ref#refs/heads/} refused (protected branch)" >&2
+      exit 1
+      ;;
+  esac
+done
+exit 0
