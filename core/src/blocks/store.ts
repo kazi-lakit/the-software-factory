@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DocTooLargeError, MAX_DOC_BYTES } from '../limits.js';
 import { DEFAULT_SETTINGS } from '../defaults.js';
 import {
-  CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, VersionConflictError,
+  CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, VersionConflictError,
   type BoardStore, type StoredSettings,
 } from '../store.js';
 import type {
@@ -27,6 +27,8 @@ const TASK_KEYS = new Set<string>([
 export const DOC_RETRY_WINDOW_MS = 120_000;
 /** createTask and addDoc re-read and retry a duplicate key this many times. */
 const DUPLICATE_RETRIES = 3;
+/** updateTask reads the task back this many times after its write landed. */
+const REREAD_ATTEMPTS = 3;
 
 /** A JSON object, or undefined for null, malformed JSON or any non-object: one bad Board row must not stop a read. */
 function parseObject(v: Value | undefined): Record<string, unknown> | undefined {
@@ -129,6 +131,11 @@ const byAt = <T extends { at: string }>(xs: T[]) => xs.sort((a, b) => (a.at < b.
  */
 export class BlocksStore implements BoardStore {
   private readonly now: () => Date;
+  /**
+   * Writes whose outcome a settle left unknown, per row and expected version. The caller's retry of the same update
+   * (same row, same version) re-sends with a new writeId; these let it recognise an earlier write that has landed since.
+   */
+  private readonly pending = new Map<string, string[]>();
 
   /** `now` decides the addDoc retry window (default: real time). */
   constructor(private readonly data: BlocksData, private readonly identity: 'core' | 'owner', opts: { now?: () => Date } = {}) {
@@ -199,8 +206,19 @@ export class BlocksStore implements BoardStore {
       if (row && !hasVersion(row)) throw new MissingVersionError('FactoryTask', id);
     }
     const outcome = await this.settle('FactoryTask', { taskId: id }, expectedVersion, input);
-    if (outcome.kind === 'applied') return this.getTask(id);
+    if (outcome.kind === 'applied') return this.rereadTask(id);
     throw this.settleError(outcome, `task ${id}`, id, expectedVersion);
+  }
+
+  /** The write landed: sending it again would conflict with itself, so only the read is retried. */
+  private async rereadTask(id: string): Promise<Task> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.getTask(id);
+      } catch {
+        if (attempt >= REREAD_ATTEMPTS) throw new RereadAfterUpdateError(id);
+      }
+    }
   }
 
   async addDoc(taskId: string, kind: DocKind, body: string, author: string): Promise<Doc> {
@@ -336,8 +354,10 @@ export class BlocksStore implements BoardStore {
   /** One compare-and-set update keyed by `key` plus the row version; bumps the version and stamps a writeId. */
   private async settle(schema: SchemaName, key: Filter, expectedVersion: number, input: Record<string, Value>): Promise<Settled> {
     let seenVersion = Number.NaN;
+    const slot = JSON.stringify([schema, key, expectedVersion]);
     const outcome = await settleConditionalUpdate({
       expectedVersion,
+      priorWriteIds: this.pending.get(slot) ?? [],
       // Must never reject: a rejection is an unknown outcome. Forbidden (a 403 or a column refusal) is final.
       send: async (writeId): Promise<WriteOutcome | { kind: 'forbidden' }> => {
         try {
@@ -358,6 +378,8 @@ export class BlocksStore implements BoardStore {
         }
       },
     });
+    if (outcome.kind === 'reconcile') this.pending.set(slot, outcome.pendingWriteIds);
+    else this.pending.delete(slot);
     return outcome.kind === 'applied' || outcome.kind === 'forbidden' ? { kind: outcome.kind } : { kind: outcome.kind, seenVersion };
   }
 

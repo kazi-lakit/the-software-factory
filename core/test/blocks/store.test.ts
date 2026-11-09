@@ -5,7 +5,7 @@ import {
   BlocksStore, CORE_TASK_FIELDS, DocTooLargeError, MAX_DOC_BYTES, OwnerOnlyError,
 } from '../../src/blocks/store.js';
 import { DEFAULT_SETTINGS } from '../../src/defaults.js';
-import { CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, VersionConflictError } from '../../src/store.js';
+import { CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, RereadAfterUpdateError, VersionConflictError } from '../../src/store.js';
 import { PROTECTED_TASK_FIELDS } from '../../src/blocks/schema.js';
 import { runStoreContract } from '../storeContract.js';
 
@@ -239,6 +239,57 @@ describe('BlocksStore', () => {
     const t = await s.createTask({ title: 't', description: '', repo: 'data' });
     data.failNextReply('update');
     expect(await s.updateTask(t.taskId, 1, { status: 'ready' })).toMatchObject({ status: 'ready', version: 2 });
+  });
+
+  /** A fake whose next `n` full task reads (getTask) or settle re-reads (version + writeId) fail. */
+  function flakyReads(inner: FakeBlocksData) {
+    const fail = { getTask: 0, reread: 0 };
+    const data: BlocksData = {
+      list: async (schema, filter, fields) => {
+        if (schema === 'FactoryTask' && fields === undefined && fail.getTask > 0) { fail.getTask--; throw new Error('blocks: getFactoryTasks transport error'); }
+        if (fields?.includes('writeId') && fail.reread > 0) { fail.reread--; throw new Error('blocks: getFactoryTasks transport error'); }
+        return inner.list(schema, filter, fields);
+      },
+      insert: (...a) => inner.insert(...a),
+      update: (...a) => inner.update(...a),
+      hardDelete: (...a) => inner.hardDelete(...a),
+    };
+    return { data, fail };
+  }
+
+  it('a write that landed during a reconcile is recognised by the next updateTask for the same version', async () => {
+    const inner = new FakeBlocksData('any');
+    const { data, fail } = flakyReads(inner);
+    const s = new BlocksStore(data, 'owner');
+    await s.createTask({ title: 't', description: '', repo: 'data' });
+    // The write lands, its reply is lost, and the re-read fails: outcome unknown.
+    inner.failNextReply('update');
+    fail.reread = 1;
+    await expect(s.updateTask('T-1', 1, { status: 'ready' })).rejects.toThrow('task T-1 update outcome unknown');
+    expect(inner.rows('FactoryTask')[0]).toMatchObject({ status: 'ready', version: 2 });
+    // The caller's retry sends the same version: our landed write counts as applied, not as a conflict.
+    expect(await s.updateTask('T-1', 1, { status: 'ready' })).toMatchObject({ status: 'ready', version: 2 });
+    // Once settled, the old write id is forgotten: someone else's later write is a conflict again.
+    await expect(s.updateTask('T-1', 1, { status: 'ready' })).rejects.toBeInstanceOf(VersionConflictError);
+  });
+
+  it('a failed post-apply re-read is retried in the store', async () => {
+    const inner = new FakeBlocksData('any');
+    const { data, fail } = flakyReads(inner);
+    const s = new BlocksStore(data, 'owner');
+    await s.createTask({ title: 't', description: '', repo: 'data' });
+    fail.getTask = 2;
+    expect(await s.updateTask('T-1', 1, { status: 'ready' })).toMatchObject({ status: 'ready', version: 2 });
+  });
+
+  it('a post-apply re-read that keeps failing throws RereadAfterUpdateError (the update did land)', async () => {
+    const inner = new FakeBlocksData('any');
+    const { data, fail } = flakyReads(inner);
+    const s = new BlocksStore(data, 'owner');
+    await s.createTask({ title: 't', description: '', repo: 'data' });
+    fail.getTask = 3;
+    await expect(s.updateTask('T-1', 1, { status: 'ready' })).rejects.toThrow(new RereadAfterUpdateError('T-1'));
+    expect(inner.rows('FactoryTask')[0]).toMatchObject({ status: 'ready', version: 2 });
   });
 
   it('a compare-and-set race between two updateTask calls: one wins, one VersionConflictError', async () => {

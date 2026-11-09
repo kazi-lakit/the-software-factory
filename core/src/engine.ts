@@ -13,8 +13,8 @@ import { SecretMissingError } from './secrets.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from './limits.js';
 import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
 import {
-  CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, VersionConflictError,
-  type BoardStore, type StoredSettings,
+  CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError,
+  updateHeld, VersionConflictError, type BoardStore, type StoredSettings,
 } from './store.js';
 import type { AgentStep, DocKind, FactoryEvent, Gate, Mode, RepoId, Settings, Status, Step, Task } from './types.js';
 
@@ -67,7 +67,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 /** Errors that the same call would hit again: retrying only delays them. */
 const FINAL_ERRORS = [
   VersionConflictError, SecretMissingError, ProtectedBranchError, PrBaseMismatchError, DocTooLargeError,
-  NotFoundError, OwnerOnlyError, CoreFieldError, ForbiddenError, MissingVersionError,
+  NotFoundError, OwnerOnlyError, CoreFieldError, ForbiddenError, MissingVersionError, RereadAfterUpdateError,
 ];
 
 /** Retries `fn` with doubling waits (baseMs, 2·baseMs, …) between tries. FINAL_ERRORS are rethrown at once. */
@@ -272,7 +272,7 @@ export class Engine {
     const { store, now } = this.deps;
     if (decision.status !== task.status) assertMove(task.status, decision.status, 'core');
     const updated = await retry(() =>
-      store.updateTask(task.taskId, task.version, {
+      updateHeld(store, task, {
         ...decision.patch,
         // A blocked task waits for a new answer; a stale one must not resume it.
         ...(decision.status === 'blocked' ? { answer: null } : {}),
@@ -291,7 +291,7 @@ export class Engine {
   /** A version-checked field write that keeps status and claim, with its events. */
   private async record(task: Task, patch: Partial<Task>, reason: string): Promise<Task> {
     const { store, now } = this.deps;
-    const updated = await retry(() => store.updateTask(task.taskId, task.version, patch));
+    const updated = await retry(() => updateHeld(store, task, patch));
     const events = diffEvents(task, updated, this.coreActor, reason, now().toISOString());
     await retry(() => store.addEvents(events));
     return updated;

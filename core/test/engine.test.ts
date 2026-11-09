@@ -13,7 +13,8 @@ import { BlocksStore, DocTooLargeError, MAX_DOC_BYTES } from '../src/blocks/stor
 import { FakeBlocksData } from '../src/blocks/fakeData.js';
 import { PROTECTED_TASK_FIELDS } from '../src/blocks/schema.js';
 import {
-  CoreFieldError, ForbiddenError, MemoryStore, MissingVersionError, NotFoundError, OwnerOnlyError, VersionConflictError, type BoardStore,
+  CoreFieldError, ForbiddenError, MemoryStore, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError,
+  VersionConflictError, type BoardStore,
 } from '../src/store.js';
 import type { RepoId, Task } from '../src/types.js';
 
@@ -343,6 +344,57 @@ describe('on BlocksStore', () => {
     expect(await p).toMatchObject({ step: 'spec' });
     const moves = (await store.listEvents('T-1')).filter((e) => e.field === 'status');
     expect(moves).toEqual([expect.objectContaining({ from: 'ready', to: 'spec' })]);
+  });
+
+  test('a status write whose outcome was unknown is recognised on the engine retry: applied, events once', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    let data!: FakeBlocksData;
+    const { store, engine } = setup({
+      store: (now) => new BlocksStore((data = new FakeBlocksData('any', { now })), 'owner', { now }),
+    });
+    await put(store, { status: 'ready' });
+    // The ready -> spec write lands but its reply is lost, and the settle re-read fails once.
+    const update = data.update.bind(data);
+    const list = data.list.bind(data);
+    let armed = true;
+    let failReread = false;
+    data.update = async (schema, filter, input) => {
+      if (input.status === 'spec' && armed) { armed = false; failReread = true; data.failNextReply('update'); }
+      return update(schema, filter, input);
+    };
+    data.list = async (schema, filter, fields) => {
+      if (failReread && fields?.includes('writeId')) { failReread = false; throw new Error('blocks: getFactoryTasks transport error'); }
+      return list(schema, filter, fields);
+    };
+    const p = engine.next();
+    await vi.runAllTimersAsync();
+    expect(await p).toMatchObject({ step: 'spec' });
+    expect((await store.listEvents('T-1')).filter((e) => e.field === 'status')).toEqual([expect.objectContaining({ from: 'ready', to: 'spec' })]);
+  });
+
+  test('a status write whose re-read keeps failing still writes its events', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    let data!: FakeBlocksData;
+    const { store, engine } = setup({
+      store: (now) => new BlocksStore((data = new FakeBlocksData('any', { now })), 'owner', { now }),
+    });
+    await put(store, { status: 'ready' });
+    const update = data.update.bind(data);
+    const list = data.list.bind(data);
+    let failReads = 0;
+    data.update = async (schema, filter, input) => {
+      const r = await update(schema, filter, input);
+      if (input.status === 'spec') failReads = 3;
+      return r;
+    };
+    data.list = async (schema, filter, fields) => {
+      if (failReads > 0 && schema === 'FactoryTask' && fields === undefined) { failReads--; throw new Error('blocks: getFactoryTasks transport error'); }
+      return list(schema, filter, fields);
+    };
+    const p = engine.next();
+    await vi.runAllTimersAsync();
+    expect(await p).toMatchObject({ step: 'spec', context: { task: { status: 'spec', claimBy: 'me' } } });
+    expect((await store.listEvents('T-1')).filter((e) => e.field === 'status')).toEqual([expect.objectContaining({ from: 'ready', to: 'spec' })]);
   });
 
   test('a setup error note is retried with the same event', async () => {
@@ -925,6 +977,7 @@ describe('withRetry', () => {
     ['CoreFieldError', new CoreFieldError('title')],
     ['ForbiddenError', new ForbiddenError('task T-1 update forbidden')],
     ['MissingVersionError', new MissingVersionError('FactoryTask', 'T-1')],
+    ['RereadAfterUpdateError', new RereadAfterUpdateError('T-1')],
   ])('never retries a %s', async (_name, error) => {
     const fn = vi.fn().mockRejectedValue(error);
     await expect(withRetry(fn, { tries: 3, baseMs: 500 })).rejects.toBe(error);

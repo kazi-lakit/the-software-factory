@@ -52,6 +52,17 @@ export class MissingVersionError extends Error {
   }
 }
 
+/**
+ * The task update landed (version + 1) but the task could not be read back. Final: sending the update again
+ * would be a version conflict with our own write. The caller knows the result: its task plus its patch.
+ */
+export class RereadAfterUpdateError extends Error {
+  constructor(readonly taskId: string) {
+    super(`task ${taskId} updated; re-read failed`);
+    this.name = 'RereadAfterUpdateError';
+  }
+}
+
 export interface StoredSettings {
   global: Settings;
   repos: Partial<Record<RepoId, RepoSettings>>;
@@ -76,6 +87,20 @@ export interface BoardStore {
   finishRun(runId: string, p: { result: string; turns: number | null; costUsd: number | null }): Promise<void>;
   addEvents(e: FactoryEvent[]): Promise<void>;
   listEvents(taskId?: string): Promise<FactoryEvent[]>;
+}
+
+/**
+ * updateTask for a caller that holds the task at `task.version`. A write that landed but could not be read back
+ * (RereadAfterUpdateError) is exactly the held task plus the patch at version + 1: the version check proved the row
+ * was the held task. So the caller still gets the task, and can write its events.
+ */
+export async function updateHeld(store: BoardStore, task: Task, patch: Partial<Task>): Promise<Task> {
+  try {
+    return await store.updateTask(task.taskId, task.version, patch);
+  } catch (e) {
+    if (e instanceof RereadAfterUpdateError) return { ...task, ...clone(patch), version: task.version + 1 };
+    throw e;
+  }
 }
 
 interface State {

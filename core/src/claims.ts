@@ -1,5 +1,5 @@
 import { CLAIM_MS } from './defaults.js';
-import { VersionConflictError, type BoardStore } from './store.js';
+import { updateHeld, VersionConflictError, type BoardStore } from './store.js';
 import type { Task } from './types.js';
 
 export function claimExpired(t: Task, now: Date): boolean {
@@ -10,7 +10,7 @@ const until = (now: Date) => new Date(now.getTime() + CLAIM_MS).toISOString();
 
 async function tryUpdate(store: BoardStore, t: Task, patch: Partial<Task>): Promise<Task | null> {
   try {
-    return await store.updateTask(t.taskId, t.version, patch);
+    return await updateHeld(store, t, patch);
   } catch (e) {
     if (e instanceof VersionConflictError) return null;
     throw e;
@@ -23,7 +23,7 @@ export async function claim(store: BoardStore, t: Task, claimant: string, now: D
 }
 
 export function release(store: BoardStore, t: Task): Promise<Task> {
-  return store.updateTask(t.taskId, t.version, { claimBy: null, claimUntil: null });
+  return updateHeld(store, t, { claimBy: null, claimUntil: null });
 }
 
 export async function renew(store: BoardStore, t: Task, claimant: string, now: Date): Promise<Task | null> {

@@ -54,10 +54,12 @@ export async function settleConditionalUpdate(p: {
   send: (writeId: string) => Promise<WriteOutcome | { kind: 'forbidden' }>;
   reread: () => Promise<RereadResult>;
   newWriteId?: () => string;
+  /** Lost writes of an earlier settle of the same row and version (its `pendingWriteIds`): they may have landed since. */
+  priorWriteIds?: string[];
 }): Promise<SettleResult> {
   const newWriteId = p.newWriteId ?? randomUUID;
-  const sent: string[] = [];
-  const unknown: string[] = [];
+  const sent: string[] = [...(p.priorWriteIds ?? [])];
+  const unknown: string[] = [...sent];
   const reconcile = (): SettleResult => ({ kind: 'reconcile', pendingWriteIds: [...unknown] });
   for (const isRetry of [false, true]) {
     const writeId = newWriteId();

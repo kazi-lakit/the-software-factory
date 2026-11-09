@@ -109,6 +109,19 @@ describe('settleConditionalUpdate', () => {
     const result = await settleConditionalUpdate({ expectedVersion: 3, newWriteId: ids('w1'), send: sequence<WriteOutcome>(unknown), reread: sequence<RereadResult>({ rows: [{ version: 4, writeId: 'someone-else' }] }) });
     expect(result).toEqual({ kind: 'conflict' });
   });
+  it('recognises a write from an earlier settle (priorWriteIds) that landed', async () => {
+    const result = await settleConditionalUpdate({ expectedVersion: 3, newWriteId: ids('w2'), priorWriteIds: ['w1'], send: async () => notApplied,
+      reread: async () => ({ rows: [{ version: 4, writeId: 'w1' }] }) });
+    expect(result).toEqual({ kind: 'applied' });
+  });
+  it('keeps prior writeIds pending while the outcome is still unknown', async () => {
+    const result = await settleConditionalUpdate({ expectedVersion: 3, newWriteId: ids('w2'), priorWriteIds: ['w1'], send: async () => unknown, reread: async () => ({ error: 'failed' }) });
+    expect(result).toEqual({ kind: 'reconcile', pendingWriteIds: ['w1', 'w2'] });
+  });
+  it('a forbidden answer with an earlier lost write pending is not final', async () => {
+    const result = await settleConditionalUpdate({ expectedVersion: 3, newWriteId: ids('w2'), priorWriteIds: ['w1'], send: async () => ({ kind: 'forbidden' as const }), reread: vi.fn() });
+    expect(result).toEqual({ kind: 'reconcile', pendingWriteIds: ['w1'] });
+  });
   it('stops at a forbidden answer: no re-read, no second send', async () => {
     const send = vi.fn(async (_writeId: string) => ({ kind: 'forbidden' as const }));
     const reread = vi.fn();

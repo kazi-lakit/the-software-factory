@@ -2,12 +2,27 @@ import { describe, expect, test } from 'vitest';
 import { existsSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { FileStore, MemoryStore, VersionConflictError } from '../src/store.js';
+import { FileStore, MemoryStore, RereadAfterUpdateError, updateHeld, VersionConflictError } from '../src/store.js';
 import { runStoreContract } from './storeContract.js';
 
 const mk = (s: MemoryStore, title = 'a') => s.createTask({ title, description: '', repo: 'data' });
 
 runStoreContract('MemoryStore', () => new MemoryStore());
+
+describe('updateHeld', () => {
+  test('a write that landed but could not be read back is the held task plus the patch', async () => {
+    const s = new MemoryStore();
+    const t = await mk(s);
+    s.updateTask = async () => { throw new RereadAfterUpdateError(t.taskId); };
+    expect(await updateHeld(s, t, { status: 'ready', claimBy: 'w' })).toEqual({ ...t, status: 'ready', claimBy: 'w', version: 2 });
+  });
+  test('other errors pass through', async () => {
+    const s = new MemoryStore();
+    const t = await mk(s);
+    await s.updateTask(t.taskId, 1, { status: 'ready' });
+    await expect(updateHeld(s, t, { status: 'spec' })).rejects.toBeInstanceOf(VersionConflictError);
+  });
+});
 
 describe('MemoryStore', () => {
   test('run ids are R-<n>', async () => {
