@@ -16,6 +16,13 @@ export function runStoreContract(name: string, make: () => BoardStore | Promise<
       expect(await s.getTask('T-1')).toEqual(a);
       expect((await s.listTasks()).map((t) => t.taskId)).toEqual(['T-1', 'T-2']);
     });
+    test('createTask with status ready inserts a ready task; the default is inbox', async () => {
+      const s = await make();
+      const r = await s.createTask({ title: 'r', description: '', repo: 'data', status: 'ready' });
+      const i = await s.createTask({ title: 'i', description: '', repo: 'data', status: 'inbox' });
+      expect([r.status, i.status]).toEqual(['ready', 'inbox']);
+      expect((await s.getTask(r.taskId)).status).toBe('ready');
+    });
     test('getTask throws NotFoundError', async () => {
       await expect((await make()).getTask('T-9')).rejects.toBeInstanceOf(NotFoundError);
     });

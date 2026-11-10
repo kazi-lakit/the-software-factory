@@ -82,11 +82,14 @@ export interface StoredSettings {
   repos: Partial<Record<RepoId, RepoSettings>>;
 }
 
+/** `status` is where the task starts (default inbox); the owner's Board and `factory new` choose it. */
+export interface NewTask { title: string; description: string; repo: RepoId; baseBranch?: string; status?: 'inbox' | 'ready' }
+
 export interface BoardStore {
   listTasks(): Promise<Task[]>;
   /** Throws NotFoundError. */
   getTask(id: string): Promise<Task>;
-  createTask(t: { title: string; description: string; repo: RepoId; baseBranch?: string }): Promise<Task>;
+  createTask(t: NewTask): Promise<Task>;
   /** Throws VersionConflictError; returns the stored task with version + 1. */
   updateTask(id: string, expectedVersion: number, patch: Partial<Task>): Promise<Task>;
   addDoc(taskId: string, kind: DocKind, body: string, author: string): Promise<Doc>;

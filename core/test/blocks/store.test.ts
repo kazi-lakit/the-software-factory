@@ -55,15 +55,20 @@ describe('BlocksStore', () => {
     expect(MAX_DOC_BYTES).toBe(4 * 1024 * 1024);
   });
 
-  it('core identity: owner-only methods throw OwnerOnlyError before any data call', async () => {
+  it('core identity: owner-only methods (not createTask) throw OwnerOnlyError before any data call', async () => {
     const data = counting(new FakeBlocksData('factory-core'));
     const s = new BlocksStore(data, 'core');
-    await expect(s.createTask({ title: 't', description: '', repo: 'data' })).rejects.toThrow(
-      new OwnerOnlyError('createTask is done on the Board, not by the factory core'),
-    );
     await expect(s.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'approve', comment: '' })).rejects.toBeInstanceOf(OwnerOnlyError);
     await expect(s.setSettings({ global: DEFAULT_SETTINGS, repos: {} })).rejects.toThrow('setSettings is done on the Board, not by the factory core');
     expect(data.calls).toBe(0);
+  });
+
+  it('core identity: createTask inserts (the rules allow a core insert) as inbox or ready', async () => {
+    const storage = newFakeStorage();
+    const s = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core');
+    expect(await s.createTask({ title: 'a', description: 'd', repo: 'data' })).toMatchObject({ taskId: 'T-1', status: 'inbox' });
+    expect(await s.createTask({ title: 'b', description: '', repo: 'iam', status: 'ready' })).toMatchObject({ taskId: 'T-2', status: 'ready' });
+    expect((await s.getTask('T-2')).status).toBe('ready');
   });
 
   it('core identity: a patch outside CORE_TASK_FIELDS throws before any data call', async () => {

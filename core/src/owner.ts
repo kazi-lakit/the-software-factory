@@ -117,6 +117,31 @@ export async function createTask(
   return task;
 }
 
+export const CORE_NEW_ACTOR = 'core · new';
+
+/**
+ * `factory new`: the one task the core may insert, run by the owner from their session. Starts in inbox unless `ready`;
+ * the owner-only fields stay the owner's afterwards (the Blocks column rule). The base is never main.
+ */
+export async function createTaskAsCore(
+  store: BoardStore, now: () => Date, input: { title: string; description: string; repo: RepoId; baseBranch?: string; ready?: boolean },
+): Promise<Task> {
+  if (!nonBlank(input.title)) invalid('title must not be blank');
+  if (typeof input.description !== 'string') invalid('description must be text');
+  if (!isRepoId(input.repo)) invalid(`repo must be one of ${REPO_IDS.join(', ')}`);
+  if (input.baseBranch !== undefined && !nonBlank(input.baseBranch)) invalid('base branch must not be blank');
+  if (input.baseBranch?.trim() === 'main') invalid('the factory never targets main');
+  const at = now().toISOString();
+  const task = await store.createTask({
+    title: input.title.trim(), description: input.description, repo: input.repo, status: input.ready ? 'ready' : 'inbox',
+    ...(input.baseBranch !== undefined ? { baseBranch: input.baseBranch.trim() } : {}),
+  });
+  await writeEvents(store, [
+    { taskId: task.taskId, actor: CORE_NEW_ACTOR, action: 'create', field: null, from: null, to: task.status, reason: 'created by factory new', at },
+  ]);
+  return task;
+}
+
 async function move(store: BoardStore, now: () => Date, taskId: string, to: Status, reason: string): Promise<Task> {
   const task = await store.getTask(taskId);
   assertMove(task.status, to, 'you');

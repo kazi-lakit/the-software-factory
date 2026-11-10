@@ -13,7 +13,7 @@ export {
 export type { BoardStore, NewApproval, StoredSettings } from './boardStore.js';
 import {
   CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval, updateHeld,
-  VersionConflictError, canonicalJson, settingsConflict, type BoardStore, type NewApproval, type StoredSettings,
+  VersionConflictError, canonicalJson, settingsConflict, type BoardStore, type NewApproval, type NewTask, type StoredSettings,
 } from './boardStore.js';
 
 interface State {
@@ -60,7 +60,7 @@ export class MemoryStore implements BoardStore {
     return this.read(() => clone(this.find(id)));
   }
 
-  createTask(t: { title: string; description: string; repo: RepoId; baseBranch?: string }) {
+  createTask(t: NewTask) {
     return this.write(() => {
       const task: Task = {
         taskId: nextId('T', this.state.tasks.map((x) => x.taskId)),
@@ -68,7 +68,7 @@ export class MemoryStore implements BoardStore {
         description: t.description,
         repo: t.repo,
         baseBranch: t.baseBranch ?? 'dev',
-        status: 'inbox',
+        status: t.status ?? 'inbox',
         stage: null,
         branch: null,
         prUrl: null,

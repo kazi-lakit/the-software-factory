@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { ClaimError, Engine } from '../src/engine.js';
 import { FakeGitHub } from '../src/github.js';
 import {
-  answerTask, cancelTask, createTask, decideGate, editTask, markReady, OwnerActionError, saveSettings, StaleDocError,
+  answerTask, cancelTask, createTask, createTaskAsCore, decideGate, editTask, markReady, OwnerActionError, saveSettings, StaleDocError,
 } from '../src/owner.js';
 import type { RepoConfig } from '../src/repoConfig.js';
 import { IllegalMoveError } from '../src/status.js';
@@ -466,4 +466,48 @@ test('OwnerActionError and StaleDocError carry their details', () => {
   const s = new StaleDocError('T-1', 'spec', 1, 2);
   expect(s).toMatchObject({ name: 'StaleDocError', taskId: 'T-1', kind: 'spec', seenVersion: 1, currentVersion: 2 });
   expect(s.message).toBe('T-1 spec is now v2, not v1');
+});
+
+describe.each(fixtures)('createTaskAsCore (%s)', (_name, make) => {
+  const setup = () => make();
+  const input = { title: ' Fix typo ', description: 'd', repo: 'data' as RepoId };
+
+  test('inserts in inbox by default with a create event from core · new', async () => {
+    const { core } = setup();
+    const t = await createTaskAsCore(core, now, input);
+    expect(t).toMatchObject({ taskId: 'T-1', title: 'Fix typo', description: 'd', repo: 'data', baseBranch: 'dev', status: 'inbox', version: 1 });
+    expect(await core.listEvents('T-1')).toEqual([
+      { taskId: 'T-1', actor: 'core · new', action: 'create', field: null, from: null, to: 'inbox', reason: 'created by factory new', at: NOW },
+    ]);
+  });
+
+  test('inserts in ready when asked', async () => {
+    const { core } = setup();
+    const t = await createTaskAsCore(core, now, { ...input, ready: true, baseBranch: 'stg' });
+    expect(t).toMatchObject({ status: 'ready', baseBranch: 'stg' });
+    expect(await core.getTask('T-1')).toEqual(t);
+    expect((await core.listEvents('T-1'))[0]).toMatchObject({ to: 'ready', actor: 'core · new' });
+  });
+
+  test('refuses base main', async () => {
+    const { core } = setup();
+    await expect(createTaskAsCore(core, now, { ...input, baseBranch: 'main' })).rejects.toThrow('the factory never targets main');
+    expect(await core.listTasks()).toEqual([]);
+  });
+
+  test.each([
+    ['a blank title', { title: '  ' }, 'title must not be blank'],
+    ['an unknown repo', { repo: 'nope' as RepoId }, 'repo must be one of'],
+    ['a blank base', { baseBranch: ' ' }, 'base branch must not be blank'],
+  ])('refuses %s', async (_n, patch, message) => {
+    const { core } = setup();
+    await expect(createTaskAsCore(core, now, { ...input, ...patch })).rejects.toThrow(message);
+    expect(await core.listTasks()).toEqual([]);
+  });
+
+  test('the owner createTask still writes the event as you', async () => {
+    const { owner } = setup();
+    await createTask(owner, now, input);
+    expect((await owner.listEvents('T-1'))[0]).toMatchObject({ actor: 'you', reason: 'created' });
+  });
 });

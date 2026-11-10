@@ -4,7 +4,7 @@ import { DocTooLargeError, MAX_DOC_BYTES } from '../limits.js';
 import { DEFAULT_SETTINGS } from '../defaults.js';
 import {
   canonicalJson, CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval,
-  settingsConflict, VersionConflictError, type BoardStore, type NewApproval, type StoredSettings,
+  settingsConflict, VersionConflictError, type BoardStore, type NewApproval, type NewTask, type StoredSettings,
 } from '../boardStore.js';
 import type {
   Approval, Doc, DocKind, FactoryEvent, Gate, Mode, RepoId, RepoSettings, Run, Settings, Step, Task,
@@ -198,8 +198,8 @@ export class BlocksStore implements BoardStore {
     return decodeTask(rows[0]!);
   }
 
-  async createTask(t: { title: string; description: string; repo: RepoId; baseBranch?: string }): Promise<Task> {
-    this.ownerOnly('createTask');
+  async createTask(t: NewTask): Promise<Task> {
+    // Both identities may insert a task: the core only through `factory new` (see createTaskAsCore).
     for (let attempt = 0; attempt <= DUPLICATE_RETRIES; attempt++) {
       const ids = await this.data.list('FactoryTask', {}, ['taskId']);
       const taskId = `T-${1 + Math.max(0, ...ids.map((r) => taskNumber(r.taskId)))}`;
@@ -209,7 +209,7 @@ export class BlocksStore implements BoardStore {
         description: t.description,
         repo: t.repo,
         baseBranch: t.baseBranch ?? 'dev',
-        status: 'inbox',
+        status: t.status ?? 'inbox',
         stage: null,
         branch: null,
         prUrl: null,

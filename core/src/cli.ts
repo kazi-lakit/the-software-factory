@@ -129,6 +129,37 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       }
     });
 
+  program
+    .command('new')
+    .description('create a task in the Board (run by the owner from their session; inbox unless --ready)')
+    .requiredOption('--repo <id>', 'repo id')
+    .requiredOption('--title <title>', 'task title')
+    .option('--description <text>', 'task description')
+    .option('--description-file <path>', 'file with the task description')
+    .option('--base <branch>', 'base branch (default dev; never main)')
+    .option('--ready', 'start in ready instead of inbox')
+    .option('--json', 'print the task as JSON')
+    .action(async (o: { repo: string; title: string; description?: string; descriptionFile?: string; base?: string; ready?: boolean; json?: boolean }, cmd: Command) => {
+      if ((o.description === undefined) === (o.descriptionFile === undefined)) {
+        throw new CliExit('pass exactly one of --description or --description-file', 1);
+      }
+      const repo = choice<RepoId>('--repo', o.repo, REPO_IDS);
+      let description = o.description ?? '';
+      if (o.descriptionFile !== undefined) {
+        try {
+          description = readFileSync(o.descriptionFile, 'utf8');
+        } catch {
+          throw new CliExit(`cannot read --description-file ${o.descriptionFile}`, 1);
+        }
+      }
+      const { store } = await open(cmd);
+      const t = await owner.createTaskAsCore(store, () => new Date(), {
+        title: o.title, description, repo, ...(o.base ? { baseBranch: o.base } : {}), ready: o.ready === true,
+      });
+      if (o.json) return printJson(t);
+      io.out(`${t.taskId} created in ${t.status}`);
+    });
+
   const dev = program.command('dev').description('stand-ins for the Board page (file store only)');
   const openDev = async (cmd: Command): Promise<BoardStore> => {
     if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') throw new CliExit('dev commands need --store file', 1);

@@ -9,7 +9,7 @@ import type { GitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
 import type { RepoConfig } from '../src/repoConfig.js';
 import { BlocksStore } from '../src/blocks/store.js';
-import { FakeBlocksData } from '../src/blocks/fakeData.js';
+import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
 import { MemoryStore } from '../src/store.js';
 import type { RepoId, Task } from '../src/types.js';
 
@@ -278,5 +278,73 @@ describe('factory cli', () => {
     expect(json.settings.gates).toEqual({ spec: true, plan: false, pr: true });
     await go('status');
     expect(out.slice(1).join('\n')).toMatch(/ready: 1/);
+  });
+});
+
+describe('new', () => {
+  const dir = () => mkdtempSync(join(tmpdir(), 'factory-new-'));
+
+  test('creates an inbox task and prints the line; the event is core · new', async () => {
+    const { store, out, go } = setup();
+    expect(await go('new', '--repo', 'data', '--title', 'Fix typo', '--description', 'd')).toBe(0);
+    expect(out).toEqual(['T-1 created in inbox']);
+    expect(await store.getTask('T-1')).toMatchObject({ title: 'Fix typo', description: 'd', repo: 'data', baseBranch: 'dev', status: 'inbox' });
+    expect(await store.listEvents('T-1')).toMatchObject([{ actor: 'core · new', action: 'create', to: 'inbox', reason: 'created by factory new' }]);
+  });
+
+  test('--ready creates in ready; --base is used', async () => {
+    const { store, out, go } = setup();
+    expect(await go('new', '--repo', 'data', '--title', 'X', '--description', '', '--ready', '--base', 'stg')).toBe(0);
+    expect(out).toEqual(['T-1 created in ready']);
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', baseBranch: 'stg' });
+  });
+
+  test('--description-file reads the text as is', async () => {
+    const { store, go } = setup();
+    const file = join(dir(), 'd.md');
+    writeFileSync(file, 'line one\n"quoted" $x `y`\n');
+    expect(await go('new', '--repo', 'data', '--title', 'X', '--description-file', file)).toBe(0);
+    expect((await store.getTask('T-1')).description).toBe('line one\n"quoted" $x `y`\n');
+  });
+
+  test('--json prints the task', async () => {
+    const { out, go } = setup();
+    expect(await go('new', '--repo', 'data', '--title', 'X', '--description', 'd', '--json')).toBe(0);
+    expect(JSON.parse(out.join('\n'))).toMatchObject({ taskId: 'T-1', status: 'inbox' });
+  });
+
+  test('exactly one description source', async () => {
+    const { store, err, go } = setup();
+    const file = join(dir(), 'd.md');
+    writeFileSync(file, 'x');
+    expect(await go('new', '--repo', 'data', '--title', 'X')).toBe(1);
+    expect(await go('new', '--repo', 'data', '--title', 'X', '--description', 'a', '--description-file', file)).toBe(1);
+    expect(err).toEqual(Array(2).fill('error: pass exactly one of --description or --description-file'));
+    expect(await store.listTasks()).toEqual([]);
+  });
+
+  test('a missing file, base main and an unknown repo exit 1 with one line', async () => {
+    const { store, err, go } = setup();
+    expect(await go('new', '--repo', 'data', '--title', 'X', '--description-file', '/nope/none.md')).toBe(1);
+    expect(await go('new', '--repo', 'data', '--title', 'X', '--description', 'd', '--base', 'main')).toBe(1);
+    expect(await go('new', '--repo', 'zzz', '--title', 'X', '--description', 'd')).toBe(1);
+    expect(err[0]).toBe('error: cannot read --description-file /nope/none.md');
+    expect(err[1]).toContain('the factory never targets main');
+    expect(err[2]).toContain('--repo must be one of');
+    expect(await store.listTasks()).toEqual([]);
+  });
+
+  test('works with a BlocksStore (core identity)', async () => {
+    const storage = newFakeStorage();
+    const store = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core');
+    const out: string[] = [];
+    const engine = new Engine({
+      store, git, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,
+      exec: async () => ({ code: 0, output: '' }), now: () => new Date(), mode: 'session', claimant: 'me',
+    });
+    const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: () => {} }, async () => ({ engine, store }));
+    expect(await go('--store', 'blocks', 'new', '--repo', 'data', '--title', 'X', '--description', 'd', '--ready')).toBe(0);
+    expect(out).toEqual(['T-1 created in ready']);
+    expect(await store.listEvents('T-1')).toMatchObject([{ actor: 'core · new' }]);
   });
 });
