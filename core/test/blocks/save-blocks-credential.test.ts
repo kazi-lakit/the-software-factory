@@ -42,7 +42,7 @@ describe('runSave', () => {
   };
   it('puts the secret only in stdin and prints only the client id', async () => {
     const { calls, spawn } = make(0);
-    const out = await runSave({ raw, argv, spawn, exec: execOf(expected + '\n') });
+    const out = await runSave({ platform: 'darwin', raw, argv, spawn, exec: execOf(expected + '\n') });
     expect(out).toEqual({ code: 0, stdout: 'saved blocks-credential (client cid)' });
     expect(calls).toHaveLength(1);
     expect(calls[0].file).toBe('security');
@@ -57,21 +57,52 @@ describe('runSave', () => {
   it('errors on read-back mismatch or failure without printing either value', async () => {
     for (const exec of [execOf('{"other":"LEAKME"}\n'), execOf('', 44)]) {
       const { spawn } = make(0);
-      const out = await runSave({ raw, argv, spawn, exec });
+      const out = await runSave({ platform: 'darwin', raw, argv, spawn, exec });
       expect(out).toEqual({ code: 1, stdout: 'error: could not save blocks-credential' });
     }
   });
   it('fails with a fixed message on a non-zero exit', async () => {
     const { spawn } = make(1);
-    const out = await runSave({ raw, argv, spawn, exec: execOf(expected) });
+    const out = await runSave({ platform: 'darwin', raw, argv, spawn, exec: execOf(expected) });
     expect(out).toEqual({ code: 1, stdout: 'error: could not save blocks-credential' });
   });
   it('validates flags and never spawns on bad input', async () => {
     const { calls, spawn } = make(0);
     for (const argv of [[], ['--project-key', '--api-url', 'https://x.io'], ['--project-key', 'a b', '--api-url', 'https://x.io'], ['--project-key', 'a', '--api-url', 'http://x.io'], ['--project-key', 'a', '--api-url', 'nope']]) {
-      expect((await runSave({ raw, argv, spawn })).code).toBe(1);
+      expect((await runSave({ platform: 'darwin', raw, argv, spawn })).code).toBe(1);
     }
-    expect((await runSave({ raw: 'garbage TOPSECRET', argv: ['--project-key', 'a', '--api-url', 'https://x.io'], spawn })).stdout).not.toContain('TOPSECRET');
+    expect((await runSave({ platform: 'darwin', raw: 'garbage TOPSECRET', argv: ['--project-key', 'a', '--api-url', 'https://x.io'], spawn })).stdout).not.toContain('TOPSECRET');
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('runSave on Linux', () => {
+  const raw = JSON.stringify({ clientId: 'cid', clientSecret: 'TOPSECRET' });
+  const argv = ['--project-key', 'tenant1', '--api-url', 'https://api.example.com'];
+  const expected = JSON.stringify({ clientId: 'cid', clientSecret: 'TOPSECRET', projectKey: 'tenant1', apiUrl: 'https://api.example.com' });
+  const make = (code: number) => {
+    const calls: { file: string; args: string[]; stdin: string }[] = [];
+    const spawn: Spawner = async (file, args, stdin) => { calls.push({ file, args, stdin }); return { code }; };
+    return { calls, spawn };
+  };
+  it('stores with secret-tool, the secret only in stdin, then reads it back', async () => {
+    const { calls, spawn } = make(0);
+    const reads: Array<[string, string[]]> = [];
+    const exec: ExecFile = async (file, args) => { reads.push([file, args]); return { code: 0, stdout: expected, stderr: '' }; };
+    const out = await runSave({ platform: 'linux', raw, argv, spawn, exec });
+    expect(out).toEqual({ code: 0, stdout: 'saved blocks-credential (client cid)' });
+    expect(calls).toEqual([{ file: 'secret-tool', args: ['store', '--label=the-software-factory blocks-credential', 'service', 'the-software-factory', 'account', 'blocks-credential'], stdin: expected }]);
+    expect(reads).toEqual([['secret-tool', ['lookup', 'service', 'the-software-factory', 'account', 'blocks-credential']]]);
+  });
+  it('fails without printing the secret when secret-tool fails', async () => {
+    const { spawn } = make(1);
+    const out = await runSave({ platform: 'linux', raw, argv, spawn, exec: async () => ({ code: 0, stdout: expected, stderr: '' }) });
+    expect(out).toEqual({ code: 1, stdout: 'error: could not save blocks-credential' });
+  });
+  it('refuses another platform without spawning', async () => {
+    const { calls, spawn } = make(0);
+    const out = await runSave({ platform: 'win32', raw, argv, spawn });
+    expect(out).toEqual({ code: 1, stdout: 'error: no secret store on win32 (macOS Keychain or Linux secret-tool only)' });
+    expect(calls).toEqual([]);
   });
 });
