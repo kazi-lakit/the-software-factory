@@ -550,11 +550,36 @@ describe.each(fixtures)('creating a task checks the factory and its repos (%s)',
     expect(await store.listTasks()).toEqual([]);
   });
 
-  test('the same repo id in a second factory is its own repo', async () => {
-    const { owner } = make();
-    // Another factory exists, but `data` is only in blocks.
-    expect(await owner.listFactoryRepos('blocks')).toHaveLength(3);
+  // BlocksStore stores tasks of factory `blocks` only until plan 6 Task 3.
+  test.runIf(_name === 'MemoryStore')('the same repo id in a second factory is its own repo', async () => {
+    const factories = {
+      defs: [defFixture('blocks'), defFixture('delta')],
+      repos: [repoFixture('blocks', 'data'), repoFixture('delta', 'api')],
+    };
+    const owner = new MemoryStore({ factories });
+    await expect(createTask(owner, now, { factoryId: 'delta', ...input, repo: 'api' })).resolves.toMatchObject({ factoryId: 'delta', repo: 'api' });
+    await expect(createTask(owner, now, { factoryId: 'delta', ...input })).rejects.toThrow('repo data is not in factory delta');
     await expect(createTask(owner, now, { factoryId: 'blocks', ...input })).resolves.toMatchObject({ factoryId: 'blocks', repo: 'data' });
+    await expect(createTask(owner, now, { factoryId: 'blocks', ...input, repo: 'api' })).rejects.toThrow('repo api is not in factory blocks');
+  });
+
+  test('editTask refuses a repo that is not in the task\'s factory, and allows one that is', async () => {
+    const { owner } = make();
+    const t = await createTask(owner, now, { factoryId: 'blocks', ...input });
+    await expect(editTask(owner, now, t.taskId, t.version, { repo: 'api' })).rejects.toThrow('repo api is not in factory blocks');
+    expect((await owner.getTask(t.taskId)).repo).toBe('data');
+    await expect(editTask(owner, now, t.taskId, t.version, { repo: 'iam' })).resolves.toMatchObject({ repo: 'iam' });
+    // An edit that leaves the repo alone does not look it up.
+    await expect(editTask(owner, now, t.taskId, t.version + 1, { title: 'x' })).resolves.toMatchObject({ title: 'x' });
+  });
+
+  test('saveSettings refuses a factory or repo that does not exist', async () => {
+    const { owner } = make();
+    await expect(saveSettings(owner, now, 'delta', { paused: true })).rejects.toThrow('factory delta does not exist');
+    await expect(saveSettings(owner, now, 'blocks/api', { paused: true })).rejects.toThrow('repo api is not in factory blocks');
+    await expect(saveSettings(owner, now, 'delta/api', { paused: true })).rejects.toThrow('factory delta does not exist');
+    expect(await owner.getSettings()).toEqual({ factories: {} });
+    expect(await owner.listEvents('-')).toEqual([]);
   });
 });
 
@@ -620,6 +645,20 @@ describe.each([
     await saveRepo(s, now, api, { ...api, remote: 'git@github.com:o/other.git' });
     await expect(saveRepo(s, now, api, { ...api, baseBranch: 'stg' })).rejects.toBeInstanceOf(VersionConflictError);
     expect(await s.listFactoryRepos('delta')).toHaveLength(1);
+  });
+
+  test('events record the stored row as the old value, not the caller\'s stale copy', async () => {
+    const s = make();
+    const first = await saveFactory(s, now, null, defFixture('delta'));
+    // Same version as stored, but other content.
+    const lying = { ...first, name: 'Not what is stored' };
+    const before = (await s.listEvents('-')).length;
+    await saveFactory(s, now, lying, { ...first, name: 'Delta 2' });
+    expect((await factoryEvents(s)).slice(before)).toEqual([['delta', 'you', 'def.name', 'delta', 'Delta 2']]);
+    const api = await saveRepo(s, now, null, repoFixture('delta', 'api'));
+    const mark = (await s.listEvents('-')).length;
+    await saveRepo(s, now, { ...api, baseBranch: 'lie' }, { ...api, baseBranch: 'stg' });
+    expect((await factoryEvents(s)).slice(mark)).toEqual([['delta', 'you', 'repo.api.baseBranch', 'dev', 'stg']]);
   });
 
   test('createTask then works against a saved factory and repo', async () => {

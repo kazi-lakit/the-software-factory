@@ -105,6 +105,16 @@ function ownerFieldEvents(before: Task, after: Task, reason: string, at: string)
   }));
 }
 
+async function requireFactory(store: BoardStore, factoryId: string): Promise<void> {
+  if (!(await store.listFactoryDefs()).some((d) => d.factoryId === factoryId)) invalid(`factory ${factoryId} does not exist`);
+}
+
+/** The factory exists and has the repo. */
+async function requireRepo(store: BoardStore, factoryId: string, repoId: string): Promise<void> {
+  await requireFactory(store, factoryId);
+  if (!(await store.listFactoryRepos(factoryId)).some((r) => r.repoId === repoId)) invalid(`repo ${repoId} is not in factory ${factoryId}`);
+}
+
 /** The shared validation and insert-then-event of both creators; `actor` and `reason` name who made the task. */
 async function insertTask(
   store: BoardStore, now: () => Date, input: { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string; status?: 'inbox' | 'ready' },
@@ -115,10 +125,8 @@ async function insertTask(
   if (typeof input.description !== 'string') invalid('description must be text');
   if (!isRepoId(input.repo)) invalid(`repo must be a repo id (${REPO_ID_RULE})`);
   if (input.baseBranch !== undefined && !nonBlank(input.baseBranch)) invalid('base branch must not be blank');
-  if (!(await store.listFactoryDefs()).some((d) => d.factoryId === input.factoryId)) invalid(`factory ${input.factoryId} does not exist`);
-  if (!(await store.listFactoryRepos(input.factoryId)).some((r) => r.repoId === input.repo)) {
-    invalid(`repo ${input.repo} is not in factory ${input.factoryId}`);
-  }
+  await requireFactory(store, input.factoryId);
+  await requireRepo(store, input.factoryId, input.repo);
   const at = now().toISOString();
   const task = await store.createTask({
     factoryId: input.factoryId, title: input.title.trim(), description: input.description, repo: input.repo,
@@ -229,6 +237,7 @@ export async function editTask(store: BoardStore, now: () => Date, taskId: strin
   }
   if (task.version !== expectedVersion) throw new VersionConflictError(taskId, expectedVersion, task.version);
   if (!EDITABLE_FIELDS.some((f) => f in clean && canon(clean[f]) !== canon(task[f]))) return task;
+  if (clean.repo !== undefined && clean.repo !== task.repo) await requireRepo(store, task.factoryId, clean.repo);
   return ownerUpdate(store, now, task, clean, 'edited');
 }
 
@@ -269,6 +278,8 @@ export async function saveSettings(
       if (!ok) invalid(`${key} must be ${r.integer ? 'a whole number' : 'a number'} from ${r.min} to ${r.max}`);
     }
   }
+  if (isFactory) await requireFactory(store, factoryId);
+  else await requireRepo(store, factoryId, repoId);
   const stored = await store.getSettings();
   const entry = stored.factories[factoryId];
   const read = isFactory ? (entry?.factory ?? DEFAULT_SETTINGS) : entry?.repos[repoId];
@@ -337,8 +348,10 @@ export async function saveFactory(store: BoardStore, now: () => Date, before: Fa
   const checked = validateFactoryDef(after);
   if (!checked.ok) return invalid(checked.error);
   if (before !== null && before.factoryId !== after.factoryId) invalid('factoryId cannot be changed');
+  // History is the stored row's, not the caller's `before` (same version, other content).
+  const previous = before === null ? null : ((await store.listFactoryDefs()).find((d) => d.factoryId === before.factoryId) ?? null);
   const stored = await store.saveFactoryDef(before, checked.value);
-  await writeEvents(store, fieldEvents(DEF_FIELDS, before, stored, stored.factoryId, (f) => `def.${f}`, 'factory saved', now().toISOString()));
+  await writeEvents(store, fieldEvents(DEF_FIELDS, previous, stored, stored.factoryId, (f) => `def.${f}`, 'factory saved', now().toISOString()));
   return stored;
 }
 
@@ -350,7 +363,10 @@ export async function saveRepo(store: BoardStore, now: () => Date, before: Facto
   const checked = validateFactoryRepo(after, def);
   if (!checked.ok) return invalid(checked.error);
   if (before !== null && (before.factoryId !== after.factoryId || before.repoId !== after.repoId)) invalid('factoryId and repoId cannot be changed');
+  const previous = before === null
+    ? null
+    : ((await store.listFactoryRepos(before.factoryId)).find((r) => r.repoId === before.repoId) ?? null);
   const stored = await store.saveFactoryRepo(before, checked.value);
-  await writeEvents(store, fieldEvents(REPO_FIELDS, before, stored, stored.factoryId, (f) => `repo.${stored.repoId}.${f}`, 'repo saved', now().toISOString()));
+  await writeEvents(store, fieldEvents(REPO_FIELDS, previous, stored, stored.factoryId, (f) => `repo.${stored.repoId}.${f}`, 'repo saved', now().toISOString()));
   return stored;
 }

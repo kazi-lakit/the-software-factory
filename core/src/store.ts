@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { DEFAULT_SETTINGS } from './defaults.js';
 import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
 import { loadFactoriesFromDir } from './factoriesFs.js';
@@ -311,6 +311,10 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 export interface FileStoreOptions extends Omit<MemoryStoreOptions, 'factories'> {
   /** How long a write waits for the lock before it gives up (default 5 s). */
   lockTimeoutMs?: number;
+  /** Where definitions are seeded from the first time the store has none (`<root>/factories`). Left out: no seeding. */
+  factoriesDir?: string;
+  /** Told why a definition file was skipped while seeding. */
+  log?: (line: string) => void;
 }
 
 /** A lock file older than this belongs to a crashed writer and may be removed. */
@@ -323,9 +327,15 @@ const STALE_LOCK_MS = 30_000;
 export class FileStore extends MemoryStore {
   private readonly lockPath: string;
   private readonly lockTimeoutMs: number;
+  private readonly factoriesDir: string | undefined;
+  private readonly log: ((line: string) => void) | undefined;
+  /** Read once per instance: a bad file is reported once, not on every call. */
+  private seeded: { defs: FactoryDef[]; repos: FactoryRepo[] } | undefined;
 
   constructor(private readonly path: string, opts: FileStoreOptions = {}) {
     super(opts);
+    this.factoriesDir = opts.factoriesDir;
+    this.log = opts.log;
     this.lockPath = `${path}.lock`;
     this.lockTimeoutMs = opts.lockTimeoutMs ?? 5_000;
     this.reload();
@@ -356,7 +366,7 @@ export class FileStore extends MemoryStore {
 
   /**
    * A file written before factories: its tasks and events belong to factory `blocks`, and its `{ global, repos }`
-   * settings are that factory's. Definitions the file lacks are seeded from `<dir>/factories` (see loadFactoriesFromDir).
+   * settings are that factory's. Definitions the file lacks are seeded from `factoriesDir` (see loadFactoriesFromDir).
    */
   private upgrade(raw: Record<string, unknown>): State {
     const state = { ...emptyState(), ...raw } as State;
@@ -366,10 +376,10 @@ export class FileStore extends MemoryStore {
     if (legacy && 'global' in legacy) {
       state.settings = { factories: { [LEGACY_FACTORY]: { factory: legacy.global ?? clone(DEFAULT_SETTINGS), repos: legacy.repos ?? {} } } };
     }
-    if (state.factoryDefs.length === 0 && state.factoryRepos.length === 0) {
-      const seeded = loadFactoriesFromDir(join(dirname(this.path), 'factories'));
-      state.factoryDefs = seeded.defs;
-      state.factoryRepos = seeded.repos;
+    if (this.factoriesDir !== undefined && state.factoryDefs.length === 0 && state.factoryRepos.length === 0) {
+      this.seeded ??= loadFactoriesFromDir(this.factoriesDir, (file, reason) => this.log?.(`skipped ${file}: ${reason}`));
+      state.factoryDefs = clone(this.seeded.defs);
+      state.factoryRepos = clone(this.seeded.repos);
     }
     return state;
   }

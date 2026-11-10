@@ -111,7 +111,7 @@ function loadLegacyRepoConfigs(reposDir: string): Record<RepoId, RepoConfig> {
 }
 
 export async function wire(o: WireOptions): Promise<{ engine: Engine; store: BoardStore }> {
-  const store: BoardStore = o.store === 'blocks' ? new LazyBlocksStore(o.loadCredential) : new FileStore(join(o.root, '.factory', 'board.json'));
+  const store: BoardStore = o.store === 'blocks' ? new LazyBlocksStore(o.loadCredential) : new FileStore(join(o.root, '.factory', 'board.json'), { factoriesDir: join(o.root, 'factories'), ...(o.log ? { log: o.log } : {}) });
   const engine = new Engine({
     store,
     git: new LocalGitRepos(o.root),

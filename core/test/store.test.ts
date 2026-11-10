@@ -116,12 +116,35 @@ describe('FileStore factories', () => {
       join(root, 'factories', 'delta', 'repos', 'api.yaml'),
       'repoId: api\nremote: git@github.com:o/api.git\nchecks:\n  server: { cwd: s, build: b, test: t }\n  client: { cwd: c, install: i, typecheck: tc, lint: l, test: t }\n  e2e: off\n',
     );
-    const s = new FileStore(join(root, 'board.json'));
+    // The board file is not in the root: the definitions dir is given explicitly.
+    const board = join(root, '.factory', 'board.json');
+    const opts = { factoriesDir: join(root, 'factories') };
+    const s = new FileStore(board, opts);
     expect((await s.listFactoryDefs()).map((d) => d.factoryId)).toEqual(['delta']);
     expect((await s.listFactoryRepos('delta')).map((r) => r.repoId)).toEqual(['api']);
     const [def] = await s.listFactoryDefs();
     await s.saveFactoryDef(def!, { ...def!, name: 'Delta 2' });
-    expect((await new FileStore(join(root, 'board.json')).listFactoryDefs())[0]).toMatchObject({ name: 'Delta 2', version: 2 });
+    expect((await new FileStore(board, opts).listFactoryDefs())[0]).toMatchObject({ name: 'Delta 2', version: 2 });
+  });
+
+  test('an invalid definition is skipped with a logged reason; the valid one loads', async () => {
+    const root = dir();
+    for (const id of ['alpha', 'broken']) mkdirSync(join(root, 'factories', id), { recursive: true });
+    writeFileSync(join(root, 'factories', 'alpha', 'factory.yaml'), 'factoryId: alpha\nname: Alpha\n');
+    writeFileSync(join(root, 'factories', 'broken', 'factory.yaml'), 'factoryId: Not Valid\n');
+    const lines: string[] = [];
+    const s = new FileStore(join(root, 'board.json'), { factoriesDir: join(root, 'factories'), log: (l) => lines.push(l) });
+    expect((await s.listFactoryDefs()).map((d) => d.factoryId)).toEqual(['alpha']);
+    await s.listFactoryDefs();
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('broken');
+  });
+
+  test('without factoriesDir nothing is seeded', async () => {
+    const root = dir();
+    mkdirSync(join(root, 'factories', 'alpha'), { recursive: true });
+    writeFileSync(join(root, 'factories', 'alpha', 'factory.yaml'), 'factoryId: alpha\n');
+    expect(await new FileStore(join(root, 'board.json')).listFactoryDefs()).toEqual([]);
   });
 
   test('an old file without factories loads as factory blocks', async () => {
