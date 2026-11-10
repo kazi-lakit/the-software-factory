@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Status, Task } from "@factory/core";
-import { ctaLabel, progressLabel, progressSteps, STEPS, type StepState } from "./status";
+import { ageOf, ctaLabel, progressLabel, progressSteps, STEPS, type StepState } from "./status";
 
 type Stage = Task["stage"];
 const T = "todo", D = "done", C = "current", W = "waiting";
@@ -51,5 +51,22 @@ describe("status helpers", () => {
     expect(progressLabel("cancelled", "build")).toBe("Progress: stopped");
     expect(progressLabel("done", null)).toBe("Progress: done");
     expect(progressLabel("blocked", null)).toBe("Progress: stopped");
+  });
+});
+
+describe("ageOf", () => {
+  const now = Date.parse("2026-11-10T12:00:00.000Z");
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+  it("ageOf_just_now_under_a_minute", () => {
+    expect(ageOf(ago(30_000), now)).toBe("just now");
+  });
+  it("ageOf_formats_minutes_hours_days", () => {
+    expect(ageOf(ago(5 * 60_000), now)).toBe("5m");
+    expect(ageOf(ago(5 * 3_600_000), now)).toBe("5h");
+    expect(ageOf(ago(3 * 86_400_000), now)).toBe("3d");
+  });
+  it("ageOf_returns_null_for_undefined_or_invalid", () => {
+    expect(ageOf(undefined, now)).toBeNull();
+    expect(ageOf("garbage", now)).toBeNull();
   });
 });
