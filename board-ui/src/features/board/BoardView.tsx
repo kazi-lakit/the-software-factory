@@ -95,6 +95,10 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const [view, setView] = useBoardView();
   const [showTest, setShowTest] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<Status>>(new Set());
+  // Expansion is not remembered: leaving All stages collapses Done and Cancelled again.
+  useEffect(() => {
+    if (view !== "stages") setExpanded((current) => (current.size === 0 ? current : new Set()));
+  }, [view]);
   // A New task link wins over unsent text; otherwise reopens on unsent text, e.g. after the session ended mid-form.
   const [prefill] = useState(readLinkPrefill);
   const [link, setLink] = useState(prefill.choice);

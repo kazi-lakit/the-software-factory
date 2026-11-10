@@ -761,4 +761,68 @@ describe("BoardView all stages restyle", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Show test tasks" }));
     expect(screen.getAllByRole("region")).toHaveLength(13);
   });
+
+  it("done_and_cancelled_start_collapsed_with_counts_and_no_cards", async () => {
+    await seedTask({ title: "Shipped" }, "done");
+    await seedTask({ title: "Dropped" }, "cancelled");
+    renderBoard();
+    for (const name of ["Done (1)", "Cancelled (1)"]) {
+      expect(await screen.findByRole("button", { name })).toHaveAttribute("aria-expanded", "false");
+    }
+    expect(column("Done")).toHaveClass("sf-column-collapsed");
+    expect(column("Cancelled")).toHaveClass("sf-column-collapsed");
+    expect(screen.queryByText("Shipped")).toBeNull();
+    expect(screen.queryByText("Dropped")).toBeNull();
+  });
+
+  it("clicking_the_header_expands_and_clicking_again_collapses", async () => {
+    await seedTask({ title: "Shipped" }, "done");
+    renderBoard();
+    const toggle = await screen.findByRole("button", { name: "Done (1)" });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("Shipped")).toBeInTheDocument();
+    expect(column("Done")).not.toHaveClass("sf-column-collapsed");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Shipped")).toBeNull();
+    expect(column("Done")).toHaveClass("sf-column-collapsed");
+  });
+
+  it("a_collapsed_column_with_tasks_has_no_aria_controls", async () => {
+    await seedTask({ title: "Shipped" }, "done");
+    renderBoard();
+    const toggle = await screen.findByRole("button", { name: "Done (1)" });
+    expect(toggle).not.toHaveAttribute("aria-controls");
+    fireEvent.click(toggle);
+    const target = toggle.getAttribute("aria-controls");
+    expect(target).toBeTruthy();
+    expect(document.getElementById(target ?? "")).not.toBeNull();
+  });
+
+  it("expansion_is_not_remembered", async () => {
+    await seedTask({ title: "Shipped" }, "done");
+    renderBoard();
+    fireEvent.click(await screen.findByRole("button", { name: "Done (1)" }));
+    expect(screen.getByText("Shipped")).toBeInTheDocument();
+    cleanup();
+    renderBoard();
+    expect(await screen.findByRole("button", { name: "Done (1)" })).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Done (1)" }));
+    expect(screen.getByText("Shipped")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Lanes" }));
+    fireEvent.click(screen.getByRole("button", { name: "All stages" }));
+    expect(screen.getByRole("button", { name: "Done (1)" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByText("Shipped")).toBeNull();
+  });
+
+  it("an_unknown_status_task_does_not_break_the_strip", async () => {
+    fakeBoard().ownerData.seed("FactoryTask", {
+      attempt: 0, baseBranch: "dev", costUsd: 0, description: "", gateOverrides: "{}", repo: "data", status: "paused",
+      taskId: "T-900", title: "Odd one", version: 1
+    });
+    renderBoard();
+    await screen.findByRole("region", { name: "Inbox" });
+    expect(screen.getAllByRole("region")).toHaveLength(13);
+  });
 });
