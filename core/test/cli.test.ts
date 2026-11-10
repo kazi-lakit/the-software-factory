@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import type { Exec } from '../src/checks.js';
 import { run, type WireOptions } from '../src/cli.js';
 import { Engine } from '../src/engine.js';
@@ -54,6 +54,22 @@ const put = async (store: MemoryStore, patch: Partial<Task>) => {
   const t = await store.createTask({ title: 'Add widget', description: 'd', repo: 'data' });
   return store.updateTask(t.taskId, t.version, patch);
 };
+
+// The CLI reads these from the environment; clear them so the suite passes with or without them exported.
+const AMBIENT = ['FACTORY_STORE', 'FACTORY_ROOT', 'FACTORY_CLAIMANT'] as const;
+const ambient: Partial<Record<(typeof AMBIENT)[number], string>> = {};
+beforeAll(() => {
+  for (const k of AMBIENT) {
+    if (process.env[k] !== undefined) ambient[k] = process.env[k];
+    delete process.env[k];
+  }
+});
+afterAll(() => {
+  for (const k of AMBIENT) {
+    if (ambient[k] === undefined) delete process.env[k];
+    else process.env[k] = ambient[k];
+  }
+});
 
 describe('factory cli', () => {
   test('next --json prints a ticket at the spec step', async () => {
@@ -116,10 +132,8 @@ describe('factory cli', () => {
   });
 
   describe('FACTORY_STORE', () => {
-    const saved = process.env.FACTORY_STORE;
     afterEach(() => {
-      if (saved === undefined) delete process.env.FACTORY_STORE;
-      else process.env.FACTORY_STORE = saved;
+      delete process.env.FACTORY_STORE;
     });
 
     test('is the default store, and an explicit --store wins', async () => {
@@ -327,10 +341,10 @@ describe('new', () => {
     const { store, err, go } = setup();
     expect(await go('new', '--repo', 'data', '--title', 'X', '--description-file', '/nope/none.md')).toBe(1);
     expect(await go('new', '--repo', 'data', '--title', 'X', '--description', 'd', '--base', 'main')).toBe(1);
-    expect(await go('new', '--repo', 'zzz', '--title', 'X', '--description', 'd')).toBe(1);
+    expect(await go('new', '--repo', 'ZZZ!', '--title', 'X', '--description', 'd')).toBe(1);
     expect(err[0]).toBe('error: cannot read --description-file /nope/none.md');
     expect(err[1]).toContain('the factory never targets main');
-    expect(err[2]).toContain('--repo must be one of');
+    expect(err[2]).toContain('--repo must be a repo id');
     expect(await store.listTasks()).toEqual([]);
   });
 

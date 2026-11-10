@@ -1,6 +1,6 @@
-export type RepoId = 'os' | 'iam' | 'monitor' | 'logic' | 'data' | 'localization' | 'release';
-/** Every repo the factory works on. Here, not in repoConfig.ts, so the browser entry can use it. */
-export const REPO_IDS: readonly RepoId[] = ['os', 'iam', 'monitor', 'logic', 'data', 'localization', 'release'];
+/** A repo id, unique within its factory (`^[a-z][a-z0-9-]*$`, at most 40 characters). */
+export type RepoId = string;
+export type FactoryId = string;
 export type Status =
   | 'inbox' | 'ready' | 'spec' | 'spec_review' | 'plan' | 'plan_review' | 'build'
   | 'verify' | 'review' | 'pr_open' | 'done' | 'blocked' | 'cancelled';

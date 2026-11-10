@@ -2,10 +2,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useId, useState } from "react";
 import type { FormEvent } from "react";
 import {
-  REPO_IDS, saveSettings, SETTING_RANGES, VersionConflictError,
+  saveSettings, SETTING_RANGES, VersionConflictError,
   type Gate, type RepoId, type RepoSettings, type RepoSettingsPatch, type Settings, type StoredSettings
 } from "@factory/core";
 import { boardStore } from "../../lib/board";
+import { REPO_IDS } from "../../lib/repoIds";
 import { HISTORY_KEY } from "../history/useHistory";
 import { describeWriteError, now, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 import { SETTINGS_KEY, useSettings } from "./useSettings";

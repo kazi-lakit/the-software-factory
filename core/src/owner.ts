@@ -4,9 +4,10 @@ import {
 import { GATE_DOC } from './gates.js';
 import { diffEvents } from './history.js';
 import { PROTECTED_BRANCHES } from './branches.js';
+import { isValidId } from './factories.js';
 import { assertMove } from './status.js';
 import {
-  REPO_IDS, type Approval, type DocKind, type FactoryEvent, type Gate, type RepoId, type RepoSettings, type Settings, type Status, type Task,
+  type Approval, type DocKind, type FactoryEvent, type Gate, type RepoId, type RepoSettings, type Settings, type Status, type Task,
 } from './types.js';
 
 // The owner's actions, shared by the Board page and `factory dev`. Pure (no Node API): the browser entry exports them.
@@ -50,7 +51,8 @@ const invalid = (message: string): never => {
   throw new OwnerActionError('invalid', message);
 };
 const nonBlank = (v: unknown): v is string => typeof v === 'string' && v.trim() !== '';
-const isRepoId = (v: unknown): v is RepoId => typeof v === 'string' && (REPO_IDS as readonly string[]).includes(v);
+const isRepoId = (v: unknown): v is RepoId => isValidId(v);
+const REPO_ID_RULE = 'lowercase letters, digits and hyphens, starting with a letter';
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 /** Drops undefined values: a key set to undefined is a key not sent. */
 const defined = <T extends object>(o: T): Partial<T> =>
@@ -108,7 +110,7 @@ async function insertTask(
 ): Promise<Task> {
   if (!nonBlank(input.title)) invalid('title must not be blank');
   if (typeof input.description !== 'string') invalid('description must be text');
-  if (!isRepoId(input.repo)) invalid(`repo must be one of ${REPO_IDS.join(', ')}`);
+  if (!isRepoId(input.repo)) invalid(`repo must be a repo id (${REPO_ID_RULE})`);
   if (input.baseBranch !== undefined && !nonBlank(input.baseBranch)) invalid('base branch must not be blank');
   const at = now().toISOString();
   const task = await store.createTask({
@@ -207,7 +209,7 @@ export async function editTask(store: BoardStore, now: () => Date, taskId: strin
     if (value === undefined) continue;
     if (key === 'title' && !nonBlank(value)) invalid('title must not be blank');
     if (key === 'description' && typeof value !== 'string') invalid('description must be text');
-    if (key === 'repo' && !isRepoId(value)) invalid(`repo must be one of ${REPO_IDS.join(', ')}`);
+    if (key === 'repo' && !isRepoId(value)) invalid(`repo must be a repo id (${REPO_ID_RULE})`);
     if (key === 'baseBranch' && !nonBlank(value)) invalid('base branch must not be blank');
     if (key === 'gateOverrides') checkGates(value, 'gateOverrides');
   }
@@ -239,7 +241,7 @@ export const INHERIT = 'inherit';
 export async function saveSettings(
   store: BoardStore, now: () => Date, scope: SettingsScope, patch: RepoSettingsPatch | RepoSettings | Settings,
 ): Promise<StoredSettings> {
-  if (scope !== 'global' && !isRepoId(scope)) invalid(`scope must be global or one of ${REPO_IDS.join(', ')}`);
+  if (scope !== 'global' && !isRepoId(scope)) invalid(`scope must be global or a repo id (${REPO_ID_RULE})`);
   if (!isObject(patch)) invalid('settings must be an object');
   for (const [key, value] of Object.entries(patch)) {
     if (!(SETTING_KEYS as readonly string[]).includes(key)) invalid(`unknown setting ${key}`);

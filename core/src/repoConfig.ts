@@ -2,9 +2,10 @@ import { readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { parse } from 'yaml';
 import { z } from 'zod';
-import { REPO_IDS, type RepoId } from './types.js';
+import { ChecksSchema } from './checksSchema.js';
+import type { RepoId } from './types.js';
 
-export { REPO_IDS };
+export { ChecksSchema };
 
 export class RepoConfigError extends Error {
   constructor(message: string) {
@@ -13,17 +14,11 @@ export class RepoConfigError extends Error {
   }
 }
 
-const cmd = z.string().min(1);
-
 const RepoConfigSchema = z.object({
-  repo: z.enum(REPO_IDS as [RepoId, ...RepoId[]]),
+  repo: z.string().min(1),
   remote: z.string().min(1),
   baseBranch: z.string().min(1).default('dev'),
-  checks: z.object({
-    server: z.object({ cwd: cmd, build: cmd, test: cmd }),
-    client: z.object({ cwd: cmd, install: cmd, typecheck: cmd, lint: cmd, test: cmd }),
-    e2e: z.literal('off'),
-  }),
+  checks: ChecksSchema,
 });
 
 export type RepoConfig = z.infer<typeof RepoConfigSchema>;
@@ -47,10 +42,4 @@ export function loadRepoConfig(reposDir: string, repo: RepoId): RepoConfig {
   }
   if (result.data.repo !== repo) throw new RepoConfigError(`${name}: repo must be "${repo}"`);
   return result.data;
-}
-
-export function loadAllRepoConfigs(reposDir: string): Record<RepoId, RepoConfig> {
-  const out = {} as Record<RepoId, RepoConfig>;
-  for (const id of REPO_IDS) out[id] = loadRepoConfig(reposDir, id);
-  return out;
 }

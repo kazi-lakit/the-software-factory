@@ -2,9 +2,10 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FormEvent, KeyboardEvent } from "react";
 import {
-  canMove, cancelTask, editTask, EDITABLE_STATUSES, markReady, REPO_IDS, type RepoId, type Task, type TaskEdit
+  canMove, cancelTask, editTask, EDITABLE_STATUSES, markReady, type RepoId, type Task, type TaskEdit
 } from "@factory/core";
 import { boardStore } from "../../lib/board";
+import { REPO_IDS } from "../../lib/repoIds";
 import { clearUnsent, hasUnsent, useUnsent } from "../../lib/unsent";
 import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "./writeOutcome";
 

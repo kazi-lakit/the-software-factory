@@ -8,14 +8,17 @@ export class ProtectedBranchError extends Error {
   }
 }
 
-/** True when the ref names a protected branch (`refs/heads/`, `refs/remotes/origin/`, `remotes/origin/` and `origin/` prefixes are ignored). */
-export function isProtected(ref: string): boolean {
+/**
+ * True when the ref names a protected branch (`refs/heads/`, `refs/remotes/origin/`, `remotes/origin/` and `origin/` prefixes
+ * are ignored). `main` always counts, whatever the list says.
+ */
+export function isProtected(ref: string, protectedBranches: readonly string[] = PROTECTED_BRANCHES): boolean {
   const name = ref.replace(/^refs\/heads\//, '').replace(/^(?:refs\/)?remotes\/origin\//, '').replace(/^origin\//, '');
-  return (PROTECTED_BRANCHES as readonly string[]).includes(name);
+  return name === 'main' || protectedBranches.includes(name);
 }
 
-export function assertPushAllowed(branch: string): void {
-  if (isProtected(branch)) throw new ProtectedBranchError(branch);
+export function assertPushAllowed(branch: string, protectedBranches: readonly string[] = PROTECTED_BRANCHES): void {
+  if (isProtected(branch, protectedBranches)) throw new ProtectedBranchError(branch);
 }
 
 /** Task branch name: `factory/<taskId>-<slug>`, slug lowercase a-z0-9- and at most 40 chars. */

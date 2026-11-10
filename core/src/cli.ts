@@ -6,7 +6,7 @@ import { parseAgentReply } from './agentReply.js';
 import type { Engine } from './engine.js';
 import { GATE_DOC } from './gates.js';
 import * as owner from './owner.js';
-import { REPO_IDS } from './repoConfig.js';
+import { isValidId } from './factories.js';
 import type { BoardStore } from './store.js';
 import type { AgentStep, Gate, Mode, RepoId } from './types.js';
 import { findRoot, wire, type WireOptions } from './wire.js';
@@ -35,6 +35,11 @@ const STORES = ['file', 'blocks'];
 function choice<T extends string>(what: string, value: string, allowed: readonly string[]): T {
   if (!allowed.includes(value)) throw new CliExit(`${what} must be one of ${allowed.join(', ')}`, 1);
   return value as T;
+}
+
+function repoId(what: string, value: string): RepoId {
+  if (!isValidId(value)) throw new CliExit(`${what} must be a repo id (lowercase letters, digits and hyphens)`, 1);
+  return value;
 }
 
 export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) => wire(o)): Promise<number> {
@@ -143,7 +148,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       if ((o.description === undefined) === (o.descriptionFile === undefined)) {
         throw new CliExit('pass exactly one of --description or --description-file', 1);
       }
-      const repo = choice<RepoId>('--repo', o.repo, REPO_IDS);
+      const repo = repoId('--repo', o.repo);
       let description = o.description ?? '';
       if (o.descriptionFile !== undefined) {
         try {
@@ -174,7 +179,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .option('--description <text>', 'task description', '')
     .option('--base <branch>', 'base branch')
     .action(async (o: { repo: string; title: string; description: string; base?: string }, cmd: Command) => {
-      const repo = choice<RepoId>('--repo', o.repo, REPO_IDS);
+      const repo = repoId('--repo', o.repo);
       const store = await openDev(cmd);
       const t = await owner.createTask(store, now, {
         title: o.title, description: o.description, repo, ...(o.base ? { baseBranch: o.base } : {}),

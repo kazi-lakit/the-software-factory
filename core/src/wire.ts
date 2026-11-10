@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { ClientCredentialsToken } from './blocks/token.js';
@@ -9,10 +9,10 @@ import { shellExec } from './checks.js';
 import { Engine } from './engine.js';
 import { LocalGitRepos } from './git.js';
 import { OctokitGitHub, type GitHub } from './github.js';
-import { loadAllRepoConfigs } from './repoConfig.js';
+import { loadRepoConfig, type RepoConfig } from './repoConfig.js';
 import { readSecret } from './secrets.js';
 import { FileStore, type BoardStore } from './store.js';
-import type { Mode } from './types.js';
+import type { Mode, RepoId } from './types.js';
 
 export interface WireOptions {
   root: string;
@@ -94,13 +94,23 @@ export class LazyBlocksStore implements BoardStore {
   updateSettingsScope(...a: Parameters<BoardStore['updateSettingsScope']>) { return this.store.then((s) => s.updateSettingsScope(...a)); }
 }
 
+/** Temporary single-factory adapter (factory `blocks`): every repos/*.yaml. Plan 6 Task 4 replaces it with FactoryConfig. */
+function loadLegacyRepoConfigs(reposDir: string): Record<RepoId, RepoConfig> {
+  const out: Record<RepoId, RepoConfig> = {};
+  for (const f of readdirSync(reposDir).filter((n) => n.endsWith('.yaml')).sort()) {
+    const id = f.slice(0, -'.yaml'.length);
+    out[id] = loadRepoConfig(reposDir, id);
+  }
+  return out;
+}
+
 export async function wire(o: WireOptions): Promise<{ engine: Engine; store: BoardStore }> {
   const store: BoardStore = o.store === 'blocks' ? new LazyBlocksStore(o.loadCredential) : new FileStore(join(o.root, '.factory', 'board.json'));
   const engine = new Engine({
     store,
     git: new LocalGitRepos(o.root),
     github: new LazyGitHub(),
-    repos: loadAllRepoConfigs(join(o.root, 'repos')),
+    repos: loadLegacyRepoConfigs(join(o.root, 'repos')),
     exec: shellExec,
     now: () => new Date(),
     mode: o.mode,

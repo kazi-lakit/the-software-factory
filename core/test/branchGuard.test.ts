@@ -11,12 +11,12 @@ import {
   branchName,
   isProtected,
 } from '../src/branchGuard.js';
-import { loadAllRepoConfigs } from '../src/repoConfig.js';
+import { loadRepoConfig } from '../src/repoConfig.js';
 
 const REPOS = fileURLToPath(new URL('../../repos', import.meta.url));
 
 describe('branch guard', () => {
-  test.each(Object.values(loadAllRepoConfigs(REPOS)))('$repo: protected branches refused', (cfg) => {
+  test.each(['os', 'iam', 'monitor', 'logic', 'data', 'localization', 'release'].map((id) => loadRepoConfig(REPOS, id)))('$repo: protected branches refused', (cfg) => {
     for (const b of [cfg.baseBranch, 'stg', 'main', 'refs/heads/main', 'origin/dev'])
       expect(() => assertPushAllowed(b)).toThrow(ProtectedBranchError);
     expect(() => assertPushAllowed(branchName('T-12', 'Add retry to export'))).not.toThrow();

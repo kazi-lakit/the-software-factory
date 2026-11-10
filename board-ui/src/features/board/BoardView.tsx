@@ -1,7 +1,8 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { createTask, REPO_IDS, type RepoId, type Status, type Task } from "@factory/core";
+import { createTask, type RepoId, type Status, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
+import { REPO_IDS } from "../../lib/repoIds";
 import { clearUnsent, hasUnsent, keepUnsent, useUnsent } from "../../lib/unsent";
 import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 import { COLUMNS, isTestTask, MUTED, STATUS_LABEL } from "./status";

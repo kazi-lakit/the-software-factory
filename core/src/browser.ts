@@ -5,11 +5,12 @@ export type { TokenSource } from './blocks/token.js';
 export { PROTECTED_TASK_FIELDS } from './blocks/schema.js';
 export { assertMove, canMove, IllegalMoveError, STEP_STATUS, TERMINAL } from './status.js';
 export { isProtected } from './branches.js';
+export { ensureMain, validateFactoryDef, validateFactoryRepo, FactoryConfig } from './factories.js';
+export type { FactoryDef, FactoryRepo, FactoryHealth } from './factories.js';
 export { GATE_DOC, resolveSettings, resolveGates, validApproval, shouldMerge } from './gates.js';
 export type {
-  RepoId, Status, Step, AgentStep, Gate, DocKind, Mode, Task, Doc, Approval, Settings, RepoSettings, Run, FactoryEvent, AgentResult,
+  RepoId, FactoryId, Status, Step, AgentStep, Gate, DocKind, Mode, Task, Doc, Approval, Settings, RepoSettings, Run, FactoryEvent, AgentResult,
 } from './types.js';
-export { REPO_IDS } from './types.js';
 export { DEFAULT_SETTINGS } from './defaults.js';
 export { MAX_DOC_BYTES } from './limits.js';
 export { ForbiddenError, VersionConflictError, NotFoundError } from './boardStore.js';

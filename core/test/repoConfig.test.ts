@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, test } from 'vitest';
-import { RepoConfigError, loadAllRepoConfigs, loadRepoConfig } from '../src/repoConfig.js';
+import { RepoConfigError, loadRepoConfig } from '../src/repoConfig.js';
 
+const REPO_IDS = ['os', 'iam', 'monitor', 'logic', 'data', 'localization', 'release'];
 const reposDir = fileURLToPath(new URL('../../repos', import.meta.url));
 
 function tempDir(files: Record<string, string>): string {
@@ -15,7 +16,7 @@ function tempDir(files: Record<string, string>): string {
 
 describe('repo configs', () => {
   test('loads all 7 shipped repos', () => {
-    const all = loadAllRepoConfigs(reposDir);
+    const all = Object.fromEntries(REPO_IDS.map((id) => [id, loadRepoConfig(reposDir, id)])) as Record<string, ReturnType<typeof loadRepoConfig>>;
     expect(Object.keys(all).sort()).toEqual(['data', 'iam', 'localization', 'logic', 'monitor', 'os', 'release']);
     for (const c of Object.values(all)) {
       expect(c.remote).toMatch(/SELISEdigitalplatforms\/blocks-[a-z]+\.git$/);
@@ -25,7 +26,7 @@ describe('repo configs', () => {
   });
 
   test('solution files per repo', () => {
-    const all = loadAllRepoConfigs(reposDir);
+    const all = Object.fromEntries(REPO_IDS.map((id) => [id, loadRepoConfig(reposDir, id)])) as Record<string, ReturnType<typeof loadRepoConfig>>;
     expect(all.iam.checks.server.build).toBe('dotnet build BlocksIAM.sln');
     expect(all.os.checks.server.test).toBe('dotnet test BlocksOS.sln');
     expect(all.data.checks.server.build).toBe('dotnet build Blocks.slnx');
@@ -53,6 +54,6 @@ describe('repo configs', () => {
   });
 
   test('missing file throws RepoConfigError', () => {
-    expect(() => loadAllRepoConfigs(tempDir({}))).toThrow(RepoConfigError);
+    expect(() => loadRepoConfig(tempDir({}), 'os')).toThrow(RepoConfigError);
   });
 });

@@ -78,7 +78,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
 
     test.each([
       ['a blank title', { title: '  ' }],
-      ['an unknown repo', { repo: 'nope' as RepoId }],
+      ['an unknown repo', { repo: 'Nope!' as RepoId }],
       ['an empty base branch', { baseBranch: ' ' }],
       ['a description that is not text', { description: 7 as unknown as string }],
     ])('refuses %s', async (_what, bad) => {
@@ -305,7 +305,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
     test.each([
       ['a blank title', { title: '' }],
       ['a description that is not text', { description: 7 }],
-      ['an unknown repo', { repo: 'nope' }],
+      ['an unknown repo', { repo: 'Nope!' }],
       ['an empty base branch', { baseBranch: '' }],
       ['a non-boolean gate override', { gateOverrides: { spec: 'yes' } }],
       ['an unknown gate', { gateOverrides: { deploy: true } }],
@@ -448,7 +448,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       ['global', { maxTurnsPerStage: 0 }], ['data', { maxTurnsPerStage: 501 }],
       ['global', { maxCostPerTaskUsd: -1 }], ['global', { maxCostPerTaskUsd: 1000.01 }], ['data', { maxCostPerTaskUsd: Number.NaN }],
       ['global', { maxParallel: '3' }], ['global', { paused: 'yes' }], ['data', { gates: { spec: 1 } }], ['global', { gates: { deploy: true } }],
-      ['global', { colour: 'red' }], ['nope', { maxParallel: 2 }],
+      ['global', { colour: 'red' }], ['Nope!', { maxParallel: 2 }],
       ['global', { maxParallel: null }], ['global', { gates: null }], ['global', { gates: { pr: null } }], ['data', { gates: { pr: 'off' } }],
     ])('refuses scope %s with %o', async (scope, patch) => {
       const { owner } = setup();
@@ -508,7 +508,7 @@ describe.each(fixtures)('createTaskAsCore (%s)', (_name, make) => {
 
   test.each([
     ['a blank title', { title: '  ' }, 'title must not be blank'],
-    ['an unknown repo', { repo: 'nope' as RepoId }, 'repo must be one of'],
+    ['an unknown repo', { repo: 'Nope!' as RepoId }, 'repo must be a repo id'],
     ['a blank base', { baseBranch: ' ' }, 'base branch must not be blank'],
   ])('refuses %s', async (_n, patch, message) => {
     const { core } = setup();

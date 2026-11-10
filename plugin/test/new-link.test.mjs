@@ -4,10 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { REPO_IDS } from '../../core/src/types.ts';
 import { buildLink } from '../skills/new/link.mjs';
 
 const script = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../skills/new/link.mjs');
+// plan 6 Task 7 replaces this: link.mjs will take the factory's repos instead of a fixed list.
+const REPO_IDS = ['os', 'iam', 'monitor', 'logic', 'data', 'localization', 'release'];
 const BOARD = 'https://board.test';
 const draft = (over = {}) => ({ title: 'Fix it', description: 'Details', repo: 'os', base: 'dev', ...over });
 const params = (url) => new URL(url).searchParams;
