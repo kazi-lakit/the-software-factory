@@ -10,7 +10,7 @@ import { Engine } from './engine.js';
 import { LocalGitRepos } from './git.js';
 import { OctokitGitHub, type GitHub } from './github.js';
 import { loadAllRepoConfigs } from './repoConfig.js';
-import { readSecret } from './secrets.js';
+import { githubUser, readGhToken } from './secrets.js';
 import { FileStore, type BoardStore } from './store.js';
 import type { Mode } from './types.js';
 
@@ -33,11 +33,11 @@ export function findRoot(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = p
   }
 }
 
-/** Creates the real GitHub client on first use, so commands that never touch GitHub need no PAT. */
+/** Creates the real GitHub client on first use, with the token of the gh CLI login, so commands that never touch GitHub never ask gh. */
 class LazyGitHub implements GitHub {
   private inner: Promise<GitHub> | undefined;
   private get gh(): Promise<GitHub> {
-    this.inner ??= readSecret('github-pat').then((pat) => new OctokitGitHub(pat));
+    this.inner ??= readGhToken(githubUser()).then((token) => new OctokitGitHub(token));
     return this.inner;
   }
   async openPr(p: Parameters<GitHub['openPr']>[0]) {

@@ -26,3 +26,16 @@ export async function readSecret(name: 'github-pat' | 'blocks-credential', exec:
   if (code !== 0) throw new SecretMissingError(`${name} not found in Keychain (service ${SERVICE})`);
   return stdout.replace(/\r?\n$/, '');
 }
+
+/** The gh CLI login whose token the factory uses for GitHub API calls: `FACTORY_GH_USER`, else `kazi-lakit`. */
+export function githubUser(env: NodeJS.ProcessEnv = process.env): string {
+  return env.FACTORY_GH_USER || 'kazi-lakit';
+}
+
+/** Reads the GitHub token of a gh CLI login (`gh auth token`). Error messages never include command output. */
+export async function readGhToken(user: string, exec: ExecFile = realExecFile): Promise<string> {
+  const { code, stdout } = await exec('gh', ['auth', 'token', '--hostname', 'github.com', '--user', user]);
+  const token = stdout.trim();
+  if (code !== 0 || !token) throw new SecretMissingError(`gh account ${user} is not logged in (run: gh auth login)`);
+  return token;
+}
