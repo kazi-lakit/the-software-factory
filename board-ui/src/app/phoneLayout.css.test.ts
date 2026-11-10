@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { phoneBlockInfo, phoneRules } from "../test/cssMedia";
+import { outranked, phoneBlockInfo, phoneRules } from "../test/cssMedia";
 import { tokens } from "../test/cssTokens";
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "board.css"), "utf8");
@@ -135,5 +135,53 @@ describe("phone pills and lanes", () => {
   it("the pill gets the shared colour transition and no phone rule adds one", () => {
     const list = css.match(/([^{}]+)\{\s*transition: background-color 150ms/)?.[1] ?? "";
     expect(list).toContain(".sf-pill");
+  });
+});
+
+describe("phone action bar, inputs and buttons", () => {
+  it("action bar is fixed with 48px buttons", () => {
+    const bar = phone(".sf-action-bar");
+    expect(bar).toMatchObject({ position: "fixed", left: "0", right: "0", bottom: "0", background: "var(--sf-surface)", gap: "8px", "flex-wrap": "nowrap" });
+    expect(bar["border-top"]).toContain("var(--sf-chrome-border)");
+    expect(bar.padding).toBe("8px 12px calc(8px + env(safe-area-inset-bottom))");
+    expect(phone(".sf-action-bar .sf-button")).toMatchObject({ flex: "1", "min-height": "var(--sf-actionbar-button)" });
+  });
+
+  it("Approve and Send answer keep the accent fill and Create task the primary fill", () => {
+    const bg = phoneRules(css).filter((r) => /sf-button-(accent|primary)/.test(r.selector) && ("background" in r.decls || "background-color" in r.decls));
+    expect(bg).toEqual([]);
+  });
+
+  it("New task form hides Close on phones", () => {
+    expect(phone(".sf-action-bar .sf-action-close").display).toBe("none");
+  });
+
+  it("inputs and selects are 44px with 16px text", () => {
+    for (const s of [".sf-input", ".sf-select"]) expect(phone(s)).toMatchObject({ "min-height": "var(--sf-input-height)", "font-size": "var(--sf-input-font)" });
+    expect(phone(".sf-select").height).toBe("var(--sf-input-height)");
+    expect(phone("input.sf-input").height).toBe("var(--sf-input-height)");
+    expect(phone("textarea.sf-input")["min-height"]).toBe("var(--sf-input-height)");
+    expect(phone("textarea.sf-input").height).toBeUndefined();
+  });
+
+  it("desktop control sizes stay", () => {
+    expect(tokens(css, ".sf-select").height).toBe("34px");
+    expect(tokens(css, ".sf-input")["min-height"]).toBe("28px");
+    expect(tokens(css, ".sf-select")["font-size"]).not.toBe("16px");
+    expect(tokens(css, ".sf-input")["font-size"]).toBeUndefined();
+  });
+
+  it("task action buttons are 44px", () => {
+    expect(phone(".sf-task-actions .sf-button")["min-height"]).toBe("var(--sf-input-height)");
+    expect(phone(".sf-form .sf-actions .sf-button")["min-height"]).toBe("var(--sf-input-height)");
+  });
+
+  it("no phone rule sets box-shadow", () => {
+    expect(phoneRules(css).filter((r) => "box-shadow" in r.decls)).toEqual([]);
+  });
+
+  it("no phone rule is out-ranked by an earlier base rule", () => {
+    const ELEMENT_OF = { "sf-lane-name": "h3", "sf-question-title": "h3", "sf-page-title": "h2", "sf-input": "input", "sf-select": "select", "sf-pill": "button", "sf-account-name": "span" };
+    expect(outranked(css, ELEMENT_OF, [".sf-theme-switch"])).toEqual([]);
   });
 });

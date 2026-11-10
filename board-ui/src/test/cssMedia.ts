@@ -150,9 +150,10 @@ const related = (a: string, b: string): boolean => a === b || a.startsWith(`${b}
  * Phone rules that a base rule would beat in a real browser: the base rule sets the same property on the
  * same element and is more specific and earlier, or at least as specific and later. `elementOf` maps a phone
  * subject class to its element (for example `sf-question-title` to `h3`) so bare-element base rules like
- * `.sf-view h3` are compared. Base rules for a different state (`:hover`, `[aria-current]`) are skipped.
+ * `.sf-view h3` are compared. `neverContains` lists base ancestors that cannot contain the phone subject
+ * (for example `.sf-theme-switch` never contains a lane pill), so their bare-element rules are not compared. Base rules for a different state (`:hover`, `[aria-current]`) are skipped.
  */
-export function outranked(css: string, elementOf: Record<string, string>): string[] {
+export function outranked(css: string, elementOf: Record<string, string>, neverContains: string[] = []): string[] {
   const base = baseRules(css);
   const found: string[] = [];
   for (const phone of phoneRules(css)) {
@@ -162,6 +163,7 @@ export function outranked(css: string, elementOf: Record<string, string>): strin
     const phoneSpec = specificity(phone.selector);
     const phoneStates = states(subj);
     for (const b of base) {
+      if (neverContains.some((c) => b.selector.startsWith(`${c} `))) continue;
       const bSubj = subject(b.selector);
       const sameClass = classesOf(bSubj).some((c) => classes.includes(c));
       const bElement = elementOfCompound(bSubj);

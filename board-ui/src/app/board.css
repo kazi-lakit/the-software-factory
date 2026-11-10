@@ -1750,4 +1750,47 @@ textarea.sf-input {
   .sf-view .sf-lane .sf-lane-empty {
     display: block;
   }
+
+  /* Action bar: fixed to the bottom, 48px buttons; accent and primary fills stay. Close is hidden because Cancel is in the top bar. */
+  .sf-action-bar {
+    background: var(--sf-surface);
+    border-top: 1px solid var(--sf-chrome-border);
+    bottom: 0;
+    flex-wrap: nowrap;
+    gap: 8px;
+    left: 0;
+    padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+    position: fixed;
+    right: 0;
+  }
+
+  .sf-action-bar .sf-button {
+    flex: 1;
+    min-height: var(--sf-actionbar-button);
+  }
+
+  .sf-action-bar .sf-action-close {
+    display: none;
+  }
+
+  /* Inputs and selects: 44px tall, 16px text so iOS does not zoom. */
+  .sf-input,
+  .sf-select {
+    font-size: var(--sf-input-font);
+    min-height: var(--sf-input-height);
+  }
+
+  input.sf-input,
+  .sf-select {
+    height: var(--sf-input-height);
+  }
+
+  textarea.sf-input {
+    min-height: var(--sf-input-height);
+  }
+
+  .sf-task-actions .sf-button,
+  .sf-form .sf-actions .sf-button {
+    min-height: var(--sf-input-height);
+  }
 }

@@ -476,7 +476,7 @@ function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start
       <WriteProblemNotice problem={problem} />
       <div className="sf-actions sf-action-bar">
         <button type="submit" className="sf-button sf-button-primary" disabled={busy}>Create task</button>
-        <button type="button" className="sf-button" onClick={onClose}>Close</button>
+        <button type="button" className="sf-button sf-action-close" onClick={onClose}>Close</button>
       </div>
     </form>
   );

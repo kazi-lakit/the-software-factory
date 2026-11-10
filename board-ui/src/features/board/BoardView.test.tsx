@@ -1089,4 +1089,11 @@ describe("New task form action bar", () => {
     expect(bar).toHaveClass("sf-actions", "sf-action-bar");
     expect(bar).toContainElement(within(form).getByRole("button", { name: "Close" }));
   });
+
+  it("Close_has_the_sf_action_close_class", async () => {
+    renderBoard();
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    const form = screen.getByRole("form", { name: "New task" });
+    expect(within(form).getByRole("button", { name: "Close" })).toHaveClass("sf-action-close");
+  });
 });
