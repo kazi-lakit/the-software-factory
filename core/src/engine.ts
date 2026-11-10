@@ -64,8 +64,8 @@ export interface FactoryStatus {
   active: boolean;
   paused: boolean;
   counts: Partial<Record<Status, number>>;
-  /** Whether the factory's PAT was found when last checked; null when it was never checked. */
-  patPresent: boolean | null;
+  /** Whether the factory's gh login was found when last checked; null when it was never checked. */
+  ghLoggedIn: boolean | null;
 }
 
 export interface EngineStatus {
@@ -344,7 +344,7 @@ export class Engine {
     // Defence in depth: the creators and the edit refuse main, but a row written another way must still never reach it.
     if (isMainRef(claimed.baseBranch)) return block(claimed, 'base main is never a target');
     try {
-      const github = this.deps.githubFor(def.patAccount);
+      const github = this.deps.githubFor(def.ghUser);
       await github.ensureReady?.(); // before any push: a missing PAT must not leave a pushed branch behind
       return await this.shipTo({ github, def, cfg, claimed, branch, settings, block });
     } catch (e) {
@@ -406,7 +406,7 @@ export class Engine {
     const { store, now } = this.deps;
     const cfg = await this.loadFactories();
     const stored = await retry(() => store.getSettings());
-    const health = new Map((await retry(() => store.listFactoryHealth())).map((h) => [h.factoryId, h.patPresent]));
+    const health = new Map((await retry(() => store.listFactoryHealth())).map((h) => [h.factoryId, h.ghLoggedIn]));
     const inScope = (factoryId: string) => !filter || filter.includes(factoryId);
     const tasks = (await retry(() => store.listTasks())).filter((t) => inScope(t.factoryId));
     const count = (list: Task[]) => {
@@ -426,7 +426,7 @@ export class Engine {
       active: f.active,
       paused: factorySettings(stored, f.factoryId).paused,
       counts: count(tasks.filter((t) => t.factoryId === f.factoryId)),
-      patPresent: health.get(f.factoryId) ?? null,
+      ghLoggedIn: health.get(f.factoryId) ?? null,
     }));
     return { paused: factories.length > 0 && factories.every((f) => f.paused), active, counts: count(tasks), tasks: list, factories };
   }
@@ -475,7 +475,7 @@ export class Engine {
   /** Approval, PR and answer moves for one task; returns the moved task, or undefined if nothing moved. */
   private async syncGate(task: Task, settings: Settings, def: FactoryDef): Promise<Task | undefined> {
     const { store } = this.deps;
-    const github = this.deps.githubFor(def.patAccount);
+    const github = this.deps.githubFor(def.ghUser);
     const approval = async (gate: Gate) => {
       const doc = await retry(() => store.currentDoc(task.taskId, GATE_DOC[gate]));
       return validApproval(await retry(() => store.listApprovals(task.taskId)), gate, doc?.version);

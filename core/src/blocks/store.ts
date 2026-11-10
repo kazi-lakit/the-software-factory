@@ -166,7 +166,7 @@ const decodeBranches = (v: Value | undefined): string[] => {
 
 const decodeDef = (r: Row): FactoryDef => ({
   factoryId: text(r.factoryId), name: text(r.name), protectedBranches: decodeBranches(r.protectedBranches), gitName: text(r.gitName),
-  gitEmail: text(r.gitEmail), docsPath: text(r.docsPath), patAccount: text(r.patAccount), active: num(r.active) === 1, version: num(r.version),
+  gitEmail: text(r.gitEmail), docsPath: text(r.docsPath), ghUser: text(r.ghUser), active: num(r.active) === 1, version: num(r.version),
 });
 
 /** A repo whose checks are not a JSON object decodes with empty checks, which validation then skips. */
@@ -175,11 +175,11 @@ const decodeRepo = (r: Row): FactoryRepo => ({
   checks: (parseObject(r.checks) ?? {}) as FactoryRepo['checks'], version: num(r.version),
 });
 
-const decodeHealth = (r: Row): FactoryHealth => ({ factoryId: text(r.factoryId), patPresent: num(r.patPresent) === 1, checkedAt: text(r.checkedAt) });
+const decodeHealth = (r: Row): FactoryHealth => ({ factoryId: text(r.factoryId), ghLoggedIn: num(r.ghLoggedIn) === 1, checkedAt: text(r.checkedAt) });
 
 const encodeDef = (d: FactoryDef): Record<string, Value> => ({
   name: d.name, protectedBranches: JSON.stringify(d.protectedBranches), gitName: d.gitName, gitEmail: d.gitEmail, docsPath: d.docsPath,
-  patAccount: d.patAccount, active: d.active ? 1 : 0,
+  ghUser: d.ghUser, active: d.active ? 1 : 0,
 });
 
 const encodeRepo = (r: FactoryRepo): Record<string, Value> => ({ remote: r.remote, baseBranch: r.baseBranch, checks: canonicalJson(r.checks) });
@@ -478,7 +478,7 @@ export class BlocksStore implements BoardStore {
 
   async setFactoryHealth(h: FactoryHealth): Promise<void> {
     if (this.identity !== 'core') throw new ForbiddenError('setFactoryHealth is done by the factory core, not on the Board');
-    const fields: Record<string, Value> = { patPresent: h.patPresent ? 1 : 0, checkedAt: h.checkedAt };
+    const fields: Record<string, Value> = { ghLoggedIn: h.ghLoggedIn ? 1 : 0, checkedAt: h.checkedAt };
     const key = { factoryId: h.factoryId };
     // The core is the only writer: an insert that finds the row (or an update that loses a race) is retried once against it.
     for (let attempt = 0; attempt < 2; attempt++) {

@@ -384,7 +384,7 @@ function mergeSettings(current: RepoSettings, patch: RepoSettingsPatch): RepoSet
   return next as RepoSettings;
 }
 
-const DEF_FIELDS = ['name', 'protectedBranches', 'gitName', 'gitEmail', 'docsPath', 'patAccount', 'active'] as const;
+const DEF_FIELDS = ['name', 'protectedBranches', 'gitName', 'gitEmail', 'docsPath', 'ghUser', 'active'] as const;
 const REPO_FIELDS = ['remote', 'baseBranch', 'checks'] as const;
 const eventText = (v: unknown): string => (typeof v === 'string' ? v : canon(v));
 

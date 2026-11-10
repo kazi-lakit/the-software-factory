@@ -276,7 +276,7 @@ export const STEPS: Step[] = [
       // no real factory id has: the core skips these rows as invalid.
       const factoryId = 'GATE-gate';
       const repoKey = 'GATE-gate/gate';
-      const defRow = { factoryId, name: 'gate', protectedBranches: '["main"]', gitName: '', gitEmail: '', docsPath: '', patAccount: 'gate', active: 0, version: 1, writeId: '' };
+      const defRow = { factoryId, name: 'gate', protectedBranches: '["main"]', gitName: '', gitEmail: '', docsPath: '', ghUser: 'gate', active: 0, version: 1, writeId: '' };
       const repoRow = { repoKey, factoryId, repoId: 'gate', remote: 'gate', baseBranch: 'dev', checks: '{}', version: 1, writeId: '' };
       for (const [schema, row, key, field] of [['FactoryDef', defRow, { factoryId }, 'name'], ['FactoryRepo', repoRow, { repoKey }, 'remote']] as const) {
         const existed = (await d.owner.list(schema, key, ['version'])).length === 1;
@@ -298,7 +298,7 @@ export const STEPS: Step[] = [
   {
     label: '14 FactoryHealth: owner insert and edit forbidden, core insert and edit ok',
     async run(d, c) {
-      const row = (factoryId: string) => ({ factoryId, patPresent: 0, checkedAt: new Date().toISOString(), version: 1, writeId: '' });
+      const row = (factoryId: string) => ({ factoryId, ghLoggedIn: 0, checkedAt: new Date().toISOString(), version: 1, writeId: '' });
       const ownerId = `GATE-${c.suffix}-owner`; // per run: a row left by a misconfigured run must not fail later runs
       const denied = await d.owner.insert('FactoryHealth', row(ownerId));
       expect(denied.kind === 'forbidden', `owner insert of FactoryHealth answered ${denied.kind}`);
@@ -311,7 +311,7 @@ export const STEPS: Step[] = [
       const [cur] = await d.core.list('FactoryHealth', { factoryId }, ['version']);
       const version = Number(cur?.version);
       expect(Number.isInteger(version), 'FactoryHealth row has no version');
-      const edit = await d.core.update('FactoryHealth', { factoryId, version }, { patPresent: 1, checkedAt: new Date().toISOString(), version: version + 1, writeId: `gate-${c.suffix}-h` });
+      const edit = await d.core.update('FactoryHealth', { factoryId, version }, { ghLoggedIn: 1, checkedAt: new Date().toISOString(), version: version + 1, writeId: `gate-${c.suffix}-h` });
       expect(edit.kind === 'applied', `core edit of FactoryHealth was ${edit.kind}`);
     },
   },

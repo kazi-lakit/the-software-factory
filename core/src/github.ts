@@ -2,7 +2,7 @@ import { Octokit } from '@octokit/rest';
 import { isProtected, ProtectedBranchError } from './branchGuard.js';
 
 /** The client for a factory's PAT (its Keychain account). */
-export type GitHubFor = (patAccount: string) => GitHub;
+export type GitHubFor = (ghUser: string) => GitHub;
 
 export type PrState = 'open' | 'merged' | 'closed';
 

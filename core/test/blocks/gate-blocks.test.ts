@@ -84,7 +84,7 @@ describe('runGate', () => {
     expect(lines.some((l) => l.startsWith('13 ') && l.endsWith(': pass'))).toBe(true);
     expect(owner.rows('FactoryDef')).toMatchObject([{ factoryId: 'GATE-gate', name: 'gate owner abcd1234', active: 0, version: 2 }]);
     expect(owner.rows('FactoryRepo')).toMatchObject([{ repoKey: 'GATE-gate/gate', remote: 'gate owner abcd1234', version: 2 }]);
-    expect(owner.rows('FactoryHealth')).toMatchObject([{ factoryId: 'GATE-gate', patPresent: 1, version: 2 }]);
+    expect(owner.rows('FactoryHealth')).toMatchObject([{ factoryId: 'GATE-gate', ghLoggedIn: 1, version: 2 }]);
     expect(owner.rows('FactoryTask').find((r) => r.taskId === 'GATE-abcd1234-fid')).toMatchObject({ factoryId: 'blocks', status: 'cancelled', version: 1 });
     // The def and repo rows carry GATE- ids no real factory has (capitals fail the id pattern), so the core skips them.
     expect((await deps.coreStore.listFactoryDefs()).map((x) => x.factoryId)).toEqual(['GATE-gate']);

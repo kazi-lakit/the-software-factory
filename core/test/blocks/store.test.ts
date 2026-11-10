@@ -61,7 +61,7 @@ describe('BlocksStore factories', () => {
     const data = new FakeBlocksData('any');
     const { s, def, repo } = await stored(data);
     expect(data.rows('FactoryDef')[0]).toMatchObject({
-      factoryId: 'delta', protectedBranches: '["dev","stg","main"]', active: 1, version: 1, patAccount: 'github-pat:delta',
+      factoryId: 'delta', protectedBranches: '["dev","stg","main"]', active: 1, version: 1, ghUser: 'gh-delta',
     });
     expect(data.rows('FactoryRepo')[0]).toMatchObject({ repoKey: 'delta/api', factoryId: 'delta', repoId: 'api', version: 1 });
     expect(JSON.parse(String(data.rows('FactoryRepo')[0]!.checks))).toEqual(repo.checks);
@@ -123,7 +123,7 @@ describe('BlocksStore factories', () => {
     await expect(core.saveFactoryRepo(null, repoFixture('delta', 'api'))).rejects.toBeInstanceOf(OwnerOnlyError);
     expect(data.calls).toBe(0);
     const owner = new BlocksStore(counting(new FakeBlocksData('factory-owner')), 'owner');
-    await expect(owner.setFactoryHealth({ factoryId: 'delta', patPresent: true, checkedAt: 't' })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(owner.setFactoryHealth({ factoryId: 'delta', ghLoggedIn: true, checkedAt: 't' })).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it('under the access rules the core reads defs and writes health, the owner writes defs and reads health', async () => {
@@ -132,9 +132,9 @@ describe('BlocksStore factories', () => {
     const core = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core');
     await owner.saveFactoryDef(null, defFixture('delta'));
     expect((await core.listFactoryDefs()).map((d) => d.factoryId)).toEqual(['delta']);
-    await core.setFactoryHealth({ factoryId: 'delta', patPresent: false, checkedAt: 'a' });
-    await core.setFactoryHealth({ factoryId: 'delta', patPresent: true, checkedAt: 'b' });
-    expect(await owner.listFactoryHealth()).toEqual([{ factoryId: 'delta', patPresent: true, checkedAt: 'b' }]);
+    await core.setFactoryHealth({ factoryId: 'delta', ghLoggedIn: false, checkedAt: 'a' });
+    await core.setFactoryHealth({ factoryId: 'delta', ghLoggedIn: true, checkedAt: 'b' });
+    expect(await owner.listFactoryHealth()).toEqual([{ factoryId: 'delta', ghLoggedIn: true, checkedAt: 'b' }]);
     expect(storage.tables.get('FactoryHealth')).toHaveLength(1);
   });
 

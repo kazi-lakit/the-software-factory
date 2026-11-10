@@ -596,7 +596,7 @@ describe.each([
     expect(stored).toMatchObject({ factoryId: 'delta', protectedBranches: ['dev', 'main'], version: 1 });
     expect(await s.listFactoryDefs()).toEqual([stored]);
     expect((await factoryEvents(s)).map((e) => e[2])).toEqual([
-      'def.name', 'def.protectedBranches', 'def.gitName', 'def.gitEmail', 'def.docsPath', 'def.patAccount', 'def.active',
+      'def.name', 'def.protectedBranches', 'def.gitName', 'def.gitEmail', 'def.docsPath', 'def.ghUser', 'def.active',
     ]);
     expect((await s.listEvents('-'))[0]).toMatchObject({ factoryId: 'delta', actor: 'you', action: 'set', from: null, to: 'delta', at: NOW });
   });

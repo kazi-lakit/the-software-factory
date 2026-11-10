@@ -26,7 +26,7 @@ const git: GitRepos = {
 };
 
 /** A fake `security`: only the listed accounts exist (value `secret`). It never touches the real Keychain. */
-const fakeSecurity = (initial: string[] = ['github-pat:blocks']): ExecFile => {
+const fakeSecurity = (initial: string[] = ['gh-blocks']): ExecFile => {
   const accounts = new Set(initial);
   return async (_file, args, stdin) => {
     if (args[0] === '-i') {
@@ -317,7 +317,7 @@ describe('factory cli', () => {
     const json = JSON.parse(out[0]!);
     expect(json.counts).toEqual({ ready: 1 });
     expect(json.tasks).toMatchObject([{ taskId: 'T-1', status: 'ready' }]);
-    expect(json.factories).toMatchObject([{ factoryId: 'blocks', name: 'blocks', active: true, paused: false, counts: { ready: 1 }, patPresent: true }]);
+    expect(json.factories).toMatchObject([{ factoryId: 'blocks', name: 'blocks', active: true, paused: false, counts: { ready: 1 }, ghLoggedIn: true }]);
     await go('status');
     expect(out.slice(1).join('\n')).toMatch(/factory blocks: active, paused false, PAT present, ready=1\n.*ready: 1/s);
   });
@@ -367,18 +367,18 @@ describe('factories, status health and --factory', () => {
   });
 
   test('status writes a health row per factory and prints the PAT state', async () => {
-    const { store, out, go } = setup(two(), ['github-pat:blocks']);
+    const { store, out, go } = setup(two(), ['gh-blocks']);
     expect(await go('status')).toBe(0);
     expect(out).toContain('factory blocks: active, paused false, PAT present');
     expect(out).toContain('factory delta: active, paused false, PAT missing');
     const health = await store.listFactoryHealth();
-    expect(health.map((h) => [h.factoryId, h.patPresent])).toEqual([['blocks', true], ['delta', false]]);
+    expect(health.map((h) => [h.factoryId, h.ghLoggedIn])).toEqual([['blocks', true], ['delta', false]]);
     expect(JSON.stringify(health)).not.toMatch(/secret/);
   });
 
   test('status checks that each PAT entry exists without reading its value (M2)', async () => {
     const calls: string[][] = [];
-    const { out, go } = setup(two(), ['github-pat:blocks'], calls);
+    const { out, go } = setup(two(), ['gh-blocks'], calls);
     expect(await go('status')).toBe(0);
     expect(calls.length).toBe(2);
     expect(calls.some((a) => a.includes('-w'))).toBe(false);

@@ -167,20 +167,20 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       const loaded = new Set(s.factories.map((f) => f.factoryId));
       for (const d of await store.listFactoryDefs()) {
         if (!loaded.has(d.factoryId)) continue;
-        const ok = !isReservedPatAccount(d.patAccount) && (await hasEntry(exec, d.patAccount).catch(() => false));
+        const ok = !isReservedPatAccount(d.ghUser) && (await hasEntry(exec, d.ghUser).catch(() => false));
         present.set(d.factoryId, ok);
         try {
-          await store.setFactoryHealth({ factoryId: d.factoryId, patPresent: ok, checkedAt: new Date().toISOString() });
+          await store.setFactoryHealth({ factoryId: d.factoryId, ghLoggedIn: ok, checkedAt: new Date().toISOString() });
         } catch (e) {
           io.err(`health of ${d.factoryId} not written: ${(e instanceof Error ? e.message : String(e)).split('\n')[0]}`);
         }
       }
-      for (const f of s.factories) f.patPresent = present.get(f.factoryId) ?? f.patPresent;
+      for (const f of s.factories) f.ghLoggedIn = present.get(f.factoryId) ?? f.ghLoggedIn;
       if (o.json) return printJson(s);
       io.out(`paused: ${s.paused}`);
       for (const f of s.factories) {
         const counts = Object.entries(f.counts).filter(([, n]) => n > 0).map(([status, n]) => `${status}=${n}`);
-        io.out(`factory ${f.factoryId}: ${f.active ? 'active' : 'inactive'}, paused ${f.paused}, PAT ${f.patPresent === null ? 'unknown' : f.patPresent ? 'present' : 'missing'}${counts.map((c) => `, ${c}`).join('')}`);
+        io.out(`factory ${f.factoryId}: ${f.active ? 'active' : 'inactive'}, paused ${f.paused}, PAT ${f.ghLoggedIn === null ? 'unknown' : f.ghLoggedIn ? 'present' : 'missing'}${counts.map((c) => `, ${c}`).join('')}`);
       }
       for (const [status, n] of Object.entries(s.counts)) io.out(`${status}: ${n}`);
       for (const a of s.active) io.out(`active: ${a.taskId} ${a.step ?? '-'} by ${a.claimBy ?? '-'} until ${a.claimUntil ?? '-'}`);

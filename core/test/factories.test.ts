@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { isProtected } from '../src/branches.js';
-import { FactoryConfig, ensureMain, validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from '../src/factories.js';
+import { DEFAULT_GH_USER, FactoryConfig, ensureMain, validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from '../src/factories.js';
 import { loadFactoriesFromDir } from '../src/factoriesFs.js';
 
 const checks = {
@@ -38,19 +38,32 @@ describe('validateFactoryDef', () => {
   test.each(['Delta', '1x', 'a'.repeat(41), 'a_b'])('rejects id %s', (id) => {
     expect(validateFactoryDef(defInput({ factoryId: id })).ok).toBe(false);
   });
-  test('accepts delta, forces main, defaults the PAT account', () => {
+  test('accepts delta, forces main, defaults the gh login', () => {
     const r = validateFactoryDef(defInput({ protectedBranches: ['dev'] }));
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.factoryId).toBe('delta');
     expect(r.value.protectedBranches).toEqual(['dev', 'main']);
-    expect(r.value.patAccount).toBe('github-pat:delta');
+    expect(r.value.ghUser).toBe('kazi-lakit');
     expect(r.value.active).toBe(true);
   });
-  test('the blocks-credential account is reserved', () => {
-    const r = validateFactoryDef(defInput({ patAccount: ' Blocks-Credential ' }));
-    expect(r).toMatchObject({ ok: false });
-    expect(JSON.stringify(r)).toContain('patAccount blocks-credential is reserved');
+  test('the default gh login is kazi-lakit', () => {
+    expect(DEFAULT_GH_USER).toBe('kazi-lakit');
+  });
+  test.each(['', '   '])('an empty ghUser (%j) means the default (R16)', (ghUser) => {
+    expect(validateFactoryDef(defInput({ ghUser }))).toMatchObject({ ok: true, value: { ghUser: 'kazi-lakit' } });
+  });
+  test.each(['octocat', ' Some-User ', 'a', 'a1-b2', 'x'.repeat(39)])('accepts the GitHub login %j, trimmed (R16)', (ghUser) => {
+    expect(validateFactoryDef(defInput({ ghUser }))).toMatchObject({ ok: true, value: { ghUser: ghUser.trim() } });
+  });
+  test.each(['-lead', 'trail-', 'two--dashes', 'has space', 'under_score', 'x'.repeat(40), 'blocks-credential:x', 'github-pat:delta'])(
+    'refuses %j as ghUser (R16)',
+    (ghUser) => {
+      expect(validateFactoryDef(defInput({ ghUser }))).toEqual({ ok: false, error: 'ghUser must be a GitHub login' });
+    },
+  );
+  test('a ghUser that is not text is refused', () => {
+    expect(validateFactoryDef(defInput({ ghUser: 3 }))).toMatchObject({ ok: false });
   });
   test.each(['docs', './docs', '~/docs'])('a non-empty docsPath must be absolute (%j) (M5)', (docsPath) => {
     expect(validateFactoryDef(defInput({ docsPath }))).toEqual({ ok: false, error: 'docsPath must be an absolute folder or empty' });

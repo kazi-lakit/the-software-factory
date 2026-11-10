@@ -43,7 +43,7 @@ export const isReservedPatAccount = (account: string): boolean => account.trim()
 export const KEYCHAIN_SERVICE = 'the-software-factory';
 const SERVICE = KEYCHAIN_SERVICE;
 
-/** Reads a secret from the macOS Keychain; `name` is the account (`blocks-credential`, or a factory's `patAccount`). Error messages never include command output. */
+/** Reads a secret from the macOS Keychain; `name` is the account (`blocks-credential`, or a factory's `ghUser`). Error messages never include command output. */
 export async function readSecret(name: string, exec: ExecFile = realExecFile): Promise<string> {
   const { code, stdout } = await exec('security', ['find-generic-password', '-s', SERVICE, '-a', name, '-w']);
   if (code !== 0) throw new SecretMissingError(`${name} not found in Keychain (service ${SERVICE})`);

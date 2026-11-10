@@ -7,10 +7,10 @@
       "description": "Unique id of the factory."
     },
     {
-      "name": "patPresent",
+      "name": "ghLoggedIn",
       "type": "Int",
       "isArray": false,
-      "description": "1 if the factory PAT was found, else 0."
+      "description": "1 if the factory's gh login was found, else 0."
     },
     {
       "name": "checkedAt",

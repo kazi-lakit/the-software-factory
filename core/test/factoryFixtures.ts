@@ -9,7 +9,7 @@ export const checksFixture = {
 
 export const defFixture = (factoryId: string, over: Partial<FactoryDef> = {}): FactoryDef => ({
   factoryId, name: factoryId, protectedBranches: ['dev', 'stg', 'main'], gitName: 'Factory', gitEmail: 'factory@example.com',
-  docsPath: '/docs', patAccount: `github-pat:${factoryId}`, active: true, version: 1, ...over,
+  docsPath: '/docs', ghUser: `gh-${factoryId}`, active: true, version: 1, ...over,
 });
 
 export const repoFixture = (factoryId: string, repoId: string, over: Partial<FactoryRepo> = {}): FactoryRepo => ({
@@ -26,7 +26,7 @@ export function seedBlocksFactories(data: FakeBlocksData, factories: { defs: Fac
   for (const d of factories.defs) {
     data.seed('FactoryDef', {
       factoryId: d.factoryId, name: d.name, protectedBranches: JSON.stringify(d.protectedBranches), gitName: d.gitName, gitEmail: d.gitEmail,
-      docsPath: d.docsPath, patAccount: d.patAccount, active: d.active ? 1 : 0, version: d.version, writeId: '',
+      docsPath: d.docsPath, ghUser: d.ghUser, active: d.active ? 1 : 0, version: d.version, writeId: '',
     });
   }
   for (const r of factories.repos) {

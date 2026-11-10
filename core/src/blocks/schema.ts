@@ -43,7 +43,7 @@ export const FIELDS: Record<SchemaName, Field[]> = {
   FactoryDef: [
     s('factoryId', 'Unique id of the factory.'), s('name', 'Display name.'), s('protectedBranches', 'JSON text of the protected branch names.'),
     s('gitName', 'Git author name.'), s('gitEmail', 'Git author email.'), s('docsPath', 'Folder the factory writes docs to.'),
-    s('patAccount', 'Keychain account of the factory PAT (never the token).'), i('active', '1 if the factory is active, else 0.'),
+    s('ghUser', 'GitHub login of the gh CLI account the factory uses (never a token).'), i('active', '1 if the factory is active, else 0.'),
     i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
   ],
   FactoryRepo: [
@@ -52,7 +52,7 @@ export const FIELDS: Record<SchemaName, Field[]> = {
     i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
   ],
   FactoryHealth: [
-    s('factoryId', 'Unique id of the factory.'), i('patPresent', '1 if the factory PAT was found, else 0.'), s('checkedAt', 'ISO time of the check.'),
+    s('factoryId', 'Unique id of the factory.'), i('ghLoggedIn', "1 if the factory's gh login was found, else 0."), s('checkedAt', 'ISO time of the check.'),
     i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
   ],
 };

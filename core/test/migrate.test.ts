@@ -87,7 +87,7 @@ describe.each(kinds)('migrate on a %s store', (_name, make) => {
     expect(names(first)).toEqual(ALL_NOW);
     const def = (await store.listFactoryDefs())[0]!;
     expect(def).toMatchObject({
-      factoryId: 'blocks', name: 'Blocks', protectedBranches: ['dev', 'stg', 'main'], patAccount: 'github-pat:blocks',
+      factoryId: 'blocks', name: 'Blocks', protectedBranches: ['dev', 'stg', 'main'], ghUser: 'kazi-lakit',
       docsPath: join(home, 'scratchpad', 'selise', 'vaultS', 'projects'),
     });
     expect((await store.listFactoryRepos('blocks')).map((r) => r.repoId)).toEqual(['data', 'iam', 'localization', 'logic', 'monitor', 'os', 'release']);
@@ -198,7 +198,7 @@ describe('buildImport and validateImportFile', () => {
   test('buildImport reads repos/*.yaml with the migrate defaults and holds no secret', () => {
     const file = buildImport(root, home);
     expect(file.format).toBe('factory-import/1');
-    expect(file.factory).toMatchObject({ factoryId: 'blocks', name: 'Blocks', protectedBranches: ['dev', 'stg', 'main'], patAccount: 'github-pat:blocks' });
+    expect(file.factory).toMatchObject({ factoryId: 'blocks', name: 'Blocks', protectedBranches: ['dev', 'stg', 'main'], ghUser: 'kazi-lakit' });
     expect(file.repos.map((r) => r.repoId)).toEqual(['data', 'iam', 'localization', 'logic', 'monitor', 'os', 'release']);
     expect(validateImportFile(JSON.parse(JSON.stringify(file)))).toEqual({ ok: true, value: file });
     expect(JSON.stringify(file)).not.toMatch(/ghp_|token/i);

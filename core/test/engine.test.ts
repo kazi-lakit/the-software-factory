@@ -56,7 +56,7 @@ class FakeGit implements GitRepos {
 }
 
 function setup(
-  opts: { githubFor?: (patAccount: string) => GitHub; failing?: string[]; git?: FakeGit; onExec?: () => Promise<void>; log?: (msg: string) => void; store?: (now: () => Date) => BoardStore; defs?: FactoryDef[]; repos?: FactoryRepo[] } = {},
+  opts: { githubFor?: (ghUser: string) => GitHub; failing?: string[]; git?: FakeGit; onExec?: () => Promise<void>; log?: (msg: string) => void; store?: (now: () => Date) => BoardStore; defs?: FactoryDef[]; repos?: FactoryRepo[] } = {},
 ) {
   const clock = { t: new Date('2026-11-09T10:00:00Z') };
   const store: BoardStore = opts.store?.(() => clock.t) ?? new MemoryStore();
@@ -254,19 +254,19 @@ describe('next across factories', () => {
     }
 
     test('a missing PAT blocks only that factory\'s task; the other factory opens its PR with its own client', async () => {
-      const clients = new Map<string, GitHub>([['github-pat:a', new MissingPatGitHub('github-pat:a')], ['github-pat:b', new AccountGitHub('github-pat:b')]]);
+      const clients = new Map<string, GitHub>([['gh-a', new MissingPatGitHub('gh-a')], ['gh-b', new AccountGitHub('gh-b')]]);
       const asked: string[] = [];
       const { store, engine, git } = setup({ ...TWO(), githubFor: (acct) => { asked.push(acct); return clients.get(acct)!; } });
       await putIn(store, 'a', { status: 'review', stage: 'ship', branch: 'factory/T-1-x' });
       await putIn(store, 'b', { status: 'review', stage: 'ship', branch: 'factory/T-2-x' });
       await store.setSettings({ factories: { b: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: true } }, repos: {} } } });
       await nextTicket(engine, 'T-1');
-      expect(await engine.ship('T-1')).toMatchObject({ status: 'blocked', blockedReason: 'PAT github-pat:a not in Keychain' });
+      expect(await engine.ship('T-1')).toMatchObject({ status: 'blocked', blockedReason: 'PAT gh-a not in Keychain' });
       expect(git.pushes).toEqual([]);
       await nextTicket(engine, 'T-2');
       expect(await engine.ship('T-2')).toMatchObject({ status: 'pr_open', prUrl: 'https://github.com/org/api/pull/1' });
-      expect([...(clients.get('github-pat:b') as AccountGitHub).prs.values()]).toHaveLength(1);
-      expect(new Set(asked)).toEqual(new Set(['github-pat:a', 'github-pat:b']));
+      expect([...(clients.get('gh-b') as AccountGitHub).prs.values()]).toHaveLength(1);
+      expect(new Set(asked)).toEqual(new Set(['gh-a', 'gh-b']));
     });
 
     test('the factory\'s protected list decides: a push to rel is refused, dev is mergeable', async () => {
@@ -1282,21 +1282,21 @@ describe('status', () => {
         { taskId: 'T-2', title: 'Add widget', repo: 'data', status: 'build', stage: 'build', blockedReason: null, question: null, prUrl: null },
         { taskId: 'T-3', title: 'Add widget', repo: 'data', status: 'blocked', stage: 'verify', blockedReason: null, question: 'which API?', prUrl: 'u' },
       ],
-      factories: [{ factoryId: 'blocks', name: 'blocks', active: true, paused: false, counts: { build: 2, blocked: 1 }, patPresent: null }],
+      factories: [{ factoryId: 'blocks', name: 'blocks', active: true, paused: false, counts: { build: 2, blocked: 1 }, ghLoggedIn: null }],
     });
   });
 });
 
 describe('status per factory', () => {
-  test('a filter limits tasks and factories; patPresent comes from the health row', async () => {
+  test('a filter limits tasks and factories; ghLoggedIn comes from the health row', async () => {
     const { store, engine } = setup(TWO());
     await putIn(store, 'a');
     await putIn(store, 'b');
-    await store.setFactoryHealth({ factoryId: 'b', patPresent: false, checkedAt: '2026-11-10T00:00:00Z' });
+    await store.setFactoryHealth({ factoryId: 'b', ghLoggedIn: false, checkedAt: '2026-11-10T00:00:00Z' });
     const s = await engine.status(['b']);
     expect(s.tasks.map((t) => t.taskId)).toEqual(['T-2']);
-    expect(s.factories).toEqual([{ factoryId: 'b', name: 'b', active: true, paused: false, counts: { ready: 1 }, patPresent: false }]);
-    expect((await engine.status()).factories.map((f) => [f.factoryId, f.patPresent])).toEqual([['a', null], ['b', false]]);
+    expect(s.factories).toEqual([{ factoryId: 'b', name: 'b', active: true, paused: false, counts: { ready: 1 }, ghLoggedIn: false }]);
+    expect((await engine.status()).factories.map((f) => [f.factoryId, f.ghLoggedIn])).toEqual([['a', null], ['b', false]]);
   });
 });
 

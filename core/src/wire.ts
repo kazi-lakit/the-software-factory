@@ -87,7 +87,7 @@ export function lazyGitHubFor(
 ): GitHubFor {
   const clients = new Map<string, GitHub>();
   return (account) => {
-    if (isReservedPatAccount(account)) throw new Error(`patAccount ${RESERVED_PAT_ACCOUNT} is reserved`);
+    if (isReservedPatAccount(account)) throw new Error(`ghUser ${RESERVED_PAT_ACCOUNT} is reserved`);
     let c = clients.get(account);
     if (!c) clients.set(account, (c = new LazyGitHub(account, read, make)));
     return c;

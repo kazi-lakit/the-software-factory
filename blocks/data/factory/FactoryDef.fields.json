@@ -37,10 +37,10 @@
       "description": "Folder the factory writes docs to."
     },
     {
-      "name": "patAccount",
+      "name": "ghUser",
       "type": "String",
       "isArray": false,
-      "description": "Keychain account of the factory PAT (never the token)."
+      "description": "GitHub login of the gh CLI account the factory uses (never a token)."
     },
     {
       "name": "active",

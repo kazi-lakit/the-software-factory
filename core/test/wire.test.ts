@@ -119,8 +119,8 @@ describe('lazyGitHubFor', () => {
     const err = await githubFor('github-pat:a').ensureReady!().catch((e: unknown) => e);
     expect(err).toBeInstanceOf(PatMissingError);
     expect(err).toMatchObject({ account: 'github-pat:a', message: 'PAT github-pat:a not in Keychain' });
-    expect(() => githubFor(' Blocks-Credential ')).toThrow('patAccount blocks-credential is reserved');
-    expect(() => githubFor('blocks-credential')).toThrow('patAccount blocks-credential is reserved');
+    expect(() => githubFor(' Blocks-Credential ')).toThrow('ghUser blocks-credential is reserved');
+    expect(() => githubFor('blocks-credential')).toThrow('ghUser blocks-credential is reserved');
   });
 
   test('a failed read is not cached', async () => {

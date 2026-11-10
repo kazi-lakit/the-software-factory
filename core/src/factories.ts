@@ -9,8 +9,8 @@ export interface FactoryDef {
   gitName: string;
   gitEmail: string;
   docsPath: string;
-  /** Keychain account of the factory's PAT (service `the-software-factory`). The Board stores the name, never a token. */
-  patAccount: string;
+  /** GitHub login of the gh CLI account whose token the factory opens PRs with. The Board stores the login, never a token. */
+  ghUser: string;
   active: boolean;
   version: number;
 }
@@ -26,7 +26,8 @@ export interface FactoryRepo {
 
 export interface FactoryHealth {
   factoryId: string;
-  patPresent: boolean;
+  /** Whether the factory's gh login was found (`gh auth status`) when last checked. */
+  ghLoggedIn: boolean;
   checkedAt: string;
 }
 
@@ -36,6 +37,10 @@ export const ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 export const ID_MAX = 40;
 /** The settings scope of the whole Board; no factory may take it. */
 export const RESERVED_ID = 'global';
+/** The gh login a factory uses when its definition leaves `ghUser` empty. */
+export const DEFAULT_GH_USER = 'kazi-lakit';
+/** A GitHub login: letters, digits and single inner hyphens, at most 39 characters. */
+export const GH_USER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 export const isValidId = (v: unknown): v is string => typeof v === 'string' && v.length <= ID_MAX && ID_PATTERN.test(v);
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -68,11 +73,12 @@ export function validateFactoryDef(input: unknown): Validated<FactoryDef> {
   const gitName = text(input, 'gitName', '');
   const gitEmail = text(input, 'gitEmail', '');
   const docsPath = text(input, 'docsPath', '');
-  const patAccount = text(input, 'patAccount', `github-pat:${factoryId}`);
-  if (gitName === null || gitEmail === null || docsPath === null || patAccount === null) {
-    return fail('gitName, gitEmail, docsPath and patAccount must be text');
+  const rawGhUser = text(input, 'ghUser', '');
+  if (gitName === null || gitEmail === null || docsPath === null || rawGhUser === null) {
+    return fail('gitName, gitEmail, docsPath and ghUser must be text');
   }
-  if (patAccount.trim().toLowerCase() === 'blocks-credential') return fail('patAccount blocks-credential is reserved');
+  const ghUser = rawGhUser === '' ? DEFAULT_GH_USER : rawGhUser;
+  if (!GH_USER_PATTERN.test(ghUser)) return fail('ghUser must be a GitHub login');
   if (gitEmail !== '' && !gitEmail.includes('@')) return fail('gitEmail must contain @');
   if (docsPath !== '' && !docsPath.startsWith('/')) return fail('docsPath must be an absolute folder or empty');
   const rawBranches = input.protectedBranches ?? ['dev', 'stg', 'main'];
@@ -85,7 +91,7 @@ export function validateFactoryDef(input: unknown): Validated<FactoryDef> {
     ok: true,
     value: {
       factoryId, name, protectedBranches: ensureMain(rawBranches as string[]), gitName, gitEmail, docsPath,
-      patAccount: patAccount === '' ? `github-pat:${factoryId}` : patAccount, active, version,
+      ghUser, active, version,
     },
   };
 }

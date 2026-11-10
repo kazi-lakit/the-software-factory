@@ -239,10 +239,10 @@ export function runStoreContract(
       });
       test('health is set by the core and listed; the owner may not set it', async () => {
         const core = await make('core');
-        const h = { factoryId: 'delta', patPresent: true, checkedAt: '2026-11-10T00:00:00.000Z' };
+        const h = { factoryId: 'delta', ghLoggedIn: true, checkedAt: '2026-11-10T00:00:00.000Z' };
         await core.setFactoryHealth(h);
-        await core.setFactoryHealth({ ...h, patPresent: false });
-        expect(await core.listFactoryHealth()).toEqual([{ ...h, patPresent: false }]);
+        await core.setFactoryHealth({ ...h, ghLoggedIn: false });
+        expect(await core.listFactoryHealth()).toEqual([{ ...h, ghLoggedIn: false }]);
         await expect((await make('owner')).setFactoryHealth(h)).rejects.toBeInstanceOf(ForbiddenError);
       });
       test('tasks in two factories with the same repo id keep their factoryId', async () => {

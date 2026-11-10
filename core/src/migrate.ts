@@ -49,7 +49,7 @@ const sorted = <T>(xs: T[], key: (x: T) => string): T[] => [...xs].sort((a, b) =
 export const legacyDef = (home: string): FactoryDef => {
   const r = validateFactoryDef({
     factoryId: LEGACY_FACTORY_ID, name: 'Blocks', protectedBranches: ['dev', 'stg', 'main'], gitName: '', gitEmail: '',
-    docsPath: join(home, 'scratchpad', 'selise', 'vaultS', 'projects'), patAccount: TARGET_ACCOUNT, active: true,
+    docsPath: join(home, 'scratchpad', 'selise', 'vaultS', 'projects'), ghUser: 'kazi-lakit', active: true,
   });
   if (!r.ok) throw new Error(`blocks definition: ${r.error}`);
   return r.value;
