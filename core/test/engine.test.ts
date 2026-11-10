@@ -2,7 +2,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
-import { ClaimError, Engine, StageError, withRetry, type EngineDeps } from '../src/engine.js';
+import { ClaimError, Engine, StageError, UnknownFactoryError, withRetry, type EngineDeps } from '../src/engine.js';
 import type { Exec } from '../src/checks.js';
 import type { GitRepos } from '../src/git.js';
 import { FakeGitHub, type GitHub } from '../src/github.js';
@@ -189,11 +189,27 @@ describe('next across factories', () => {
     expect(await inactive.engine.next()).toEqual({ kind: 'none', reason: 'nothing to do' });
   });
 
-  test('every factory paused with no filter reports paused; an unknown filter reports nothing to do', async () => {
+  test('every factory paused with no filter reports paused; an unknown filter is an UnknownFactoryError', async () => {
     const { store, engine } = setup(TWO());
     await store.setSettings({ factories: { a: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} }, b: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } });
     expect(await engine.next()).toEqual({ kind: 'none', reason: 'paused' });
-    expect(await engine.next(undefined, ['zzz'])).toEqual({ kind: 'none', reason: 'nothing to do' });
+    await expect(engine.next(undefined, ['zzz'])).rejects.toBeInstanceOf(UnknownFactoryError);
+    await expect(engine.next(undefined, ['a', 'zzz'])).rejects.toThrow('unknown factory zzz');
+  });
+
+  test('a targeted task in a paused or inactive factory says so, while the other factory is open', async () => {
+    const paused = setup(TWO());
+    await paused.store.setSettings({ factories: { b: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } });
+    await putIn(paused.store, 'b');
+    await putIn(paused.store, 'a');
+    expect(await paused.engine.next('T-1')).toEqual({ kind: 'none', reason: 'paused' });
+    expect((await paused.store.getTask('T-2')).claimBy).toBeNull();
+
+    const inactive = setup(TWO({ b: { active: false } }));
+    await putIn(inactive.store, 'b');
+    await putIn(inactive.store, 'a');
+    expect(await inactive.engine.next('T-1')).toEqual({ kind: 'none', reason: 'inactive' });
+    expect(await inactive.engine.next('T-2')).toMatchObject({ kind: 'ticket', ticket: { taskId: 'T-2' } });
   });
 
   test('a task whose repo is gone is blocked by sync, and one whose factory is gone too', async () => {

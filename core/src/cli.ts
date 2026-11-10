@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { Command, CommanderError } from 'commander';
 import { parseAgentReply } from './agentReply.js';
-import { NO_FACTORIES, type Engine } from './engine.js';
+import { NO_FACTORIES, UnknownFactoryError, type Engine } from './engine.js';
 import { GATE_DOC } from './gates.js';
 import * as owner from './owner.js';
 import { isReservedPatAccount, readSecret, realExecFile, type ExecFile } from './secrets.js';
@@ -27,6 +27,8 @@ class CliExit extends Error {
   constructor(
     message: string,
     public readonly code: number,
+    /** Print the message as it is, without `error: `. */
+    public readonly plain = false,
   ) {
     super(message);
   }
@@ -99,7 +101,9 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .option('--json', 'print JSON')
     .action(async (task: string | undefined, o: { json?: boolean; factory?: string[] }, cmd: Command) => {
       const { engine } = await open(cmd);
-      const outcome = await engine.next(task, factoryFilter(o.factory));
+      const outcome = await engine.next(task, factoryFilter(o.factory)).catch((e: unknown) => {
+        throw e instanceof UnknownFactoryError ? new CliExit(e.message, 1, true) : e;
+      });
       // Paused and inactive factories also return no ticket: say so, so a loop's owner is not left guessing.
       if (outcome.kind === 'none') return io.out(outcome.reason === 'no-factories' ? NO_FACTORIES : outcome.reason);
       const { ticket } = outcome;
@@ -334,7 +338,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   } catch (e) {
     if (e instanceof CommanderError) return e.exitCode;
     if (e instanceof CliExit) {
-      io.err(e.code === 2 ? e.message : `error: ${e.message}`);
+      io.err(e.code === 2 || e.plain ? e.message : `error: ${e.message}`);
       return e.code;
     }
     io.err(`error: ${(e instanceof Error ? e.message : String(e)).split('\n')[0]}`);

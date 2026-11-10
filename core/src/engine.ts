@@ -84,6 +84,14 @@ export class ClaimError extends Error {
   }
 }
 
+/** `next --factory <id>` named a factory that is neither defined nor skipped as invalid. */
+export class UnknownFactoryError extends Error {
+  constructor(readonly factoryId: string) {
+    super(`unknown factory ${factoryId}`);
+    this.name = 'UnknownFactoryError';
+  }
+}
+
 export class StageError extends Error {
   constructor(taskId: string, step: Step, stage: Step | null) {
     super(`${taskId} is at stage ${stage ?? '-'}, not ${step}`);
@@ -214,6 +222,9 @@ export class Engine {
     const { store, now, claimant } = this.deps;
     const cfg = await this.loadFactories();
     if (!cfg.hasDefinitions()) return { kind: 'none', reason: 'no-factories' };
+    const known = new Set([...cfg.factories().map((f) => f.factoryId), ...cfg.skipped().filter((s) => !s.id.includes('/')).map((s) => s.id)]);
+    const unknown = filter?.find((id) => !known.has(id));
+    if (unknown !== undefined) throw new UnknownFactoryError(unknown);
     const stored = await retry(() => store.getSettings());
     const scope = cfg.factories().filter((f) => !filter || filter.includes(f.factoryId));
     const paused = (f: FactoryDef) => factorySettings(stored, f.factoryId).paused;
@@ -232,6 +243,13 @@ export class Engine {
     const hasRoom = (factoryId: string) => (activeBy.get(factoryId) ?? 0) < factorySettings(stored, factoryId).maxParallel;
 
     const workable = (t: Task) => t.status === 'ready' || (t.stage !== null && WORKING.has(t.status));
+    // A named task in a closed factory: say why it is not picked rather than "nothing to do".
+    const target = taskId === undefined ? undefined : tasks.find((t) => t.taskId === taskId);
+    const targetDef = target && workable(target) ? scope.find((f) => f.factoryId === target.factoryId) : undefined;
+    if (target && targetDef) {
+      if (this.settingsFor(stored, target).paused) return { kind: 'none', reason: 'paused' };
+      if (!targetDef.active) return { kind: 'none', reason: 'inactive' };
+    }
     const candidates = tasks
       .filter((t) => openIds.has(t.factoryId) && hasRoom(t.factoryId) && cfg.repo(t.factoryId, t.repo))
       .filter((t) => !this.settingsFor(stored, t).paused)

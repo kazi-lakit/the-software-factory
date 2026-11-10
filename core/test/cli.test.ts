@@ -110,13 +110,15 @@ describe('factory cli', () => {
     expect((await store.getTask('T-1')).status).toBe('ready');
   });
 
-  test('next --factory limits the pass to the named factories', async () => {
-    const { store, out, go } = setup();
+  test('next --factory limits the pass to the named factories; an unknown one exits 1', async () => {
+    const { store, out, err, go } = setup();
     await put(store, { status: 'ready' });
-    expect(await go('next', '--factory', 'other')).toBe(0);
-    expect(out).toEqual(['nothing to do']);
+    expect(await go('next', '--factory', 'other')).toBe(1);
+    expect(out).toEqual([]);
+    expect(err).toEqual(['unknown factory other']);
+    expect((await store.getTask('T-1')).claimBy).toBeNull();
     expect(await go('next', '--factory', 'blocks', '--json')).toBe(0);
-    expect(JSON.parse(out.slice(1).join('\n'))).toMatchObject({ taskId: 'T-1', context: { factory: { factoryId: 'blocks' } } });
+    expect(JSON.parse(out.join('\n'))).toMatchObject({ taskId: 'T-1', context: { factory: { factoryId: 'blocks' } } });
   });
 
   test('complete with a missing result file blocks the task', async () => {
