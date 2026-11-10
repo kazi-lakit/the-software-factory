@@ -7,9 +7,9 @@ export async function readHookInput() {
   return data.trim() ? JSON.parse(data) : {};
 }
 
-/** True when dir holds repos/, core/ and plugin/. */
+/** True when dir holds core/ and plugin/ (repos/ is no longer needed). */
 export function isFactoryRoot(dir, exists = fs.existsSync) {
-  return ['repos', 'core', 'plugin'].every((d) => exists(path.join(dir, d)));
+  return ['core', 'plugin'].every((d) => exists(path.join(dir, d)));
 }
 
 /**

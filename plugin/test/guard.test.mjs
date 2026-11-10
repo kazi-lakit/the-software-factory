@@ -281,9 +281,9 @@ describe('lib', () => {
     expect(isFactoryAgent({ agent_type: 'other:x' })).toBe(false);
   });
   describe('resolveFactoryRoot', () => {
-    // A fake file system: a folder is a factory root when repos/, core/ and plugin/ exist in it.
+    // A fake file system: a folder is a factory root when core/ and plugin/ exist in it.
     const fsWith = (...roots) => {
-      const paths = new Set(roots.flatMap((r) => ['repos', 'core', 'plugin'].map((d) => path.join(r, d))));
+      const paths = new Set(roots.flatMap((r) => ['core', 'plugin'].map((d) => path.join(r, d))));
       return (p) => paths.has(p);
     };
     const home = '/h';
@@ -311,18 +311,24 @@ describe('lib', () => {
       expect(resolveFactoryRoot({ FACTORY_ROOT: '/env', CLAUDE_PROJECT_DIR: '/proj' }, home, exists).projectMode).toBe(false);
       expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/nofactory' }, home, exists).projectMode).toBe(false);
     });
-    it('a folder missing one of repos/, core/, plugin/ is not a factory root', () => {
-      const partial = (p) => p === '/proj/repos' || p === '/proj/core';
+    it('a folder with only core/ is not a factory root', () => {
+      const partial = (p) => p === '/proj/core';
       expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/proj' }, home, partial)).toBeNull();
+    });
+    it('a root without repos/ resolves', () => {
+      expect(fsWith('/proj')('/proj/repos')).toBe(false);
+      expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/proj' }, home, fsWith('/proj'))).toEqual({ root: '/proj', projectMode: true });
     });
     it('null when nothing qualifies', () => {
       expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/proj' }, home, () => false)).toBeNull();
       expect(resolveFactoryRoot({}, home, fsWith('/env'))).toBeNull();
     });
   });
-  it('isFactoryRoot needs repos/, core/ and plugin/', () => {
+  it('isFactoryRoot needs core/ and plugin/, not repos/', () => {
     const has = (...ds) => (p) => ds.some((d) => p === `/r/${d}`);
+    expect(isFactoryRoot('/r', has('core', 'plugin'))).toBe(true);
     expect(isFactoryRoot('/r', has('repos', 'core', 'plugin'))).toBe(true);
+    expect(isFactoryRoot('/r', has('core'))).toBe(false);
     expect(isFactoryRoot('/r', has('repos', 'core'))).toBe(false);
   });
   it('sessionFile', () => {
@@ -335,7 +341,7 @@ describe('entry script', () => {
   const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'guard-')));
   const link = path.join(tmp, 'link');
   fs.symlinkSync(pluginDir, link);
-  const makeRoot = (r) => { for (const d of ['repos', 'core', 'plugin', 'runs/.sessions']) fs.mkdirSync(path.join(r, d), { recursive: true }); return r; };
+  const makeRoot = (r) => { for (const d of ['core', 'plugin', 'runs/.sessions']) fs.mkdirSync(path.join(r, d), { recursive: true }); return r; };
   // A home whose default factory root exists, a home without one, a project root, and a plain project folder.
   const home = path.join(tmp, 'home');
   const dfltRoot = makeRoot(path.join(home, 'scratchpad', 'selise', 'the-software-factory'));

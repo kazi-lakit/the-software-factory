@@ -61,9 +61,9 @@ describe('renewCommand', () => {
   });
 });
 
-// Temp folders: a factory root (repos/, core/, plugin/), a plain project folder, and a home with no factory.
+// Temp folders: a factory root (core/, plugin/), a plain project folder, and a home with no factory.
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'sess-')));
-const makeRoot = (r) => { for (const d of ['repos', 'core', 'plugin']) fs.mkdirSync(path.join(r, d), { recursive: true }); return r; };
+const makeRoot = (r) => { for (const d of ['core', 'plugin']) fs.mkdirSync(path.join(r, d), { recursive: true }); return r; };
 const froot = makeRoot(path.join(tmp, 'factory'));
 const plain = path.join(tmp, 'plain');
 fs.mkdirSync(plain);

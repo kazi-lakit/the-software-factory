@@ -20,7 +20,7 @@ describe('run skill', () => {
     expect(m).not.toBeNull();
     expect(fm.name).toBe('run');
     expect(fm.description).toBe('Run one step of the software factory (use only when the user runs /factory:run)');
-    expect(fm['argument-hint']).toBe('[T-12] [--loop]');
+    expect(fm['argument-hint']).toBe('[<factory>|T-12] [--loop]');
     expect(fm['allowed-tools']).toBe('Bash(HUSKY=0 node:*), Bash(printenv:*), Bash(rm -f:*), Bash(git -C:*), Agent, Read, Write');
     expect(fmText).not.toContain('disable-model-invocation');
   });
@@ -31,7 +31,7 @@ describe('run skill', () => {
   });
 
   it('mentions the CLI, reply file, session file and every agent type', () => {
-    for (const s of ['--mode', '--reply', 'nothing to do', '<root>/runs/.sessions/${CLAUDE_SESSION_ID}.json', '<root>/repos/<repo>.yaml', '${CLAUDE_SESSION_ID}', '<root>/core/dist/cli.js']) {
+    for (const s of ['--mode', '--reply', 'nothing to do', '<root>/runs/.sessions/${CLAUDE_SESSION_ID}.json', '${CLAUDE_SESSION_ID}', '<root>/core/dist/cli.js']) {
       expect(body).toContain(s);
     }
     for (const agent of Object.values(AGENT_FOR)) expect(body).toContain(`factory:${agent}`);
@@ -63,6 +63,28 @@ describe('run skill', () => {
     expect(body).toContain('printenv FACTORY_CLAIMANT');
     expect(body).toContain('factory: session env missing; restart the factory session');
     expect(body).toMatch(/first 8 characters of `\$\{CLAUDE_SESSION_ID\}`/);
+  });
+
+  it('passes a factory word as --factory and a T- word as the task', () => {
+    const step1 = body.match(/^1\. .*$/m)[0];
+    expect(step1).toMatch(/`T-<n>`/);
+    expect(step1).toMatch(/[Aa]ny other word[^\n]*factory[^\n]*`--factory`/);
+    const step2 = body.match(/^2\. .*$/m)[0];
+    expect(step2).toContain('next [task] [--factory <factory>] --json');
+  });
+
+  it('takes the build checks from context.checks and never reads repos/', () => {
+    expect(body).toContain('`context.checks`');
+    expect(body).toMatch(/for `build` only:[^\n]*`context\.checks`/);
+    expect(text).not.toContain('repos/');
+    expect(text).not.toContain('.yaml');
+  });
+
+  it('gives the spec writer context.factory.docsPath, or says there are no docs', () => {
+    expect(body).toMatch(/for `spec` only:[^\n]*`context\.factory\.docsPath`/);
+    expect(body).toMatch(/empty[^\n]*no background docs/);
+    expect(body).not.toContain('printenv HOME');
+    expect(body).not.toContain('vaultS');
   });
 
   it('reports an inactive factory', () => {
@@ -109,9 +131,8 @@ describe('run skill', () => {
     }
   });
 
-  it('gives the spec writer an absolute vault path (I6)', () => {
+  it('never gives a tilde path (I6)', () => {
     expect(body).not.toContain('~/');
-    expect(body).toContain('printenv HOME');
   });
 
   it('never mentions git push, security or gh', () => {

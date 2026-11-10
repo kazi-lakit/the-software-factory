@@ -97,10 +97,10 @@ describe('stage skills work in the worktree (I2)', () => {
     expect(text).toMatch(/spec, the diff[^\n]*worktree path/);
     expect(text).toContain('origin/');
   });
-  it('spec uses the absolute vault path from the prompt and reports an unreadable vault (I6)', () => {
+  it('spec reads the docs folder the prompt gives, if any, and reports an unreadable one (I6)', () => {
     const text = read('skills/spec/SKILL.md');
     expect(text).not.toContain('~/');
-    expect(text).toMatch(/absolute[^\n]*path the prompt gives/);
+    expect(text).toMatch(/docs folder the prompt gives, if any/);
     expect(text).toMatch(/cannot be read[^\n]*summary[^\n]*spec/);
   });
   it('spec returns blocked when the answer asks to cancel, and writes no spec', () => {

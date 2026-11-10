@@ -7,10 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { buildLink } from '../skills/new/link.mjs';
 
 const script = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../skills/new/link.mjs');
-// plan 6 Task 7 replaces this: link.mjs will take the factory's repos instead of a fixed list.
-const REPO_IDS = ['os', 'iam', 'monitor', 'logic', 'data', 'localization', 'release'];
 const BOARD = 'https://board.test';
-const draft = (over = {}) => ({ title: 'Fix it', description: 'Details', repo: 'os', base: 'dev', ...over });
+const draft = (over = {}) => ({ title: 'Fix it', description: 'Details', factory: 'blocks', repo: 'os', base: 'dev', ...over });
 const params = (url) => new URL(url).searchParams;
 
 function runCli(d, env = {}) {
@@ -22,11 +20,11 @@ function runCli(d, env = {}) {
 }
 
 describe('buildLink', () => {
-  it('builds /?new=1 with the four fields', () => {
+  it('builds /?new=1 with the five fields', () => {
     const url = buildLink(draft(), BOARD);
     expect(url.startsWith(`${BOARD}/?new=1&title=`)).toBe(true);
     const p = params(url);
-    expect([p.get('new'), p.get('title'), p.get('description'), p.get('repo'), p.get('base')]).toEqual(['1', 'Fix it', 'Details', 'os', 'dev']);
+    expect([p.get('new'), p.get('title'), p.get('description'), p.get('factory'), p.get('repo'), p.get('base')]).toEqual(['1', 'Fix it', 'Details', 'blocks', 'os', 'dev']);
   });
 
   it('encodes spaces, ampersands, hashes, newlines and non-ASCII so they round-trip', () => {
@@ -44,12 +42,21 @@ describe('buildLink', () => {
     expect(p.get('description')).toHaveLength(8000);
   });
 
-  it('accepts every core repo id', () => {
-    for (const repo of REPO_IDS) expect(params(buildLink(draft({ repo }), BOARD)).get('repo')).toBe(repo);
+  it('accepts any repo id of the right shape (the Board checks membership)', () => {
+    for (const repo of ['os', 'my-repo2', 'x']) expect(params(buildLink(draft({ repo }), BOARD)).get('repo')).toBe(repo);
   });
 
-  it('rejects an unknown repo', () => {
-    expect(() => buildLink(draft({ repo: 'nope' }), BOARD)).toThrow('factory: unknown repo nope');
+  it('rejects a malformed repo id', () => {
+    for (const repo of ['Nope', '1x', 'a b', '', 'a'.repeat(41), undefined]) {
+      expect(() => buildLink(draft({ repo }), BOARD)).toThrow(/factory: unknown repo/);
+    }
+  });
+
+  it('rejects a malformed or missing factory id', () => {
+    for (const factory of ['Blocks', '1x', 'a&b', '', 'a'.repeat(41), undefined]) {
+      expect(() => buildLink(draft({ factory }), BOARD)).toThrow(/factory: unknown factory/);
+    }
+    expect(params(buildLink(draft({ factory: 'a'.repeat(40) }), BOARD)).get('factory')).toBe('a'.repeat(40));
   });
 
   it('rejects a blank title', () => {
@@ -85,10 +92,10 @@ describe('link.mjs command line', () => {
     expect(r.stdout.trim().startsWith('https://other.test/?new=1')).toBe(true);
   });
 
-  it('exits 1 with the message for an unknown repo', () => {
-    const r = runCli(draft({ repo: 'nope' }));
+  it('exits 1 with the message for a malformed repo', () => {
+    const r = runCli(draft({ repo: 'No pe' }));
     expect(r.status).toBe(1);
-    expect(r.stderr).toContain('factory: unknown repo nope');
+    expect(r.stderr).toContain('factory: unknown repo No pe');
     expect(r.stdout).toBe('');
   });
 

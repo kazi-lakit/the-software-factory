@@ -29,7 +29,7 @@ You install it yourself, once, in one of two ways:
 Then run `/factory:run` from any folder, for example `~/scratchpad/selise`.
 
 - The plugin loads in place from `plugin/` in `~/scratchpad/selise/the-software-factory`. After `git pull`, a branch switch or edits, start a new session or run `/reload-plugins`. Every Claude session on this Mac runs the hooks from whatever branch is checked out there, so keep the checkout on a branch that has the user-scope guard. Before this change, the guard blocks writes and pushes in every session. A branch without `plugin/` makes the plugin fail to load.
-- The factory root is `FACTORY_ROOT` from the shell that starts `claude`, or else the default `~/scratchpad/selise/the-software-factory`. If neither is a factory root (a folder with `repos/`, `core/` and `plugin/`), the skill stops with `factory: factory root not found or session env missing`.
+- The factory root is `FACTORY_ROOT` from the shell that starts `claude`, or else the default `~/scratchpad/selise/the-software-factory`. If neither is a factory root (a folder with `core/` and `plugin/`), the skill stops with `factory: factory root not found or session env missing`.
 - The plugin loads in every session, but the guard acts only while a `/factory:run` step runs (this session's `runs/.sessions/<session id>.json` exists) and for the stage agents. Other work in the session is not touched. A session started in a factory folder is still guarded all the time, as in (A).
 - If a normal session is unexpectedly guarded and the deny reason ends with `(step file <path> exists)`, a step ended without cleaning up: remove that stale `runs/.sessions/<session>.json`.
 - Every tool call in every session runs the hooks, which adds about 60 to 120 ms per call.
@@ -51,8 +51,9 @@ If the timeout kills a check, no report is written and the task stays at `check`
 
 A factory session needs a built core: run `cd core && npm run build` once (and after core changes), because `core/dist/` is not committed.
 
-- Mode 3, one step by hand: `/factory:run`, or `/factory:run T-12` for one task.
-- Mode 2, steady loop: `/loop 2m /factory:run --loop`.
+- Mode 3, one step by hand: `/factory:run`, or `/factory:run T-12` for one task, or `/factory:run <factory>` to take work from one factory only (it is passed to the CLI as `--factory`). With no argument every active factory is considered.
+- Mode 2, steady loop: `/loop 2m /factory:run --loop`, or `/loop 2m /factory:run <factory> --loop` for one factory.
+- The runner prints `factory: paused`, `factory: inactive` or `factory: nothing to do` from the CLI. The build prompt takes the repo's check commands from the ticket's `context.checks`, and the spec prompt gets the factory's docs folder (`context.factory.docsPath`), or is told there are none.
 
 Each run does one step of one task and stops. Pause stops new claims and the skill reports `factory: paused`; a step that is already running still finishes. If the skill reports `factory: factory root not found or session env missing` or `factory: session env missing`, the session start hook's environment did not apply (for example after `/clear` or a resume) or no factory root resolved: set `FACTORY_ROOT` in the shell that starts `claude` if the factory is not at the default path, and restart the session.
 
@@ -64,7 +65,7 @@ If the stage agent errors or returns nothing, the skill records nothing and prin
 
 ## Create a task from a prompt
 
-`/factory:new [--ready] <what you want done>` drafts a task from your words (repo, base branch, title, description with acceptance criteria) and creates it on the Board by running `factory new` from your session. The task starts in **inbox**; click **Mark ready** on the Board, then run `/factory:run`. With `--ready` it starts in ready, so you can run `/factory:run` straight away. Its history reads `core · new`. After creation the factory still can't edit the title, description, repo, base branch or gate overrides; only you can, on the Board. The guard denies the factory CLI to stage agents (regex defence in depth).
+`/factory:new [--ready] [<factory>:] <what you want done>` drafts a task from your words (factory, repo, base branch, title, description with acceptance criteria) and creates it on the Board by running `factory new --factory <id>` from your session. It learns the factories and their repos from `factories --json`. The factory is the `<factory>:` prefix if you give one, else the factory whose repo your prompt names; with no match, or more than one, it asks you. The fallback Board link carries `factory` too. The task starts in **inbox**; click **Mark ready** on the Board, then run `/factory:run`. With `--ready` it starts in ready, so you can run `/factory:run` straight away. Its history reads `core · new`. After creation the factory still can't edit the title, description, repo, base branch or gate overrides; only you can, on the Board. The guard denies the factory CLI to stage agents (regex defence in depth).
 
 This needs the Blocks rules to let the factory core insert a task (`blocks/data/rules.json`, regenerated with `npm run -s blocks:resources`). You deploy them; until then `factory new` fails with a one-line error.
 

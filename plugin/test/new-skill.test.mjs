@@ -18,7 +18,7 @@ describe('new skill', () => {
     expect(m).not.toBeNull();
     expect(fm.name).toBe('new');
     expect(fm.description).toBe("Draft a factory task from the user's words and create it on the Board (use only when the user runs /factory:new)");
-    expect(fm['argument-hint']).toBe('[--ready] <what you want done>');
+    expect(fm['argument-hint']).toBe('[--ready] [<factory>:] <what you want done>');
     expect(fm['allowed-tools']).toBe('Read, Write, Bash(node:*), Bash(HUSKY=0 node:*), Bash(printenv:*)');
   });
 
@@ -42,9 +42,28 @@ describe('new skill', () => {
     expect(body).not.toContain('--store');
   });
 
-  it('reads the repo configs and drafts the four fields', () => {
-    expect(body).toContain('<root>/repos/*.yaml');
+  it('learns the factories and repos from factories --json, not from repos/', () => {
+    expect(body).toContain('HUSKY=0 node "<root>/core/dist/cli.js" --mode session factories --json');
+    expect(text).not.toContain('repos/*.yaml');
+    expect(text).not.toContain('.yaml');
     expect(body).toContain('baseBranch');
+  });
+
+  it('picks the factory from the prefix or the repo, and asks on no match or several', () => {
+    const step2 = body.match(/^2\. [\s\S]*?(?=^3\. )/m)[0];
+    expect(step2).toContain('`<factory>:`');
+    expect(step2).toMatch(/prompt names/);
+    expect(step2).toMatch(/no match|more than one/);
+    expect(step2).toMatch(/ask/);
+    expect(step2).toContain('**factory:**');
+  });
+
+  it('passes --factory to new and puts factory in the draft', () => {
+    expect(body.match(/^4\. .*$/m)[0]).toContain('new --factory "<factory>" --repo "<repo>"');
+    expect(body.match(/^3\. .*$/m)[0]).toContain('"factory": ...');
+  });
+
+  it('drafts the fields', () => {
     for (const field of ['repo', 'base', 'title', 'description']) expect(body).toContain(`**${field}:**`);
     expect(body).toContain('$ARGUMENTS');
     expect(body).toContain('Acceptance criteria');
@@ -63,7 +82,7 @@ describe('new skill', () => {
 
   it('creates the task with the CLI from a description file', () => {
     const step4 = body.match(/^4\. .*$/m)[0];
-    expect(step4).toContain('HUSKY=0 node "<root>/core/dist/cli.js" --mode session new --repo "<repo>" --base "<base>" --title "<title>" --description-file');
+    expect(step4).toContain('HUSKY=0 node "<root>/core/dist/cli.js" --mode session new --factory "<factory>" --repo "<repo>" --base "<base>" --title "<title>" --description-file');
     expect(step4).toContain('runs/.drafts/${CLAUDE_SESSION_ID}.md');
     expect(step4).not.toContain('--store');
     expect(body.match(/^3\. .*$/m)[0]).toContain('${CLAUDE_SESSION_ID}.md');
