@@ -89,3 +89,51 @@ describe("phone top bar and tab bar", () => {
     expect(moving).toEqual([]);
   });
 });
+
+describe("phone pills and lanes", () => {
+  it("phone shows the pill row as a scrolling nowrap row", () => {
+    expect(phone(".sf-pills")).toMatchObject({ display: "flex", "overflow-x": "auto", "flex-wrap": "nowrap" });
+    expect(tokens(css, ".sf-pills").display).toBe("none");
+  });
+
+  it("pill style", () => {
+    const pill = phone(".sf-pill");
+    expect(pill).toMatchObject({ "min-height": "44px", flex: "0 0 auto", border: "1px solid var(--sf-border)", "border-radius": "var(--sf-radius)", background: "transparent" });
+    expect(tokens(css, ":root")["--sf-radius"]).toBe("3px");
+  });
+
+  it("selected pill uses primary-soft", () => {
+    expect(phone('.sf-pill[aria-pressed="true"]')).toMatchObject({ background: "var(--sf-primary-soft)", color: "var(--sf-on-primary-soft)" });
+    expect(phone(".sf-pill:hover")).toMatchObject({ background: "var(--sf-primary-soft)", color: "var(--sf-on-primary-soft)" });
+    expect(phoneRules(css).filter((r) => /^\.sf-pill/.test(r.selector) && /outline/.test(Object.keys(r.decls).join())).every((r) => r.decls.outline !== "none")).toBe(true);
+  });
+
+  it("the count inside a pill follows the pill's text colour", () => {
+    expect(phone(".sf-pill .sf-count").color).toBe("inherit");
+  });
+
+  it("unselected lanes are hidden on phones", () => {
+    expect(phone('.sf-view .sf-lane[data-selected="false"]').display).toBe("none");
+  });
+
+  it("selected lane head is hidden, its hint stays", () => {
+    expect(phone(".sf-view .sf-lane .sf-lane-head").display).toBe("none");
+    expect(phoneRules(css).filter((r) => /sf-lane-hint/.test(r.selector) && r.decls.display === "none")).toEqual([]);
+  });
+
+  it("empty lane text shows on phones and not at 640px and up", () => {
+    expect(phone(".sf-view .sf-lane .sf-lane-empty").display).toBe("block");
+    expect(tokens(css, ".sf-lane-empty").display).toBe("none");
+  });
+
+  it("desktop lanes are unchanged", () => {
+    const base = css.slice(0, css.lastIndexOf("@media (max-width: 639px)"));
+    expect(base).not.toContain("data-selected");
+    expect(tokens(css, ".sf-lanes")["grid-template-columns"]).toBe("repeat(5, minmax(0, 1fr))");
+  });
+
+  it("the pill gets the shared colour transition and no phone rule adds one", () => {
+    const list = css.match(/([^{}]+)\{\s*transition: background-color 150ms/)?.[1] ?? "";
+    expect(list).toContain(".sf-pill");
+  });
+});

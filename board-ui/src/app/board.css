@@ -1326,6 +1326,7 @@ textarea.sf-input {
 .sf-card-status,
 .sf-view-link,
 .sf-account,
+.sf-pill,
 .sf-tab {
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
@@ -1698,5 +1699,55 @@ textarea.sf-input {
 
   .sf-shell-detail .sf-main {
     padding-bottom: calc(var(--sf-actionbar-button) + 16px + 16px + env(safe-area-inset-bottom));
+  }
+
+  /* Lane pills: a scrolling row of toggle buttons; the selected one is on primary-soft. */
+  .sf-pills {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    margin-bottom: 12px;
+    overflow-x: auto;
+  }
+
+  .sf-pill {
+    align-items: center;
+    background: transparent;
+    border: 1px solid var(--sf-border);
+    border-radius: var(--sf-radius);
+    color: var(--sf-text);
+    display: inline-flex;
+    flex: 0 0 auto;
+    font-family: var(--sf-mono);
+    font-size: var(--sf-label-size);
+    gap: 6px;
+    letter-spacing: var(--sf-label-tracking);
+    line-height: var(--sf-label-line);
+    min-height: 44px;
+    padding: 0 14px;
+    white-space: nowrap;
+  }
+
+  .sf-pill:hover,
+  .sf-pill[aria-pressed="true"] {
+    background: var(--sf-primary-soft);
+    color: var(--sf-on-primary-soft);
+  }
+
+  .sf-pill .sf-count {
+    color: inherit;
+  }
+
+  /* One lane at a time; the pill carries the lane's name and count, so its head goes. */
+  .sf-view .sf-lane[data-selected="false"] {
+    display: none;
+  }
+
+  .sf-view .sf-lane .sf-lane-head {
+    display: none;
+  }
+
+  .sf-view .sf-lane .sf-lane-empty {
+    display: block;
   }
 }
