@@ -67,7 +67,7 @@ export function renewCommand({ root, session, sessionId, host, node = process.ex
   return {
     file: node,
     args: [path.join(root, 'core', 'dist', 'cli.js'), '--mode', session.mode, '--store', session.store, 'renew', session.taskId],
-    env: { ...env, FACTORY_CLAIMANT: claimantFor(sessionId, host) },
+    env: { ...env, FACTORY_ROOT: root, FACTORY_CLAIMANT: claimantFor(sessionId, host) },
     log: path.join(root, 'runs', session.taskId, 'renew.log'),
   };
 }

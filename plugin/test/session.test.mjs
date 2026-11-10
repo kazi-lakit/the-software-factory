@@ -56,6 +56,7 @@ describe('renewCommand', () => {
     expect(c.file).toBe('node');
     expect(c.args).toEqual(['/f/root/core/dist/cli.js', '--mode', 'session', '--store', 'blocks', 'renew', 'T-1']);
     expect(c.env.FACTORY_CLAIMANT).toBe('claude:mac:01234567');
+    expect(c.env.FACTORY_ROOT).toBe('/f/root');
     expect(c.log).toBe('/f/root/runs/T-1/renew.log');
   });
 });
@@ -71,9 +72,17 @@ describe('session-start.mjs', () => {
     expect(fs.readFileSync(envFile, 'utf8').split('\n').filter(Boolean)).toEqual([
       `export FACTORY_CLAIMANT=claude:${os.hostname()}:abcdef12`,
       'export HUSKY=0',
-      'export FACTORY_ROOT=/f/root',
+      'export FACTORY_ROOT="/f/root"',
       'export FACTORY_STORE=${FACTORY_STORE:-blocks}',
     ]);
+  });
+  it('quotes a root with spaces so the env file stays valid shell', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ss-'));
+    const envFile = path.join(dir, 'env');
+    const env = { ...process.env, CLAUDE_ENV_FILE: envFile, CLAUDE_PROJECT_DIR: '/f/my root' };
+    spawnSync('node', [path.join(hooks, 'session-start.mjs')], { input: '{"session_id":"abcdef123456"}', env });
+    const r = spawnSync('sh', ['-c', `. "${envFile}" && printf %s "$FACTORY_ROOT"`], { encoding: 'utf8', env: { PATH: process.env.PATH } });
+    expect(r.stdout).toBe('/f/my root');
   });
   it('exits 0 without CLAUDE_ENV_FILE', () => {
     const env = { ...process.env, CLAUDE_PROJECT_DIR: '/f/root' };

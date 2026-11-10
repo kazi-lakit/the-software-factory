@@ -2,6 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { readHookInput, factoryRoot, claimantFor } from './lib.mjs';
 
+// Escapes the characters that stay special inside double quotes.
+const shellQuoted = (s) => s.replace(/[\\"$`]/g, '\\$&');
+
 try {
   const input = await readHookInput();
   const envFile = process.env.CLAUDE_ENV_FILE;
@@ -11,7 +14,7 @@ try {
     const lines = [
       `export FACTORY_CLAIMANT=${claimantFor(input.session_id, os.hostname())}`,
       'export HUSKY=0',
-      `export FACTORY_ROOT=${factoryRoot(process.env)}`,
+      `export FACTORY_ROOT="${shellQuoted(factoryRoot(process.env))}"`,
       'export FACTORY_STORE=${FACTORY_STORE:-blocks}',
     ];
     fs.appendFileSync(envFile, lines.join('\n') + '\n');
