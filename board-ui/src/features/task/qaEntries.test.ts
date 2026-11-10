@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FactoryEvent } from "@factory/core";
-import { askerName, buildQaLog } from "./qaLog";
+import { askerName, buildQaLog } from "./qaEntries";
 
 const LETTERED = "Which branch?\nA. main: fits (recommended)\nB. develop: more work\nReply with an option letter.";
 const NONE = "Which branch?\nA. main: fits\nB. develop: more work";

@@ -4,7 +4,7 @@ import { answerTask, type FactoryEvent, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { useUnsent } from "../../lib/unsent";
 import { optionText, parseQuestion, recommendedLetter } from "./parseQuestion";
-import { askerName } from "./qaLog";
+import { askerName } from "./qaEntries";
 import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "./writeOutcome";
 
 const OTHER = "other";

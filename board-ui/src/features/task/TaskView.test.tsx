@@ -235,3 +235,48 @@ describe("TaskView page layout", () => {
     expect(steps[index]).toBe("waiting");
   });
 });
+
+describe("TaskView questions and answers", () => {
+  const LETTERED = "Which branch?\nA. main: fits (recommended)\nB. develop: more work";
+  const at = (n: number) => `2026-11-0${n}T10:00:00.000Z`;
+  const qa = (taskId: string, field: "question" | "answer", to: string, n: number, reason = field === "answer" ? "answered" : "asked") => ({
+    action: "set" as const, actor: field === "question" ? "spec-writer · sdk · run R-1" : "you", at: at(n), factoryId: "blocks", field, from: null, reason, taskId, to
+  });
+
+  it("shows_the_qa_log_under_the_answer_panel_when_blocked", async () => {
+    const task = await seedTask({ title: "Stuck" }, "blocked", { question: "Open now?", stage: "plan" });
+    await fakeBoard().core.addEvents([qa(task.taskId, "question", LETTERED, 1), qa(task.taskId, "answer", "A. main: fits", 2), qa(task.taskId, "question", "Open now?", 3)]);
+    renderTask(task.taskId);
+    const log = await screen.findByRole("region", { name: "Questions and answers" });
+    expect(within(log).getByText("Which branch?")).toBeInTheDocument();
+    expect(within(log).getByText("A. main: fits")).toBeInTheDocument();
+    expect(within(log).getByText("Recommended")).toBeInTheDocument();
+    expect(within(log).queryByText("Open now?")).toBeNull();
+    const panel = screen.getByRole("region", { name: "Open now?" });
+    expect(panel.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("non_blocked_task_with_past_answers_shows_the_log_without_a_panel", async () => {
+    const task = await seedTask({ title: "Moving" }, "plan", { stage: "plan" });
+    await fakeBoard().core.addEvents([qa(task.taskId, "question", "Continue?", 1), qa(task.taskId, "answer", "yes", 2)]);
+    renderTask(task.taskId);
+    expect(await screen.findByRole("region", { name: "Questions and answers" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Your answer")).toBeNull();
+  });
+
+  it("no_qa_section_when_there_are_no_entries", async () => {
+    const task = await seedTask({ title: "Quiet" });
+    renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 2, name: "Quiet" });
+    expect(screen.queryByRole("region", { name: "Questions and answers" })).toBeNull();
+  });
+
+  it("gate_changes_requested_answer_is_not_in_the_log", async () => {
+    const task = await seedTask({ title: "Gate" }, "plan", { stage: "plan" });
+    await fakeBoard().core.addEvents([qa(task.taskId, "answer", "please change X", 1, "spec changes requested")]);
+    renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 2, name: "Gate" });
+    expect(screen.queryByRole("region", { name: "Questions and answers" })).toBeNull();
+    expect(screen.queryByText("please change X")).toBeNull();
+  });
+});
