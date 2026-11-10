@@ -199,3 +199,175 @@ describe("board_css_theme_tokens", () => {
     for (const o of outlines) if (o.includes("var(")) expect(o).toContain("var(--sf-focus)");
   });
 });
+
+const labelType = {
+  "font-family": "var(--sf-mono)",
+  "font-size": "var(--sf-label-size)",
+  "letter-spacing": "var(--sf-label-tracking)"
+};
+
+describe("board_css_buttons", () => {
+  it("button_base_is_outline_label_type", () => {
+    const t = tokens(read("board.css"), ".sf-button");
+    expect(t.background).toBe("transparent");
+    expect(t.border).toBe("1px solid var(--sf-border)");
+    expect(t["border-radius"]).toBe("var(--sf-radius)");
+    expect(t).toMatchObject(labelType);
+    expect(t["line-height"]).toBe("var(--sf-label-line)");
+    expect(t.padding).toBe("8px 14px");
+    expect(t).not.toHaveProperty("min-height");
+  });
+
+  it("button_hover_is_primary_soft_with_underline", () => {
+    const t = tokens(read("board.css"), ".sf-button:hover:not(:disabled)");
+    expect(t.background).toBe("var(--sf-primary-soft)");
+    expect(t.color).toBe("var(--sf-on-primary-soft)");
+    expect(t["text-decoration"]).toBe("underline");
+  });
+
+  it("button_disabled_keeps_opacity_and_cursor", () => {
+    const css = read("board.css");
+    const t = tokens(css, ".sf-button:disabled");
+    expect(t.opacity).toBe("0.6");
+    expect(t.cursor).toBe("not-allowed");
+    expect(tokens(css, ".sf-button:hover")).toEqual({});
+  });
+
+  it("primary_is_the_only_filled_variant", () => {
+    const css = read("board.css");
+    const p = tokens(css, ".sf-button-primary");
+    expect(p.background).toBe("var(--sf-primary)");
+    expect(p["border-color"]).toBe("var(--sf-primary)");
+    expect(p.color).toBe("var(--sf-on-primary)");
+    const h = tokens(css, ".sf-button-primary:hover:not(:disabled)");
+    expect(h.background).toBe("var(--sf-primary-hover)");
+    expect(h["border-color"]).toBe("var(--sf-primary-hover)");
+    expect(h.color).toBe("var(--sf-on-primary)");
+    expect(h["text-decoration"]).toBe("underline");
+  });
+
+  it("accent_button_uses_accent_fill", () => {
+    const css = read("board.css");
+    const a = tokens(css, ".sf-button-accent");
+    expect(a.background).toBe("var(--sf-accent)");
+    expect(a["border-color"]).toBe("var(--sf-accent)");
+    expect(a.color).toBe("var(--sf-on-accent)");
+    const h = tokens(css, ".sf-button-accent:hover:not(:disabled)");
+    expect(h.background).toBe("var(--sf-accent)");
+    expect(h.color).toBe("var(--sf-on-accent)");
+    expect(h["text-decoration"]).toBe("underline");
+  });
+
+  it("danger_stays_an_outline", () => {
+    const d = tokens(read("board.css"), ".sf-button-danger");
+    expect(d["border-color"]).toBe("var(--sf-removed)");
+    expect(d.color).toBe("var(--sf-removed)");
+    expect(d).not.toHaveProperty("background");
+  });
+});
+
+describe("board_css_chips_badges_inputs", () => {
+  it("chip_and_badges_are_transparent_outlined_label_type", () => {
+    const css = read("board.css");
+    for (const s of [".sf-chip", ".sf-badge", ".sf-paused", ".sf-paused-unknown"]) {
+      const t = tokens(css, s);
+      expect(t.background, s).toBe("transparent");
+      expect(t.border, s).toMatch(/^1px /);
+      expect(t, s).toMatchObject(labelType);
+      expect(t, s).not.toHaveProperty("font-weight");
+    }
+  });
+
+  it("waiting_badge_is_accent_text_and_outline", () => {
+    const css = read("board.css");
+    for (const s of [".sf-badge", ".sf-paused"]) {
+      expect(tokens(css, s).color).toBe("var(--sf-accent-text)");
+      expect(tokens(css, s).border).toContain("var(--sf-accent)");
+    }
+  });
+
+  it("input_is_transparent_outlined_3px", () => {
+    const t = tokens(read("board.css"), ".sf-input");
+    expect(t.background).toBe("transparent");
+    expect(t.border).toBe("1px solid var(--sf-border)");
+    expect(t["border-radius"]).toBe("var(--sf-radius)");
+  });
+});
+
+describe("board_css_select", () => {
+  it("select_is_native_appearance_none_34px_label_type", () => {
+    const t = tokens(read("board.css"), ".sf-select");
+    expect(t.appearance).toBe("none");
+    expect(t["-webkit-appearance"]).toBe("none");
+    expect(t["background-color"]).toBe("transparent");
+    expect(t.border).toBe("1px solid var(--sf-border)");
+    expect(t["border-radius"]).toBe("var(--sf-radius)");
+    expect(t.height).toBe("34px");
+    expect(t["min-height"]).toBe("34px");
+    expect(t.padding).toBe("0 28px 0 10px");
+    expect(t).toMatchObject(labelType);
+    expect(t).not.toHaveProperty("outline");
+  });
+
+  it("select_has_exactly_one_chevron", () => {
+    const css = read("board.css");
+    const t = tokens(css, ".sf-select");
+    expect(t["background-image"]?.match(/linear-gradient\(/g)).toHaveLength(2);
+    expect(t["background-image"]).toContain("currentColor");
+    expect(t["background-repeat"]).toBe("no-repeat");
+    const lists = selectorLists(css).join("\n");
+    expect(lists).not.toMatch(/\.sf-select::after/);
+    expect(lists).not.toMatch(/\.sf-(field|inline-field)::after/);
+  });
+
+  it("select_hover_sets_background_color_only", () => {
+    const t = tokens(read("board.css"), ".sf-select:hover:not(:disabled)");
+    expect(t["background-color"]).toBe("var(--sf-primary-soft)");
+    expect(Object.keys(t)).not.toContain("background");
+    expect(Object.keys(t)).not.toContain("background-image");
+  });
+
+  it("mono_select_keeps_label_size_and_height", () => {
+    const css = read("board.css");
+    const t = tokens(css, ".sf-select.sf-mono");
+    for (const k of ["font-size", "letter-spacing", "height"]) expect(t).not.toHaveProperty(k);
+    expect(css.indexOf(".sf-select {")).toBeGreaterThan(css.indexOf(".sf-mono {"));
+  });
+
+  it("select_options_are_readable", () => {
+    const t = tokens(read("board.css"), ".sf-select option");
+    expect(t.color).toBe("var(--sf-text)");
+    expect(t["background-color"]).toBe("var(--sf-surface)");
+  });
+
+  it("labels_beside_selects_are_label_type_muted", () => {
+    const css = read("board.css");
+    for (const s of [".sf-field > span,\n.sf-inline-field > span,\n.sf-doc-controls label", ".sf-fieldset legend"]) {
+      const t = tokens(css, s);
+      expect(t.color, s).toBe("var(--sf-muted)");
+      expect(t, s).toMatchObject(labelType);
+    }
+  });
+});
+
+describe("board_css_motion", () => {
+  it("shared_controls_transition_colours_in_150ms", () => {
+    const css = read("board.css");
+    const sel = [".sf-button", ".sf-select", ".sf-input", ".sf-chip", ".sf-badge", ".sf-view-link", ".sf-tab"];
+    const list = selectorLists(css).find((l) => sel.every((s) => l.split(",").map((x) => x.trim()).includes(s)));
+    expect(list).toBeDefined();
+    expect(tokens(css, list ?? "").transition).toBe(
+      "background-color 150ms ease, border-color 150ms ease, color 150ms ease"
+    );
+  });
+
+  it("reduced_motion_block_zeroes_transitions", () => {
+    const css = read("board.css");
+    expect(css).toContain("@media (prefers-reduced-motion: reduce)");
+    expect(tokens(css, "*,\n  *::before,\n  *::after")["transition-duration"]).toBe("0s !important");
+  });
+
+  it("switch_thumb_reduced_motion_block_still_present", () => {
+    expect(tokens(read("board.css"), ".sf-switch input::before").transition).toBe("transform 120ms ease");
+  });
+});

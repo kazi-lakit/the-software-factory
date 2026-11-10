@@ -211,12 +211,14 @@ body {
 }
 
 .sf-paused {
-  background: var(--sf-accent-soft);
+  background: transparent;
   border: 1px solid var(--sf-accent);
   border-radius: var(--sf-radius);
   color: var(--sf-accent-text);
-  font-size: var(--sf-size-small);
-  font-weight: 600;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   padding: 2px 8px;
   white-space: nowrap;
 }
@@ -230,17 +232,21 @@ body {
 }
 
 .sf-button {
-  background: var(--sf-surface);
+  background: transparent;
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   color: var(--sf-text);
-  font: inherit;
-  min-height: 28px;
-  padding: 0 10px;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 8px 14px;
 }
 
 .sf-button:hover:not(:disabled) {
-  background: var(--sf-surface-sunk);
+  background: var(--sf-primary-soft);
+  color: var(--sf-on-primary-soft);
+  text-decoration: underline;
 }
 
 .sf-button:disabled {
@@ -290,26 +296,43 @@ body {
 }
 
 .sf-badge {
-  background: var(--sf-accent-soft);
+  background: transparent;
   border: 1px solid var(--sf-accent);
   border-radius: var(--sf-radius);
   color: var(--sf-accent-text);
-  font-size: var(--sf-size-small);
-  font-weight: 600;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   margin-left: 6px;
   padding: 0 6px;
   white-space: nowrap;
 }
 
 .sf-button-primary {
-  background: var(--sf-text);
-  border-color: var(--sf-text);
-  color: var(--sf-surface);
+  background: var(--sf-primary);
+  border-color: var(--sf-primary);
+  color: var(--sf-on-primary);
 }
 
 .sf-button-primary:hover:not(:disabled) {
-  background: var(--sf-muted);
-  border-color: var(--sf-muted);
+  background: var(--sf-primary-hover);
+  border-color: var(--sf-primary-hover);
+  color: var(--sf-on-primary);
+  text-decoration: underline;
+}
+
+.sf-button-accent {
+  background: var(--sf-accent);
+  border-color: var(--sf-accent);
+  color: var(--sf-on-accent);
+}
+
+.sf-button-accent:hover:not(:disabled) {
+  background: var(--sf-accent);
+  border-color: var(--sf-accent);
+  color: var(--sf-on-accent);
+  text-decoration: underline;
 }
 
 .sf-button-danger {
@@ -317,9 +340,8 @@ body {
   color: var(--sf-removed);
 }
 
-.sf-input,
-.sf-select {
-  background: var(--sf-surface);
+.sf-input {
+  background: transparent;
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   color: var(--sf-text);
@@ -328,7 +350,43 @@ body {
   padding: 4px 8px;
 }
 
-.sf-input.sf-mono,
+.sf-input.sf-mono {
+  font-family: var(--sf-mono);
+}
+
+/* One style for every select: native, no platform arrow, one chevron. */
+.sf-select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: transparent;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 15px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 5px 5px;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  height: 34px;
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  min-height: 34px;
+  padding: 0 28px 0 10px;
+}
+
+.sf-select:hover:not(:disabled) {
+  background-color: var(--sf-primary-soft);
+}
+
+.sf-select option {
+  background-color: var(--sf-surface);
+  color: var(--sf-text);
+}
+
 .sf-select.sf-mono {
   font-family: var(--sf-mono);
 }
@@ -347,7 +405,14 @@ textarea.sf-input {
 
 .sf-field > span,
 .sf-inline-field > span,
-.sf-doc-controls label,
+.sf-doc-controls label {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
 .sf-facts dt {
   color: var(--sf-muted);
   font-size: var(--sf-size-small);
@@ -735,10 +800,14 @@ textarea.sf-input {
 
 /* Settings could not be read: the shell says the pause state is unknown. */
 .sf-paused-unknown {
+  background: transparent;
   border: 1px dashed var(--sf-border);
   border-radius: var(--sf-radius);
   color: var(--sf-muted);
-  font-size: var(--sf-size-small);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   padding: 2px 8px;
   white-space: nowrap;
 }
@@ -800,7 +869,10 @@ textarea.sf-input {
 
 .sf-fieldset legend {
   color: var(--sf-muted);
-  font-size: var(--sf-size-small);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   margin-bottom: 4px;
   padding: 0;
 }
@@ -875,6 +947,25 @@ textarea.sf-input {
 @media (prefers-reduced-motion: reduce) {
   .sf-switch input::before {
     transition: none;
+  }
+}
+
+/* Colour changes on the shared controls last 150ms and stop on request. */
+.sf-button,
+.sf-select,
+.sf-input,
+.sf-chip,
+.sf-badge,
+.sf-view-link,
+.sf-tab {
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0s !important;
   }
 }
 
@@ -989,9 +1080,14 @@ textarea.sf-input {
 
 .sf-chip {
   align-items: center;
+  background: transparent;
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   display: inline-flex;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   gap: 6px;
   padding: 2px 8px;
 }
