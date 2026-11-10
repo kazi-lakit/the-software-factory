@@ -281,55 +281,71 @@ describe('lib', () => {
     expect(isFactoryAgent({ agent_type: 'other:x' })).toBe(false);
   });
   describe('resolveFactoryRoot', () => {
-    // A fake file system: a folder is a factory root when core/ and plugin/ exist in it.
+    // A fake file system: a folder is a factory root when core/package.json and the plugin manifest (name factory) exist in it.
+    const MANIFEST = (r) => path.join(r, 'plugin', '.claude-plugin', 'plugin.json');
     const fsWith = (...roots) => {
-      const paths = new Set(roots.flatMap((r) => ['core', 'plugin'].map((d) => path.join(r, d))));
+      const paths = new Set(roots.flatMap((r) => [path.join(r, 'core', 'package.json'), MANIFEST(r)]));
       return (p) => paths.has(p);
     };
+    const readFactory = () => '{"name":"factory"}';
     const home = '/h';
     const dflt = '/h/scratchpad/selise/the-software-factory';
     const exists = fsWith('/env', '/proj', dflt);
+    const resolve = (env, h, ex = exists, rd = readFactory) => resolveFactoryRoot(env, h, ex, rd);
 
     it('FACTORY_ROOT wins first', () => {
-      expect(resolveFactoryRoot({ FACTORY_ROOT: '/env', CLAUDE_PROJECT_DIR: '/proj' }, home, exists))
+      expect(resolve({ FACTORY_ROOT: '/env', CLAUDE_PROJECT_DIR: '/proj' }, home, exists))
         .toEqual({ root: '/env', projectMode: false });
     });
     it('CLAUDE_PROJECT_DIR wins second, in project mode', () => {
-      expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/proj' }, home, exists))
+      expect(resolve({ CLAUDE_PROJECT_DIR: '/proj' }, home, exists))
         .toEqual({ root: '/proj', projectMode: true });
     });
     it('the default path under home wins third', () => {
-      expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/elsewhere' }, home, exists))
+      expect(resolve({ CLAUDE_PROJECT_DIR: '/elsewhere' }, home, exists))
         .toEqual({ root: dflt, projectMode: false });
-      expect(resolveFactoryRoot({}, home, exists)).toEqual({ root: dflt, projectMode: false });
+      expect(resolve({}, home, exists)).toEqual({ root: dflt, projectMode: false });
     });
     it('a set but invalid FACTORY_ROOT returns null without falling through', () => {
-      expect(resolveFactoryRoot({ FACTORY_ROOT: '/nope', CLAUDE_PROJECT_DIR: '/proj' }, home, exists)).toBeNull();
+      expect(resolve({ FACTORY_ROOT: '/nope', CLAUDE_PROJECT_DIR: '/proj' }, home, exists)).toBeNull();
     });
     it('projectMode only when the root is the project dir', () => {
-      expect(resolveFactoryRoot({ FACTORY_ROOT: '/proj', CLAUDE_PROJECT_DIR: '/proj' }, home, exists).projectMode).toBe(true);
-      expect(resolveFactoryRoot({ FACTORY_ROOT: '/env', CLAUDE_PROJECT_DIR: '/proj' }, home, exists).projectMode).toBe(false);
-      expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/nofactory' }, home, exists).projectMode).toBe(false);
+      expect(resolve({ FACTORY_ROOT: '/proj', CLAUDE_PROJECT_DIR: '/proj' }, home, exists).projectMode).toBe(true);
+      expect(resolve({ FACTORY_ROOT: '/env', CLAUDE_PROJECT_DIR: '/proj' }, home, exists).projectMode).toBe(false);
+      expect(resolve({ CLAUDE_PROJECT_DIR: '/nofactory' }, home, exists).projectMode).toBe(false);
     });
     it('a folder with only core/ is not a factory root', () => {
-      const partial = (p) => p === '/proj/core';
-      expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/proj' }, home, partial)).toBeNull();
+      const partial = (p) => p === '/proj/core/package.json';
+      expect(resolve({ CLAUDE_PROJECT_DIR: '/proj' }, home, partial)).toBeNull();
+    });
+    it('core/ and plugin/ without the manifest is not a root', () => {
+      const noManifest = (p) => ['/proj/core/package.json', '/proj/plugin'].includes(p);
+      expect(resolve({ CLAUDE_PROJECT_DIR: '/proj' }, home, noManifest)).toBeNull();
+    });
+    it('a manifest named something else is not a root', () => {
+      expect(resolve({ CLAUDE_PROJECT_DIR: '/proj' }, home, fsWith('/proj'), () => '{"name":"other"}')).toBeNull();
+    });
+    it('a malformed manifest is not a root', () => {
+      expect(resolve({ CLAUDE_PROJECT_DIR: '/proj' }, home, fsWith('/proj'), () => '{oops')).toBeNull();
+      expect(resolve({ CLAUDE_PROJECT_DIR: '/proj' }, home, fsWith('/proj'), () => { throw new Error('EACCES'); })).toBeNull();
     });
     it('a root without repos/ resolves', () => {
       expect(fsWith('/proj')('/proj/repos')).toBe(false);
-      expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/proj' }, home, fsWith('/proj'))).toEqual({ root: '/proj', projectMode: true });
+      expect(resolve({ CLAUDE_PROJECT_DIR: '/proj' }, home)).toEqual({ root: '/proj', projectMode: true });
     });
     it('null when nothing qualifies', () => {
       expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/proj' }, home, () => false)).toBeNull();
       expect(resolveFactoryRoot({}, home, fsWith('/env'))).toBeNull();
     });
   });
-  it('isFactoryRoot needs core/ and plugin/, not repos/', () => {
+  it('isFactoryRoot needs core/package.json and the factory manifest, not repos/', () => {
     const has = (...ds) => (p) => ds.some((d) => p === `/r/${d}`);
-    expect(isFactoryRoot('/r', has('core', 'plugin'))).toBe(true);
-    expect(isFactoryRoot('/r', has('repos', 'core', 'plugin'))).toBe(true);
-    expect(isFactoryRoot('/r', has('core'))).toBe(false);
-    expect(isFactoryRoot('/r', has('repos', 'core'))).toBe(false);
+    const files = ['core/package.json', 'plugin/.claude-plugin/plugin.json'];
+    const rd = () => '{"name":"factory"}';
+    expect(isFactoryRoot('/r', has(...files), rd)).toBe(true);
+    expect(isFactoryRoot('/r', has(...files, 'repos'), rd)).toBe(true);
+    expect(isFactoryRoot('/r', has('core/package.json'), rd)).toBe(false);
+    expect(isFactoryRoot('/r', has('repos', 'core/package.json'), rd)).toBe(false);
   });
   it('sessionFile', () => {
     expect(sessionFile('/r', 's1')).toBe('/r/runs/.sessions/s1.json');
@@ -341,7 +357,12 @@ describe('entry script', () => {
   const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'guard-')));
   const link = path.join(tmp, 'link');
   fs.symlinkSync(pluginDir, link);
-  const makeRoot = (r) => { for (const d of ['core', 'plugin', 'runs/.sessions']) fs.mkdirSync(path.join(r, d), { recursive: true }); return r; };
+  const makeRoot = (r) => {
+    for (const d of ['core', 'plugin/.claude-plugin', 'runs/.sessions']) fs.mkdirSync(path.join(r, d), { recursive: true });
+    fs.writeFileSync(path.join(r, 'core', 'package.json'), '{}');
+    fs.writeFileSync(path.join(r, 'plugin', '.claude-plugin', 'plugin.json'), '{"name":"factory"}');
+    return r;
+  };
   // A home whose default factory root exists, a home without one, a project root, and a plain project folder.
   const home = path.join(tmp, 'home');
   const dfltRoot = makeRoot(path.join(home, 'scratchpad', 'selise', 'the-software-factory'));

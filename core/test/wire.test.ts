@@ -68,16 +68,34 @@ describe('LazyBlocksStore', () => {
 });
 
 describe('findRoot', () => {
-  test('a root has core/ and plugin/; repos/ is not needed', async () => {
-    const { mkdtempSync, mkdirSync, realpathSync } = await import('node:fs');
+  const makeRoot = async (manifest: string | null) => {
+    const { mkdtempSync, mkdirSync, realpathSync, writeFileSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
     const { join } = await import('node:path');
-    const { findRoot } = await import('../src/wire.js');
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'findroot-')));
-    mkdirSync(join(root, 'core'));
-    mkdirSync(join(root, 'plugin'));
     mkdirSync(join(root, 'core', 'src'), { recursive: true });
+    writeFileSync(join(root, 'core', 'package.json'), '{}');
+    mkdirSync(join(root, 'plugin', '.claude-plugin'), { recursive: true });
+    if (manifest !== null) writeFileSync(join(root, 'plugin', '.claude-plugin', 'plugin.json'), manifest);
+    return { root, join };
+  };
+  test('a root has core/package.json and the factory plugin manifest; repos/ is not needed', async () => {
+    const { findRoot } = await import('../src/wire.js');
+    const { root, join } = await makeRoot('{"name":"factory"}');
     expect(findRoot(join(root, 'core', 'src'), {})).toBe(root);
+  });
+  test.each([
+    ['no manifest', null],
+    ['a manifest named something else', '{"name":"other"}'],
+    ['a malformed manifest', '{not json'],
+  ])('%s is not a root', async (_label, manifest) => {
+    const { findRoot } = await import('../src/wire.js');
+    const { root, join } = await makeRoot(manifest);
+    expect(() => findRoot(join(root, 'core', 'src'), {})).toThrow(/factory root not found/);
+  });
+  test('FACTORY_ROOT still wins first', async () => {
+    const { findRoot } = await import('../src/wire.js');
+    expect(findRoot('/', { FACTORY_ROOT: '/some/where' })).toBe('/some/where');
   });
 });
 

@@ -53,7 +53,8 @@ describe('new skill', () => {
     const step2 = body.match(/^2\. [\s\S]*?(?=^3\. )/m)[0];
     expect(step2).toContain('`<factory>:`');
     expect(step2).toMatch(/prompt names/);
-    expect(step2).toMatch(/no match|more than one/);
+    expect(step2).toMatch(/no match/);
+    expect(step2).toMatch(/more than one factory/);
     expect(step2).toMatch(/ask/);
     expect(step2).toContain('**factory:**');
   });
@@ -120,7 +121,8 @@ describe('new skill', () => {
 
   it('never targets main', () => {
     expect(body).toContain('never main');
-    expect(body).toContain('`dev`/`stg`');
+    expect(body).toContain('never uses `main` as a task base');
+    expect(body).toContain('`main` is always protected');
   });
 
   it('asks about an ambiguous repo instead of guessing', () => {

@@ -70,7 +70,16 @@ describe('run skill', () => {
     expect(step1).toMatch(/`T-<n>`/);
     expect(step1).toMatch(/[Aa]ny other word[^\n]*factory[^\n]*`--factory`/);
     const step2 = body.match(/^2\. .*$/m)[0];
-    expect(step2).toContain('next [task] [--factory <factory>] --json');
+    expect(step2).toContain('next [task] [--factory "<factory>"] --json');
+  });
+
+  it('validates the factory id and always double-quotes it', () => {
+    const step1 = body.match(/^1\. .*$/m)[0];
+    expect(step1).toContain('^[a-z][a-z0-9-]{0,39}$');
+    expect(step1).toContain('`factory: bad factory id`');
+    expect(step1).toContain('`--factory "<factory>"`');
+    expect(body).toMatch(/One factory per `\/factory:run`/);
+    expect(body).not.toMatch(/--factory <factory>/);
   });
 
   it('takes the build checks from context.checks and never reads repos/', () => {

@@ -22,7 +22,7 @@ You do not start in the worktree; your session may start in the factory folder o
 3. Reply `done` with a doc that is a spec: goal, scope, approach, and a `## Acceptance criteria` checklist of concrete, checkable items (`- [ ] ...`).
 
 ## What not to do
-- Do not write or edit any file, in the repo or the vault.
+- Do not write or edit any file, in the repo or the docs folder.
 - Do not run commands, and do not look for credentials.
 - Do not invent requirements the task does not imply.
 

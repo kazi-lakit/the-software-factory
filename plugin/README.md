@@ -12,7 +12,7 @@ cd <factory root> && claude --plugin-dir plugin --add-dir ~/scratchpad/selise/va
 
 The whole session is guarded, all the time.
 
-- `--add-dir ~/scratchpad/selise/vaultS/projects` gives the spec writer read access to the repo's vault overview. Without it, Claude Code refuses the read (or asks for approval, which stalls a loop). Writes there are still denied by the guard. The plugin adds no permission rules of its own; granting more is your decision.
+- `--add-dir ~/scratchpad/selise/vaultS/projects` gives the spec writer read access to the folders your factories' `docsPath` points at (for example the vault's projects folder). Without it, Claude Code refuses the read (or asks for approval, which stalls a loop). Writes there are still denied by the guard. The plugin adds no permission rules of its own; granting more is your decision.
 - `--strict-mcp-config` loads no other MCP servers in the factory session. The guard covers only Bash and the write tools, so tools from your other MCP servers would run unguarded.
 - If the plugin is also installed user-scoped (B), the `--plugin-dir` copy replaces the installed one for this session.
 - The session start hook exports `HUSKY=0` to every Bash call in this mode only, so the repos' git hooks never run here.
@@ -29,7 +29,7 @@ You install it yourself, once, in one of two ways:
 Then run `/factory:run` from any folder, for example `~/scratchpad/selise`.
 
 - The plugin loads in place from `plugin/` in `~/scratchpad/selise/the-software-factory`. After `git pull`, a branch switch or edits, start a new session or run `/reload-plugins`. Every Claude session on this Mac runs the hooks from whatever branch is checked out there, so keep the checkout on a branch that has the user-scope guard. Before this change, the guard blocks writes and pushes in every session. A branch without `plugin/` makes the plugin fail to load.
-- The factory root is `FACTORY_ROOT` from the shell that starts `claude`, or else the default `~/scratchpad/selise/the-software-factory`. If neither is a factory root (a folder with `core/` and `plugin/`), the skill stops with `factory: factory root not found or session env missing`.
+- The factory root is `FACTORY_ROOT` from the shell that starts `claude`, or else the default `~/scratchpad/selise/the-software-factory`. If neither is a factory root (a folder with `core/package.json` and a `plugin/.claude-plugin/plugin.json` named `factory`), the skill stops with `factory: factory root not found or session env missing`.
 - The plugin loads in every session, but the guard acts only while a `/factory:run` step runs (this session's `runs/.sessions/<session id>.json` exists) and for the stage agents. Other work in the session is not touched. A session started in a factory folder is still guarded all the time, as in (A).
 - If a normal session is unexpectedly guarded and the deny reason ends with `(step file <path> exists)`, a step ended without cleaning up: remove that stale `runs/.sessions/<session>.json`.
 - Every tool call in every session runs the hooks, which adds about 60 to 120 ms per call.
@@ -51,7 +51,7 @@ If the timeout kills a check, no report is written and the task stays at `check`
 
 A factory session needs a built core: run `cd core && npm run build` once (and after core changes), because `core/dist/` is not committed.
 
-- Mode 3, one step by hand: `/factory:run`, or `/factory:run T-12` for one task, or `/factory:run <factory>` to take work from one factory only (it is passed to the CLI as `--factory`). With no argument every active factory is considered.
+- Mode 3, one step by hand: `/factory:run`, or `/factory:run T-12` for one task, or `/factory:run <factory>` to take work from one factory only (one factory per run; the skill passes it to the CLI as `--factory "<factory>"`, and the runner's `--factory` is repeatable). With no argument every active factory is considered.
 - Mode 2, steady loop: `/loop 2m /factory:run --loop`, or `/loop 2m /factory:run <factory> --loop` for one factory.
 - The runner prints `factory: paused`, `factory: inactive` or `factory: nothing to do` from the CLI. The build prompt takes the repo's check commands from the ticket's `context.checks`, and the spec prompt gets the factory's docs folder (`context.factory.docsPath`), or is told there are none.
 
@@ -77,7 +77,7 @@ No single layer is the boundary. In order:
 
 1. **The guard.** `hooks/guard.mjs` is a PreToolUse hook on Bash and the write tools. It acts for the stage agents, in a session started in a factory folder, and while a `/factory:run` step runs; otherwise it allows everything. It is defense in depth and regex-based, so a determined agent with Bash can find forms it does not match. It denies, for everyone: Keychain access, `gh`, `git push`, remote and config changes, `ssh`, token variables, the GitHub API, any path to the vault (`vaultS`) or the user's checkouts (including `../blocks` and `../vaultS`), and `.git/hooks`, `hooksPath` and `--no-verify`. For factory agents it also denies branch changes, any git command line that mentions push, the factory CLI and `core/dist/` or `core/src/`, and state-changing git commands that do not name the step worktree. Writes are allowed only in the step worktree (agents) or under `runs/` and `.clones/worktrees/` (the main session), after resolving symlinks.
 2. **The clones' pre-push hook** in `.clones/<repo>/.git/hooks/`. An agent with Bash could remove it; the guard now denies `.git/hooks`.
-3. **GitHub branch protection** on `dev`, `stg` and `main`. Pushes go over your SSH key, not the PAT, so this is the real backstop for a push that slips past the first two layers. Confirm it is on for each repo the factory works on.
+3. **GitHub branch protection** on each factory's protected branches (`main` is always one). Pushes go over your SSH key, not the PAT, so this is the real backstop for a push that slips past the first two layers. Confirm it is on for each repo the factory works on.
 4. **Claude Code's permission prompts.** Keep them on; see `--dangerously-skip-permissions` under "Both modes" above.
 
 The Keychain item that holds the PAT can be read by any process running as you, so it limits nothing against an agent with Bash; the guard's Keychain and `core/` rules are what keep agents away from it.

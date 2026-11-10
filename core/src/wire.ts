@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { ClientCredentialsToken } from './blocks/token.js';
@@ -24,11 +24,22 @@ export interface WireOptions {
   log?: (msg: string) => void;
 }
 
-/** `FACTORY_ROOT`, else the nearest parent folder of the cwd that contains `core/` and `plugin/`. */
+/** A factory root has core/package.json and plugin/.claude-plugin/plugin.json named `factory`; an unreadable manifest means no. */
+function isFactoryRoot(dir: string): boolean {
+  try {
+    if (!existsSync(join(dir, 'core', 'package.json'))) return false;
+    const manifest = JSON.parse(readFileSync(join(dir, 'plugin', '.claude-plugin', 'plugin.json'), 'utf8')) as { name?: unknown };
+    return manifest?.name === 'factory';
+  } catch {
+    return false;
+  }
+}
+
+/** `FACTORY_ROOT`, else the nearest parent folder of the cwd that is a factory root. */
 export function findRoot(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = process.env): string {
   if (env.FACTORY_ROOT) return resolve(env.FACTORY_ROOT);
   for (let dir = resolve(cwd); ; dir = dirname(dir)) {
-    if (existsSync(join(dir, 'core')) && existsSync(join(dir, 'plugin'))) return dir;
+    if (isFactoryRoot(dir)) return dir;
     if (dirname(dir) === dir) throw new Error('factory root not found (set FACTORY_ROOT or run inside the factory folder)');
   }
 }

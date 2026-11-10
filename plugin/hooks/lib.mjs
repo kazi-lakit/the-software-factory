@@ -7,9 +7,18 @@ export async function readHookInput() {
   return data.trim() ? JSON.parse(data) : {};
 }
 
-/** True when dir holds core/ and plugin/ (repos/ is no longer needed). */
-export function isFactoryRoot(dir, exists = fs.existsSync) {
-  return ['core', 'plugin'].every((d) => exists(path.join(dir, d)));
+/**
+ * True when dir holds core/package.json and plugin/.claude-plugin/plugin.json whose JSON name is
+ * `factory` (repos/ is not needed). A manifest that cannot be read or parsed means not a root.
+ */
+export function isFactoryRoot(dir, exists = fs.existsSync, read = (p) => fs.readFileSync(p, 'utf8')) {
+  const manifest = path.join(dir, 'plugin', '.claude-plugin', 'plugin.json');
+  if (!exists(path.join(dir, 'core', 'package.json')) || !exists(manifest)) return false;
+  try {
+    return JSON.parse(read(manifest))?.name === 'factory';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -17,15 +26,15 @@ export function isFactoryRoot(dir, exists = fs.existsSync) {
  * CLAUDE_PROJECT_DIR, else <home>/scratchpad/selise/the-software-factory. projectMode is true
  * when the root is the session's project dir, that is, the session started in the factory folder.
  */
-export function resolveFactoryRoot(env, home, exists = fs.existsSync) {
+export function resolveFactoryRoot(env, home, exists = fs.existsSync, read) {
   const project = env.CLAUDE_PROJECT_DIR ? path.resolve(env.CLAUDE_PROJECT_DIR) : null;
   const found = (dir) => ({ root: dir, projectMode: dir === project });
   if (env.FACTORY_ROOT) {
     const dir = path.resolve(env.FACTORY_ROOT);
-    return isFactoryRoot(dir, exists) ? found(dir) : null;
+    return isFactoryRoot(dir, exists, read) ? found(dir) : null;
   }
   for (const dir of [project, home && path.join(home, 'scratchpad', 'selise', 'the-software-factory')]) {
-    if (dir && isFactoryRoot(dir, exists)) return found(dir);
+    if (dir && isFactoryRoot(dir, exists, read)) return found(dir);
   }
   return null;
 }
