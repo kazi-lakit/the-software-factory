@@ -80,6 +80,6 @@ No single layer is the boundary. In order:
 3. **GitHub branch protection** on each factory's protected branches (`main` is always one). Pushes go over your SSH key, not the GitHub token, so this is the real backstop for a push that slips past the first two layers. Confirm it is on for each repo the factory works on.
 4. **Claude Code's permission prompts.** Keep them on; see `--dangerously-skip-permissions` under "Both modes" above.
 
-The core opens and reads PRs with the token of your gh CLI login (`gh auth token --user kazi-lakit`; set `FACTORY_GH_USER` for another login). gh keeps that token in your keyring, which any process running as you can read, so it limits nothing against an agent with Bash; the guard's `gh`, Keychain, token-variable and `core/` rules are what keep agents away from it.
+The core opens and reads PRs with the token of a gh CLI login, one per factory: the factory's `ghUser` on the Board (Settings → Factories → GitHub login; empty means `kazi-lakit`), read with `gh auth token --user <ghUser>`. `factory status` checks each login with `gh auth status` and never reads the token. gh keeps that token in your keyring, which any process running as you can read, so it limits nothing against an agent with Bash; the guard's `gh`, Keychain, token-variable and `core/` rules are what keep agents away from it.
 
 Run the tests with `cd plugin && npm i && npx vitest run`.
