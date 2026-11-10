@@ -62,6 +62,22 @@ describe("HistoryView", () => {
     expect(fields()).toEqual(["stage", "settings.global.maxParallel", "branch", "status"]);
   });
 
+  it("lists_only_question_and_answer_events_with_the_qa_filter", async () => {
+    seedTaskRow("T-1");
+    const qaEvent = (field: string, reason: string, at: string, to: string) => ({ ...event("T-1", "you", field, at, null, to), reason });
+    await addEvents(
+      event("T-1", "you", "status", DAY1),
+      qaEvent("question", "asked", DAY1, "Which?"),
+      qaEvent("answer", "answered", DAY2, "A"),
+      qaEvent("answer", "spec changes requested", DAY3, "fix")
+    );
+    renderHistory();
+    await screen.findByRole("table", { name: "History" });
+    await waitFor(() => expect(fields()).toHaveLength(4));
+    fireEvent.change(screen.getByLabelText("Kind"), { target: { value: "qa" } });
+    expect(fields()).toEqual(["answer", "question"]);
+  });
+
   it("reads_events_per_task_and_never_the_whole_list", async () => {
     seedTaskRow("T-1");
     seedTaskRow("T-2");
