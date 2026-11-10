@@ -107,7 +107,7 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
       {gate ? (
         <GatePanel key={`${task.taskId}:${gate}`} task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} />
       ) : null}
-      {task.status === "blocked" ? <AnswerPanel key={task.taskId} task={task} onReload={reload} /> : null}
+      {task.status === "blocked" ? <AnswerPanel key={task.taskId} task={task} events={events} onReload={reload} /> : null}
 
       <Section title="Runs"><RunsTable runs={runs} /></Section>
       <Section title="History"><History events={events} /></Section>

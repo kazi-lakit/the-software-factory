@@ -1,31 +1,53 @@
-import { useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { answerTask, type Task } from "@factory/core";
+import { answerTask, type FactoryEvent, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { useUnsent } from "../../lib/unsent";
+import { optionText, parseQuestion, recommendedLetter } from "./parseQuestion";
+import { askerName } from "./qaLog";
 import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "./writeOutcome";
 
+const OTHER = "other";
+
+/** The actor of the latest event that set a question: who is asking. */
+function askerOf(events: readonly FactoryEvent[]): string {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i]!;
+    if (event.field === "question" && event.to !== null) return askerName(event.actor);
+  }
+  return "";
+}
+
 /** A blocked task's question and the owner's answer; the engine resumes the task once it sees the answer. */
-export function AnswerPanel({ onReload, task }: { onReload: () => unknown; task: Task }) {
+export function AnswerPanel({ events, onReload, task }: { events: readonly FactoryEvent[]; onReload: () => unknown; task: Task }) {
   const headingId = useId();
   const answerId = useId();
+  const groupName = useId();
+  const parsed = useMemo(() => parseQuestion(task.question ?? ""), [task.question]);
+  const { options } = parsed;
+  const recommended = recommendedLetter(options);
   const [text, setText, clear] = useUnsent(`answer:${task.taskId}`);
+  const [choice, setChoice] = useState<string | null>(() => recommended ?? null);
   const [problem, setProblem] = useState<WriteProblem>();
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const invalidate = useInvalidateAfterWrite();
+  const asker = askerOf(events);
+  const showTextarea = options.length === 0 || choice === OTHER;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
-    if (text.trim() === "") {
+    const picked = options.find((option) => option.letter === choice);
+    const payload = showTextarea ? text.trim() : picked ? optionText(picked) : "";
+    if (payload === "") {
       setProblem({ kind: "message", message: "Write an answer first." });
       return;
     }
     setBusy(true);
     setProblem(undefined);
     try {
-      await answerTask(boardStore, now, task.taskId, text, task.version);
+      await answerTask(boardStore, now, task.taskId, payload, task.version);
       clear();
       setSent(true);
       void invalidate(task.taskId);
@@ -38,22 +60,56 @@ export function AnswerPanel({ onReload, task }: { onReload: () => unknown; task:
 
   return (
     <section className="sf-panel sf-panel-needs-you" aria-labelledby={headingId}>
-      <h3 id={headingId}>Blocked: your answer</h3>
+      {task.question ? (
+        <>
+          <h3 id={headingId} className="sf-question-title">{parsed.prompt || task.question}</h3>
+          {asker ? <p className="sf-muted sf-asker" data-testid="asker">{asker}</p> : null}
+        </>
+      ) : (
+        <>
+          <h3 id={headingId}>Blocked: your answer</h3>
+          <p className="sf-empty">No question was given.</p>
+        </>
+      )}
       <dl className="sf-facts">
         <dt>Reason</dt>
         <dd>{task.blockedReason ?? "—"}</dd>
       </dl>
-      {task.question ? <pre className="sf-doc-body">{task.question}</pre> : <p className="sf-empty">No question was given.</p>}
       {sent ? (
         <p role="status">Answer sent. The factory resumes the task at its next sync.</p>
       ) : task.answer ? (
         <p className="sf-muted">You answered: {task.answer}. The factory resumes the task at its next sync; a new answer replaces it.</p>
       ) : null}
       <form onSubmit={(event) => void submit(event)} aria-labelledby={headingId}>
-        <label className="sf-field" htmlFor={answerId}>
-          <span>Your answer</span>
-          <textarea id={answerId} className="sf-input" rows={4} value={text} onChange={(event) => setText(event.target.value)} />
-        </label>
+        {options.length > 0 ? (
+          <div className="sf-radio-cards" role="radiogroup" aria-labelledby={headingId}>
+            {options.map((option) => (
+              <label key={option.letter} className={`sf-radio-card${choice === option.letter ? " sf-radio-card-selected" : ""}`}>
+                <input type="radio" name={groupName} value={option.letter} checked={choice === option.letter} disabled={busy} onChange={() => setChoice(option.letter)} />
+                <span className="sf-radio-body">
+                  <span className="sf-radio-label">
+                    {option.label}
+                    {recommended === option.letter ? <span className="sf-badge">Recommended</span> : null}
+                  </span>
+                  {option.why ? <span className="sf-radio-why">{option.why}</span> : null}
+                </span>
+              </label>
+            ))}
+            <label className={`sf-radio-card${choice === OTHER ? " sf-radio-card-selected" : ""}`}>
+              <input type="radio" name={groupName} value={OTHER} checked={choice === OTHER} disabled={busy} onChange={() => setChoice(OTHER)} />
+              <span className="sf-radio-body">
+                <span className="sf-radio-label">Other</span>
+                <span className="sf-radio-why">Write your own answer</span>
+              </span>
+            </label>
+          </div>
+        ) : null}
+        {showTextarea ? (
+          <label className="sf-field" htmlFor={answerId}>
+            <span>Your answer</span>
+            <textarea id={answerId} className="sf-input" rows={4} value={text} onChange={(event) => setText(event.target.value)} />
+          </label>
+        ) : null}
         <WriteProblemNotice problem={problem} onReload={() => void onReload()} />
         <div className="sf-actions">
           <button type="submit" className="sf-button sf-button-accent" disabled={busy}>Send answer</button>
