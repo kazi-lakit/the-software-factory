@@ -178,7 +178,7 @@ export function buildImport(root: string, home: string): ImportFile {
   return r.value;
 }
 
-async function hasEntry(exec: ExecFile, account: string): Promise<boolean> {
+export async function hasEntry(exec: ExecFile, account: string): Promise<boolean> {
   // No -w: this only asks whether the entry exists, it never reads the value.
   return (await exec('security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', account])).code === 0;
 }

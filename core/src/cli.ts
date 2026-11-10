@@ -7,9 +7,9 @@ import { parseAgentReply } from './agentReply.js';
 import { NO_FACTORIES, UnknownFactoryError, type Engine } from './engine.js';
 import { GATE_DOC } from './gates.js';
 import * as owner from './owner.js';
-import { isReservedPatAccount, readSecret, realExecFile, type ExecFile } from './secrets.js';
+import { isReservedPatAccount, realExecFile, type ExecFile } from './secrets.js';
 import { isValidId } from './factories.js';
-import { buildImport, checkMigration, migrate } from './migrate.js';
+import { buildImport, checkMigration, hasEntry, migrate } from './migrate.js';
 import { ForbiddenError, OwnerOnlyError } from './boardStore.js';
 import type { BoardStore } from './store.js';
 import type { AgentStep, Gate, Mode, RepoId } from './types.js';
@@ -162,12 +162,12 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .action(async (o: { json?: boolean; factory?: string[] }, cmd: Command) => {
       const { engine, store } = await open(cmd);
       const s = await engine.status(factoryFilter(o.factory));
-      // Check each factory's PAT entry (the value is read and dropped) and record it for the Board page.
+      // Check that each factory's PAT entry exists (the value is never read) and record it for the Board page.
       const present = new Map<string, boolean>();
       const loaded = new Set(s.factories.map((f) => f.factoryId));
       for (const d of await store.listFactoryDefs()) {
         if (!loaded.has(d.factoryId)) continue;
-        const ok = !isReservedPatAccount(d.patAccount) && (await readSecret(d.patAccount, exec).then(() => true, () => false));
+        const ok = !isReservedPatAccount(d.patAccount) && (await hasEntry(exec, d.patAccount).catch(() => false));
         present.set(d.factoryId, ok);
         try {
           await store.setFactoryHealth({ factoryId: d.factoryId, patPresent: ok, checkedAt: new Date().toISOString() });
@@ -180,7 +180,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       io.out(`paused: ${s.paused}`);
       for (const f of s.factories) {
         const counts = Object.entries(f.counts).filter(([, n]) => n > 0).map(([status, n]) => `${status}=${n}`);
-        io.out(`factory ${f.factoryId}: ${f.active ? 'active' : 'inactive'}, paused ${f.paused}, PAT ${f.patPresent === true ? 'present' : 'missing'}${counts.map((c) => `, ${c}`).join('')}`);
+        io.out(`factory ${f.factoryId}: ${f.active ? 'active' : 'inactive'}, paused ${f.paused}, PAT ${f.patPresent === null ? 'unknown' : f.patPresent ? 'present' : 'missing'}${counts.map((c) => `, ${c}`).join('')}`);
       }
       for (const [status, n] of Object.entries(s.counts)) io.out(`${status}: ${n}`);
       for (const a of s.active) io.out(`active: ${a.taskId} ${a.step ?? '-'} by ${a.claimBy ?? '-'} until ${a.claimUntil ?? '-'}`);

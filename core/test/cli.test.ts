@@ -37,7 +37,7 @@ const fakeSecurity = (initial: string[] = ['github-pat:blocks']): ExecFile => {
   };
 };
 
-function setup(factories = seed(), accounts?: string[]) {
+function setup(factories = seed(), accounts?: string[], securityCalls?: string[][]) {
   const store = new MemoryStore({ factories });
   const exec: Exec = async () => ({ code: 0, output: '' });
   const engine = new Engine({
@@ -51,7 +51,12 @@ function setup(factories = seed(), accounts?: string[]) {
   };
   const out: string[] = [];
   const err: string[] = [];
-  const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine, { exec: fakeSecurity(accounts) });
+  const security = fakeSecurity(accounts);
+  const exec2: ExecFile = (file, args, stdin) => {
+    securityCalls?.push(args);
+    return security(file, args, stdin);
+  };
+  const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine, { exec: exec2 });
   return { store, out, err, go, wired };
 }
 
@@ -369,6 +374,24 @@ describe('factories, status health and --factory', () => {
     const health = await store.listFactoryHealth();
     expect(health.map((h) => [h.factoryId, h.patPresent])).toEqual([['blocks', true], ['delta', false]]);
     expect(JSON.stringify(health)).not.toMatch(/secret/);
+  });
+
+  test('status checks that each PAT entry exists without reading its value (M2)', async () => {
+    const calls: string[][] = [];
+    const { out, go } = setup(two(), ['github-pat:blocks'], calls);
+    expect(await go('status')).toBe(0);
+    expect(calls.length).toBe(2);
+    expect(calls.some((a) => a.includes('-w'))).toBe(false);
+    expect(out).toContain('factory blocks: active, paused false, PAT present');
+    expect(out).toContain('factory delta: active, paused false, PAT missing');
+  });
+
+  test('status prints PAT unknown for a factory never checked (M2)', async () => {
+    const { store, out, go } = setup(two());
+    store.listFactoryDefs = async () => []; // nothing to probe: the health rows stay unwritten
+    expect(await go('status')).toBe(0);
+    expect(out).toContain('factory blocks: active, paused false, PAT unknown');
+    expect(out).toContain('factory delta: active, paused false, PAT unknown');
   });
 
   test('a health write failure is logged and status still succeeds', async () => {
