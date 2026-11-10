@@ -7,6 +7,8 @@ import { useFactories } from "../factories/useFactories";
 import { AnswerPanel } from "./AnswerPanel";
 import { DocVersions } from "./DocVersions";
 import { GatePanel } from "./GatePanel";
+import { QaLog } from "./QaLog";
+import { buildQaLog } from "./qaEntries";
 import { Stepper } from "./Stepper";
 import { TaskActions } from "./TaskActions";
 import { useTask } from "./useTask";
@@ -82,6 +84,7 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
 
   const { approvals, docs, events, runs, task } = query.data;
   const gate = gateOf(task);
+  const qaEntries = buildQaLog(events, task.status === "blocked" ? task.question : null);
 
   return (
     <div className="sf-view sf-task">
@@ -107,7 +110,8 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
       {gate ? (
         <GatePanel key={`${task.taskId}:${gate}`} task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} />
       ) : null}
-      {task.status === "blocked" ? <AnswerPanel key={task.taskId} task={task} onReload={reload} /> : null}
+      {task.status === "blocked" ? <AnswerPanel key={task.taskId} task={task} events={events} onReload={reload} /> : null}
+      {qaEntries.length > 0 ? <Section title="Questions and answers"><QaLog entries={qaEntries} /></Section> : null}
 
       <Section title="Runs"><RunsTable runs={runs} /></Section>
       <Section title="History"><History events={events} /></Section>
