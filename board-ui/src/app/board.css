@@ -1496,3 +1496,106 @@ textarea.sf-input {
 .sf-gh-logged-out {
   font-weight: 600;
 }
+
+.sf-question-title {
+  font-size: 20px;
+  line-height: 28px;
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.sf-asker {
+  margin: 0;
+}
+
+.sf-radio-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.sf-radio-card {
+  align-items: flex-start;
+  background: transparent;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.sf-radio-card:hover {
+  background: var(--sf-primary-soft);
+}
+
+.sf-radio-card:focus-within {
+  outline: 2px solid var(--sf-focus);
+  outline-offset: 2px;
+}
+
+.sf-radio-card-selected {
+  background: var(--sf-accent-soft);
+  border-color: var(--sf-accent);
+}
+
+.sf-radio-card-selected:hover {
+  background: var(--sf-accent-soft);
+}
+
+.sf-radio-card input {
+  accent-color: var(--sf-accent);
+  flex: none;
+  margin: 4px 0 0;
+}
+
+.sf-radio-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sf-radio-label {
+  font-weight: 600;
+}
+
+.sf-radio-why {
+  color: var(--sf-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sf-badge-muted {
+  border-color: var(--sf-border);
+  color: var(--sf-muted);
+}
+
+.sf-qa-log {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sf-qa-entry {
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 10px 12px;
+}
+
+.sf-qa-entry p {
+  margin: 0;
+}
+
+.sf-qa-question {
+  font-weight: 600;
+}
