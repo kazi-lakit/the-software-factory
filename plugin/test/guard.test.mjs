@@ -122,6 +122,10 @@ describe('guard decide', () => {
     ['impl cd wt/client export HUSKY=0 npm test', bash(`cd "${wt}/client" && export HUSKY=0 && npm test`, impl), false],
     ['impl cd wt HUSKY=0 commit', bash(`cd "${wt}" && HUSKY=0 git commit -m x`, impl), false],
     ['impl HUSKY=0 commit no wt', bash('HUSKY=0 git commit -m x', impl), true],
+    ['impl factory new denied', bash('node "/f/root/core/dist/cli.js" new --repo data --title "x" --description "d"', impl), true],
+    ['impl HUSKY=0 factory new denied', bash('HUSKY=0 node "/f/root/core/dist/cli.js" --mode session new --repo data --title "x" --description-file "/f/root/runs/.drafts/s.md" --ready', impl), true],
+    ['main factory new ok', bash('HUSKY=0 node "/f/root/core/dist/cli.js" --mode session new --repo data --base dev --title "Fix the typo" --description-file "/f/root/runs/.drafts/s.md"'), false],
+    ['main factory new --ready ok', bash('node "/f/root/core/dist/cli.js" new --repo data --title "x" --description-file "/f/root/runs/.drafts/s.md" --ready'), false],
     ['main HUSKY=0 core cli ok', bash('HUSKY=0 node "/f/root/core/dist/cli.js" --mode session next --json'), false],
     ['impl cd wt bare commit', bash(`cd ${wt} && git add -A && git commit -m x`, impl), false],
     ['impl -C wt quoted add', bash(`git -C "${wt}" add a.ts`, impl), false],
@@ -186,6 +190,14 @@ describe('guard decide', () => {
     expect(decide(bash('git push'), { root, home, session: null, active: false })).toEqual({ deny: false });
     expect(decide({}, { root, home, session: null, active: false })).toEqual({ deny: false });
     expect(decide(bash('git push'), { root, home, session: null, active: true }).deny).toBe(true);
+  });
+
+  it('factory new: the main session may run it during a step or in project mode; an agent may not', () => {
+    const cmd = bash('HUSKY=0 node "/f/root/core/dist/cli.js" --mode session new --repo data --title "x" --description-file "/f/root/runs/.drafts/s.md"');
+    expect(decide(cmd, { root, home, session: null, active: true }).deny).toBe(false);
+    expect(decide(cmd, { root, home, session: null, projectMode: true, active: true }).deny).toBe(false);
+    expect(decide(cmd, { root, home, session }).deny).toBe(false);
+    expect(decide({ ...cmd, ...impl }, { root, home, session: null, active: true }).deny).toBe(true);
   });
 
   it('implementer write with null session is denied', () => {
