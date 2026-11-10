@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { ClaimError, Engine } from '../src/engine.js';
 import { FakeGitHub } from '../src/github.js';
 import {
-  answerTask, cancelTask, createTask, createTaskAsCore, decideGate, editTask, markReady, OwnerActionError, moveLegacySettings, resetRemovedRepoSettings, saveFactory, saveRepo, saveSettings,
+  importFactory, answerTask, cancelTask, createTask, createTaskAsCore, decideGate, editTask, markReady, OwnerActionError, moveLegacySettings, resetRemovedRepoSettings, saveFactory, saveRepo, saveSettings,
   StaleDocError,
 } from '../src/owner.js';
 import { defFixture, repoFixture, seed, seedBlocksFactories } from './factoryFixtures.js';
@@ -728,5 +728,88 @@ describe('moveLegacySettings', () => {
     const data = new FakeBlocksData('factory-owner');
     data.seed('FactorySettings', { scope: 'global', json: JSON.stringify({ paused: true }), version: 1 });
     await expect(moveLegacySettings(new BlocksStore(data, 'owner'))).rejects.toMatchObject({ code: 'invalid' });
+  });
+});
+
+describe.each([
+  ['MemoryStore', () => new MemoryStore()],
+  ['BlocksStore', () => new BlocksStore(new FakeBlocksData('factory-owner'), 'owner')],
+] as [string, () => BoardStore][])('importFactory (%s)', (_name, make) => {
+  const file = (id = 'blocks', repos = ['data', 'os']) => ({
+    format: 'factory-import/1' as const, factory: defFixture(id), repos: repos.map((r) => repoFixture(id, r)),
+  });
+  const rows = async (s: BoardStore) => [(await s.listFactoryDefs()).map((d) => d.factoryId), (await s.listFactoryRepos()).map((r) => r.repoId).sort()];
+
+  test('creates the repos and the definition with events, and a second run changes nothing', async () => {
+    const s = make();
+    const result = await importFactory(s, now, file());
+    expect(result).toEqual({
+      factory: 'created', repos: [{ repoId: 'data', outcome: 'created' }, { repoId: 'os', outcome: 'created' }],
+      settingsMoved: [], retired: [], remaining: [],
+    });
+    expect(await rows(s)).toEqual([['blocks'], ['data', 'os']]);
+    const fields = (await s.listEvents('-')).map((e) => e.field);
+    expect(fields).toContain('def.name');
+    expect(fields).toContain('repo.os.remote');
+    const before = (await s.listEvents('-')).length;
+    expect(await importFactory(s, now, file())).toMatchObject({ factory: 'already', repos: [{ outcome: 'already' }, { outcome: 'already' }] });
+    expect((await s.listEvents('-')).length).toBe(before);
+    expect((await s.listFactoryDefs())[0]!.version).toBe(1);
+  });
+
+  test('resumes a run that stopped after the repos, creating only the definition', async () => {
+    const s = make();
+    await s.saveFactoryRepo(null, repoFixture('blocks', 'data'));
+    const result = await importFactory(s, now, file());
+    expect(result.factory).toBe('created');
+    expect(result.repos).toEqual([{ repoId: 'data', outcome: 'already' }, { repoId: 'os', outcome: 'created' }]);
+    expect(await rows(s)).toEqual([['blocks'], ['data', 'os']]);
+  });
+
+  test('keeps a stored row that differs from the file', async () => {
+    const s = make();
+    await s.saveFactoryDef(null, defFixture('blocks', { name: 'Mine' }));
+    await s.saveFactoryRepo(null, repoFixture('blocks', 'data', { baseBranch: 'stg' }));
+    const result = await importFactory(s, now, file());
+    expect(result).toMatchObject({ factory: 'kept', repos: [{ outcome: 'kept' }, { outcome: 'created' }] });
+    expect((await s.listFactoryDefs())[0]!.name).toBe('Mine');
+    expect((await s.listFactoryRepos('blocks')).find((r) => r.repoId === 'data')!.baseBranch).toBe('stg');
+  });
+
+  test('refuses an invalid file and writes nothing', async () => {
+    const s = make();
+    const bad = { ...file(), repos: [{ ...repoFixture('blocks', 'data'), remote: '' }] };
+    await expect(importFactory(s, now, bad)).rejects.toMatchObject({ code: 'invalid' });
+    expect(await rows(s)).toEqual([[], []]);
+  });
+});
+
+describe('importFactory moves the legacy settings of blocks', () => {
+  const legacyStore = () => {
+    const data = new FakeBlocksData('factory-owner');
+    data.seed('FactorySettings', { scope: 'global', json: JSON.stringify({ paused: true }), version: 1 });
+    data.seed('FactorySettings', { scope: 'data', json: JSON.stringify({ maxParallel: 1 }), version: 1 });
+    return { data, owner: new BlocksStore(data, 'owner') };
+  };
+  const blocks = { format: 'factory-import/1' as const, factory: defFixture('blocks'), repos: [repoFixture('blocks', 'data')] };
+
+  test('moves and retires them, once', async () => {
+    const { owner, data } = legacyStore();
+    const before = await owner.getSettings();
+    const result = await importFactory(owner, now, blocks);
+    expect(result.settingsMoved.sort()).toEqual(['data', 'global']);
+    expect(result.retired.sort()).toEqual(['data', 'global']);
+    expect(result.remaining).toEqual([]);
+    expect(await owner.getSettings()).toEqual(before);
+    expect(data.rows('FactorySettings').filter((r) => r.json === 'null').map((r) => r.scope).sort()).toEqual(['data', 'global']);
+    expect(await importFactory(owner, now, blocks)).toMatchObject({ settingsMoved: [], retired: [], remaining: [] });
+    expect(await owner.getSettings()).toEqual(before);
+  });
+
+  test('leaves them alone when the imported factory is not blocks and blocks does not exist', async () => {
+    const { owner } = legacyStore();
+    const result = await importFactory(owner, now, { format: 'factory-import/1', factory: defFixture('delta'), repos: [] });
+    expect(result).toMatchObject({ factory: 'created', settingsMoved: [], retired: [], remaining: [] });
+    expect(await owner.legacySettingsStatus()).toEqual({ unmoved: expect.arrayContaining(['global', 'data']), unretired: [] });
   });
 });

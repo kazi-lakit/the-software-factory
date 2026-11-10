@@ -15,7 +15,7 @@ export type {
 } from './types.js';
 export { DEFAULT_SETTINGS } from './defaults.js';
 export { MAX_DOC_BYTES } from './limits.js';
-export { ForbiddenError, VersionConflictError, NotFoundError } from './boardStore.js';
+export { ForbiddenError, VersionConflictError, NotFoundError, canonicalJson } from './boardStore.js';
 export type { BoardStore, StoredSettings } from './boardStore.js';
 export { diffEvents } from './history.js';
 export * from './owner.js';

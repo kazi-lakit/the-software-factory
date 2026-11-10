@@ -6,6 +6,7 @@ import { diffEvents } from './history.js';
 import { PROTECTED_BRANCHES } from './branches.js';
 import { DEFAULT_SETTINGS } from './defaults.js';
 import { isValidId, validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from './factories.js';
+import { validateImportFile, type ImportFile } from './importFile.js';
 import { assertMove } from './status.js';
 import {
   type Approval, type DocKind, type FactoryEvent, type Gate, type RepoId, type RepoSettings, type Settings, type Status, type Task,
@@ -416,4 +417,53 @@ export async function saveRepo(store: BoardStore, now: () => Date, before: Facto
   const stored = await store.saveFactoryRepo(before, checked.value);
   await writeEvents(store, fieldEvents(REPO_FIELDS, previous, stored, stored.factoryId, (f) => `repo.${stored.repoId}.${f}`, 'repo saved', now().toISOString()));
   return stored;
+}
+
+export type ImportOutcome = 'created' | 'already' | 'kept';
+export interface ImportResult {
+  /** `kept`: the stored row differs from the file and was left as it is. */
+  factory: ImportOutcome;
+  repos: { repoId: string; outcome: ImportOutcome }[];
+  /** The legacy settings names written under `blocks` / `blocks/<repo>`, and the legacy rows retired or left. */
+  settingsMoved: string[];
+  retired: string[];
+  remaining: string[];
+}
+
+/**
+ * Imports a `factory migrate --export` file as the owner. Missing repos are created first, then the definition (the "done"
+ * marker, so a run that stopped halfway resumes); a row that already matches is skipped and one that differs is kept.
+ * When the `blocks` factory exists, the settings rows from before factories are then moved under its scopes and retired.
+ * Every step checks before it writes, so repeating the import is safe. Writes the same events as saveFactory / saveRepo.
+ */
+export async function importFactory(store: BoardStore, now: () => Date, file: ImportFile): Promise<ImportResult> {
+  const checked = validateImportFile(file);
+  if (!checked.ok) return invalid(checked.error);
+  const { factory, repos } = checked.value;
+  const at = now().toISOString();
+  const storedRepos = await store.listFactoryRepos(factory.factoryId);
+  const repoOutcomes: ImportResult['repos'] = [];
+  for (const r of repos) {
+    const have = storedRepos.find((x) => x.repoId === r.repoId);
+    if (have) {
+      const same = REPO_FIELDS.every((f) => canon(have[f]) === canon(r[f]));
+      repoOutcomes.push({ repoId: r.repoId, outcome: same ? 'already' : 'kept' });
+      continue;
+    }
+    const stored = await store.saveFactoryRepo(null, r);
+    await writeEvents(store, fieldEvents(REPO_FIELDS, null, stored, stored.factoryId, (f) => `repo.${stored.repoId}.${f}`, 'repo imported', at));
+    repoOutcomes.push({ repoId: r.repoId, outcome: 'created' });
+  }
+  const haveDef = (await store.listFactoryDefs()).find((d) => d.factoryId === factory.factoryId);
+  let factoryOutcome: ImportOutcome;
+  if (haveDef) factoryOutcome = DEF_FIELDS.every((f) => canon(haveDef[f]) === canon(factory[f])) ? 'already' : 'kept';
+  else {
+    const stored = await store.saveFactoryDef(null, factory);
+    await writeEvents(store, fieldEvents(DEF_FIELDS, null, stored, stored.factoryId, (f) => `def.${f}`, 'factory imported', at));
+    factoryOutcome = 'created';
+  }
+  const blocksExists = (await store.listFactoryDefs()).some((d) => d.factoryId === 'blocks');
+  const settingsMoved = blocksExists ? await moveLegacySettings(store) : [];
+  const { retired, remaining } = blocksExists ? await store.retireLegacySettings() : { retired: [], remaining: [] };
+  return { factory: factoryOutcome, repos: repoOutcomes, settingsMoved, retired, remaining };
 }
