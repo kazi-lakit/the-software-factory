@@ -63,9 +63,27 @@ describe('stage agents', () => {
 });
 
 describe('reply-format skill', () => {
-  it('has a reply-example block that parseAgentReply accepts as done', () => {
-    const m = read('skills/reply-format/SKILL.md').match(/```reply-example\n([\s\S]*?)\n```/);
-    expect(m).not.toBeNull();
-    expect(parseAgentReply(m[1], 'spec').status).toBe('done');
+  const text = read('skills/reply-format/SKILL.md');
+  const examples = [...text.matchAll(/```reply-example (\w+)\n([\s\S]*?)\n```/g)].map((m) => ({ step: m[1], body: m[2] }));
+
+  it('has a reply example for spec, verify, review and build', () => {
+    expect(examples.map((e) => e.step).sort()).toEqual(['build', 'review', 'spec', 'verify']);
+    expect(text).not.toMatch(/```reply-example\n/);
+  });
+  for (const { step, body } of examples) {
+    it(`the ${step} example parses as done`, () => {
+      expect(Object.keys(AGENT_FOR)).toContain(step);
+      const r = parseAgentReply(body, step);
+      expect(r.status).toBe('done');
+      if (step === 'build') expect(r.doc).toBeUndefined();
+      else expect(r.doc).toBeTruthy();
+      if (step === 'verify') expect(r.verdict).toBe('pass');
+      if (step === 'review') expect(r.verdict).toBe('changes');
+    });
+  }
+  it('says at most one doc block everywhere, never exactly one', () => {
+    expect(text).not.toMatch(/exactly one `<factory-doc>`/);
+    expect(text).not.toMatch(/exactly one doc/i);
+    expect(text).toMatch(/at most one `<factory-doc>` block/);
   });
 });
