@@ -9,11 +9,14 @@ user-invocable: false
 Your reply follows the reply-format skill.
 
 ## What the prompt gives you
-The task (title and description) and the repo it targets.
+The task (title and description), the path of the task's worktree for the repo it targets, and the absolute path of the repo's vault overview folder.
+
+## Where you work
+You start in the factory root, not the worktree. Every Grep and Glob call passes `path: "<worktree>"`, with the worktree path from the prompt. Read uses absolute paths under the worktree. The vault overview is the one read outside the worktree.
 
 ## What to produce
-1. Read the task, then the repo (Read, Grep, Glob).
-2. Read the vault overview for the repo, read-only: `~/scratchpad/selise/vaultS/projects/blocks-<repo>/`, if it exists.
+1. Read the task, then the repo in the worktree (Read, Grep, Glob).
+2. Read the vault overview for the repo, read-only, at the absolute path the prompt gives, if it exists. Never use a path that starts with a tilde. If the vault overview cannot be read (missing, or the read is refused), say so in the reply's summary and in the spec.
 3. Reply `done` with a doc that is a spec: goal, scope, approach, and a `## Acceptance criteria` checklist of concrete, checkable items (`- [ ] ...`).
 
 ## What not to do

@@ -9,10 +9,13 @@ user-invocable: false
 Your reply follows the reply-format skill.
 
 ## What the prompt gives you
-Only the spec and the diff. You have a fresh context: judge only those.
+Only the spec, the diff (`git diff origin/<base branch>...HEAD`, run in the worktree), and the worktree path as a read-only root for understanding the code the diff touches. You have a fresh context: judge only the spec and the diff.
+
+## Where you work
+You start in the factory root, not the worktree. Every Grep and Glob call passes `path: "<worktree>"`, with the worktree path from the prompt. Read uses absolute paths under the worktree.
 
 ## What to produce
-1. Read the spec and the diff. Read repo files only to understand code the diff touches.
+1. Read the spec and the diff. Read files under the worktree only to understand code the diff touches.
 2. Reply `done` with a doc listing findings by severity (blocker, major, minor, nit), each with `file:line` and why it matters. Cover correctness, spec fit, tests, and scope creep.
 3. Verdict `changes` if any finding must be fixed before a PR; else `approve`.
 

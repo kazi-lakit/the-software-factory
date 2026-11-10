@@ -12,9 +12,9 @@ Your reply follows the reply-format skill.
 The worktree path, the spec, the plan, the repo's check commands, and possibly feedback: failed checks, verify or review findings, or the answer to your earlier question. Feedback comes first; address it before anything else.
 
 ## What to produce
-1. Work only inside the worktree the prompt names.
+1. Work only inside the worktree the prompt names. You start in the factory root, not the worktree, so every Bash command starts with `cd "<worktree>" &&` or uses `git -C "<worktree>"`. Every Grep and Glob call passes `path: "<worktree>"`, and Read uses absolute paths under the worktree. The guard denies a state-changing git command that does not name the worktree.
 2. Test first: write a failing test, see it fail, make it pass, repeat per plan step.
-3. Run the repo's check commands from the prompt until they pass locally.
+3. Run the repo's check commands from the prompt until they pass locally. They can take minutes: run them with the Bash tool's `timeout` set to `600000`.
 4. Make local `git commit`s on the current branch, small and with clear messages.
 5. Reply `done` once the checks pass locally. No doc; the summary says what changed and which commits.
 

@@ -62,6 +62,34 @@ describe('stage agents', () => {
   }
 });
 
+describe('stage skills work in the worktree (I2)', () => {
+  for (const step of Object.keys(AGENT_FOR)) {
+    it(`${step} names the worktree for Grep, Glob and Read`, () => {
+      const text = read(`skills/${step}/SKILL.md`);
+      expect(text).toContain('path: "<worktree>"');
+      expect(text).toMatch(/Read[^\n]*absolute paths/);
+      expect(text).toMatch(/starts? in the factory root/);
+    });
+  }
+  it('build runs every Bash command in the worktree with a long timeout (I1)', () => {
+    const text = read('skills/build/SKILL.md');
+    expect(text).toContain('cd "<worktree>" &&');
+    expect(text).toContain('git -C "<worktree>"');
+    expect(text).toMatch(/`timeout`[^\n]*`600000`/);
+  });
+  it('review reads the worktree read-only, matching the dispatch prompt (I3)', () => {
+    const text = read('skills/review/SKILL.md');
+    expect(text).toMatch(/spec, the diff[^\n]*worktree path/);
+    expect(text).toContain('origin/');
+  });
+  it('spec uses the absolute vault path from the prompt and reports an unreadable vault (I6)', () => {
+    const text = read('skills/spec/SKILL.md');
+    expect(text).not.toContain('~/');
+    expect(text).toMatch(/absolute[^\n]*path the prompt gives/);
+    expect(text).toMatch(/cannot be read[^\n]*summary[^\n]*spec/);
+  });
+});
+
 describe('reply-format skill', () => {
   const text = read('skills/reply-format/SKILL.md');
   const examples = [...text.matchAll(/```reply-example (\w+)\n([\s\S]*?)\n```/g)].map((m) => ({ step: m[1], body: m[2] }));
