@@ -7,7 +7,7 @@ import { useFactories, useSelectedFactory, type FactoryEntry } from "../factorie
 import { describeWriteError, NEVER_MAIN_BASE, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 import { FactoryPicker } from "./FactoryPicker";
 import { laneOf, LANES, type LaneId } from "./lanes";
-import { COLUMNS, isTestTask, MUTED, STATUS_LABEL } from "./status";
+import { COLUMNS, isTestTask, MUTED, NEEDS_YOU, STATUS_LABEL } from "./status";
 import { TaskCard } from "./TaskCard";
 import { useBoard } from "./useBoard";
 import { useBoardView } from "./useBoardView";
@@ -95,6 +95,10 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const [view, setView] = useBoardView();
   const [showTest, setShowTest] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<Status>>(new Set());
+  // Expansion is not remembered: leaving All stages collapses Done and Cancelled again.
+  useEffect(() => {
+    if (view !== "stages") setExpanded((current) => (current.size === 0 ? current : new Set()));
+  }, [view]);
   // A New task link wins over unsent text; otherwise reopens on unsent text, e.g. after the session ended mid-form.
   const [prefill] = useState(readLinkPrefill);
   const [link, setLink] = useState(prefill.choice);
@@ -248,6 +252,8 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
       ) : null}
 
       {board.data && view === "stages" ? (
+        <>
+        <p className="sf-columns-hint">Every status as its own column. Outlined columns wait for you. Scroll sideways for Review, PR open, Done, Blocked and Cancelled</p>
         <div className="sf-columns">
           {COLUMNS.map((status) => {
             const tasks = byStatus.get(status) ?? [];
@@ -257,7 +263,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             const listId = `${formId}-${status}`;
             const tone = collapsible ? " sf-column-muted" : "";
             return (
-              <section key={status} className={`sf-column${tone}${open ? "" : " sf-column-collapsed"}`} aria-label={STATUS_LABEL[status]}>
+              <section key={status} className={`sf-column${tone}${NEEDS_YOU.has(status) ? " sf-column-needs-you" : ""}${open ? "" : " sf-column-collapsed"}`} aria-label={STATUS_LABEL[status]}>
                 <h3 className="sf-column-head">
                   {collapsible ? (
                     <button type="button" className="sf-column-toggle" aria-expanded={open} aria-controls={listed ? listId : undefined} onClick={() => toggle(status)}>
@@ -281,6 +287,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             );
           })}
         </div>
+        </>
       ) : null}
     </div>
   );
