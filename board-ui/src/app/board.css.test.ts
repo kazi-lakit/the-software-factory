@@ -689,3 +689,80 @@ describe("board_css_task_page", () => {
     expect(slice).not.toMatch(/box-shadow|#[0-9a-f]{3,8}\b|rgba?\(|transition/i);
   });
 });
+
+describe("board_css_t16_forms_tables_tabs", () => {
+  const css = read("board.css");
+  const t = (selector: string) => tokens(css, selector);
+  const title = { color: "var(--sf-text)", "font-size": "28px", "font-weight": "700", "letter-spacing": "-0.02em", margin: "0" };
+
+  it("page_title_is_28px_bold_tight", () => {
+    expect(t(".sf-page-title")).toMatchObject(title);
+  });
+
+  it("page_title_beats_view_headings", () => {
+    expect(t(".sf-view h2.sf-page-title")).toMatchObject(title);
+    expect(t(".sf-view h3.sf-page-title")).toMatchObject(title);
+  });
+
+  it("table_wrap_is_surface_panel", () => {
+    expect(t(".sf-table-wrap")).toMatchObject({
+      background: "var(--sf-surface)", border: "1px solid var(--sf-border)", "border-radius": "var(--sf-radius)", "overflow-x": "auto"
+    });
+  });
+
+  it("table_heads_are_label_type", () => {
+    expect(t(".sf-table th")).toMatchObject({
+      ...labelLine, color: "var(--sf-muted)", padding: "8px 12px", "border-bottom": "1px solid var(--sf-chrome-border)"
+    });
+    expect(t(".sf-table")["border-collapse"]).toBe("collapse");
+  });
+
+  it("table_rows_have_hairlines", () => {
+    expect(t(".sf-table tbody tr")["border-bottom"]).toBe("1px solid var(--sf-chrome-border)");
+    expect(t(".sf-table tbody tr:last-child")["border-bottom"]).toBe("0");
+    expect(t(".sf-table tbody tr:hover").background).toBe("var(--sf-surface-sunk)");
+  });
+
+  it("table_cells_pad_8_12", () => {
+    expect(t(".sf-table td").padding).toBe("8px 12px");
+  });
+
+  it("field_label_is_label_type_muted", () => {
+    expect(t(".sf-field-label")).toMatchObject({ ...labelLine, color: "var(--sf-muted)" });
+  });
+
+  it("tab_is_label_type_muted_with_transparent_2px_underline", () => {
+    const tab = t(".sf-tab");
+    expect(tab).toMatchObject({ ...labelLine, color: "var(--sf-muted)", "border-bottom": "2px solid transparent" });
+    expect(tab.font).toBeUndefined();
+  });
+
+  it("selected_tab_has_text_underline", () => {
+    expect(t('.sf-tab[aria-selected="true"]')).toMatchObject({ color: "var(--sf-text)", "border-bottom-color": "var(--sf-text)" });
+  });
+
+  it("tab_hover_underlines_and_row_uses_chrome_border", () => {
+    expect(t(".sf-tab:hover")["text-decoration"]).toBe("underline");
+    expect(t(".sf-tabs")["border-bottom"]).toBe("1px solid var(--sf-chrome-border)");
+    expect(t(".sf-tab:focus-visible").outline).toBe("2px solid var(--sf-focus)");
+  });
+
+  it("switch_on_is_primary_with_on_primary_thumb", () => {
+    expect(t(".sf-switch input:checked")).toMatchObject({ background: "var(--sf-primary)", "border-color": "var(--sf-primary)" });
+    expect(t(".sf-switch input:checked::before")).toMatchObject({
+      background: "var(--sf-on-primary)", "border-color": "var(--sf-on-primary)", transform: "translateX(12px)"
+    });
+    expect(t(".sf-switch input:disabled").opacity).toBe("0.6");
+  });
+
+  it("t16_rules_use_no_hardcoded_colours", () => {
+    const selectors = [
+      ".sf-page-title", ".sf-view h2.sf-page-title", ".sf-view h3.sf-page-title", ".sf-table-wrap", ".sf-table th", ".sf-table td",
+      ".sf-table tbody tr", ".sf-field-label", ".sf-tab", '.sf-tab[aria-selected="true"]', ".sf-tabs",
+      ".sf-switch input:checked", ".sf-switch input:checked::before"
+    ];
+    for (const s of selectors) {
+      for (const v of Object.values(t(s))) expect(v, s).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+    }
+  });
+});

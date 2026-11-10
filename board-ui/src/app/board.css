@@ -321,6 +321,31 @@ body {
   margin: 0;
 }
 
+/* Page title: 28px bold. The .sf-view heading rules are more specific than the bare class, so they are matched here. */
+.sf-page-title {
+  color: var(--sf-text);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.sf-view h2.sf-page-title {
+  color: var(--sf-text);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.sf-view h3.sf-page-title {
+  color: var(--sf-text);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
 .sf-view h3 {
   font-size: var(--sf-size);
   font-weight: 600;
@@ -1036,24 +1061,40 @@ textarea.sf-input {
 }
 
 .sf-table-wrap {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
   overflow-x: auto;
 }
 
 .sf-table {
+  border-collapse: collapse;
   font-size: 13px;
   min-width: 0;
 }
 
-.sf-table th,
 .sf-table td {
-  padding: 4px 10px 4px 0;
+  padding: 8px 12px;
 }
 
 .sf-table th {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--sf-chrome-border);
   color: var(--sf-muted);
-  font-size: var(--sf-size-small);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
   font-weight: 600;
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   text-transform: none;
+}
+
+.sf-table tbody tr {
+  border-bottom: 1px solid var(--sf-chrome-border);
+}
+
+.sf-table tbody tr:last-child {
+  border-bottom: 0;
 }
 
 .sf-table tbody tr:hover {
@@ -1182,7 +1223,10 @@ textarea.sf-input {
 
 .sf-field-label {
   color: var(--sf-muted);
-  font-size: var(--sf-size-small);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
 }
 
 .sf-limit {
@@ -1199,7 +1243,7 @@ textarea.sf-input {
   padding-left: 38px;
 }
 
-/* A checkbox drawn as a switch: the text colour when on, never the accent (that is for what needs you). */
+/* A checkbox drawn as a switch: the primary colour when on, never the accent (that is for what needs you). */
 .sf-switch {
   align-items: center;
   cursor: pointer;
@@ -1234,11 +1278,13 @@ textarea.sf-input {
 }
 
 .sf-switch input:checked {
-  background: var(--sf-text);
-  border-color: var(--sf-text);
+  background: var(--sf-primary);
+  border-color: var(--sf-primary);
 }
 
 .sf-switch input:checked::before {
+  background: var(--sf-on-primary);
+  border-color: var(--sf-on-primary);
   transform: translateX(12px);
 }
 
@@ -1356,7 +1402,7 @@ textarea.sf-input {
 
 /* Settings tabs and the Factories tab */
 .sf-tabs {
-  border-bottom: 1px solid var(--sf-border);
+  border-bottom: 1px solid var(--sf-chrome-border);
   display: flex;
   gap: 4px;
   margin-bottom: 12px;
@@ -1368,13 +1414,20 @@ textarea.sf-input {
   border-bottom: 2px solid transparent;
   color: var(--sf-muted);
   cursor: pointer;
-  font: inherit;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   padding: 8px 12px;
 }
 
+.sf-tab:hover {
+  text-decoration: underline;
+}
+
 .sf-tab[aria-selected="true"] {
-  border-bottom-color: var(--sf-accent);
-  color: inherit;
+  border-bottom-color: var(--sf-text);
+  color: var(--sf-text);
 }
 
 .sf-tab:focus-visible {
