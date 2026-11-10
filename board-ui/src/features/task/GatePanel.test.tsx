@@ -183,4 +183,68 @@ describe("GatePanel", () => {
     rerender(<QueryClientProvider client={client}><GatePanel task={task} gate="spec" docs={docs} approvals={[]} onReload={vi.fn()} /></QueryClientProvider>);
     expect(screen.getByText(/Deciding on spec/)).toHaveTextContent("Deciding on spec v1");
   });
+
+  describe("pr gate", () => {
+    const PR_URL = "https://github.com/SELISEdigitalplatforms/blocks-data/pull/7";
+    async function atPrGate(baseBranch: string): Promise<{ docs: Doc[]; task: Task }> {
+      const created = await fakeBoard().owner.createTask({ baseBranch, description: "", repo: "data", title: "Ship me" });
+      const t = await fakeBoard().core.updateTask(created.taskId, created.version, { prUrl: PR_URL, stage: "ship", status: "pr_open" });
+      await fakeBoard().core.addDoc(t.taskId, "review", "# Review\nAll good.", "reviewer");
+      return { docs: await fakeBoard().owner.listDocs(t.taskId, "review"), task: t };
+    }
+    const renderPr = (docs: Doc[], approvals: Approval[] = []) =>
+      renderWithClient(<GatePanel task={task} gate="pr" docs={docs} approvals={approvals} onReload={vi.fn()} />);
+
+    it("offers_no_approve_on_a_protected_base_and_says_to_merge_on_github", async () => {
+      const seeded = await atPrGate("dev");
+      task = seeded.task;
+      renderPr(seeded.docs);
+      expect(screen.getByText(/The factory never merges into/)).toHaveTextContent(
+        "The factory never merges into dev. Merge the PR on GitHub to finish this task."
+      );
+      const link = screen.getByRole("link", { name: /Open the PR on GitHub/ });
+      expect(link).toHaveAttribute("href", PR_URL);
+      expect(link).toHaveAttribute("target", "_blank");
+      expect(link).toHaveAccessibleName(/opens in a new tab/);
+      expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Request changes" })).toBeInTheDocument();
+    });
+
+    it("requests_changes_with_a_comment_on_a_protected_base", async () => {
+      const seeded = await atPrGate("dev");
+      task = seeded.task;
+      renderPr(seeded.docs);
+      fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Say what should change before you request changes.");
+      fireEvent.change(comment(), { target: { value: "Rename the helper" } });
+      fireEvent.click(screen.getByRole("button", { name: "Request changes" }));
+      expect(await screen.findByText(/Changes requested for review/)).toBeInTheDocument();
+      expect(await fakeBoard().owner.listApprovals(task.taskId)).toEqual([
+        expect.objectContaining({ comment: "Rename the helper", decision: "changes", docVersion: 1, gate: "pr" })
+      ]);
+      // Still available for another round on the same version.
+      expect(screen.getByRole("button", { name: "Request changes" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    });
+
+    it("keeps_request_changes_after_a_decision_was_recorded_on_a_protected_base", async () => {
+      const seeded = await atPrGate("main");
+      task = seeded.task;
+      const approval: Approval = { at: "2026-11-10T09:00:00.000Z", comment: "", decision: "approve", docVersion: 1, gate: "pr", taskId: task.taskId };
+      renderPr(seeded.docs, [approval]);
+      expect(screen.getByRole("button", { name: "Request changes" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+      expect(screen.getByText(/The factory never merges into/)).toHaveTextContent("main");
+    });
+
+    it("still_offers_approve_on_a_feature_base", async () => {
+      const seeded = await atPrGate("feature/x");
+      task = seeded.task;
+      renderPr(seeded.docs);
+      expect(screen.queryByText(/The factory never merges into/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Request changes" })).toBeInTheDocument();
+    });
+  });
 });

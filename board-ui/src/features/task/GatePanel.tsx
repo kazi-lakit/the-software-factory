@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { decideGate, GATE_DOC, type Approval, type Doc, type Gate, type Task } from "@factory/core";
+import { decideGate, GATE_DOC, isProtected, type Approval, type Doc, type Gate, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { useUnsent } from "../../lib/unsent";
 import { DocVersions } from "./DocVersions";
@@ -26,6 +26,8 @@ type Props = {
  */
 export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
   const kind = GATE_DOC[gate];
+  // The factory never merges into dev, stg or main: the owner merges on GitHub, so there is nothing to approve.
+  const mergeOnGitHub = gate === "pr" && isProtected(task.baseBranch);
   const headingId = useId();
   const commentId = useId();
   const [comment, setComment, clearComment] = useUnsent(`gate:${task.taskId}:${gate}`);
@@ -96,44 +98,63 @@ export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    void decide("approve");
+    if (!mergeOnGitHub) void decide("approve");
   }
 
   return (
     <section className="sf-panel sf-panel-needs-you" aria-labelledby={headingId}>
       <h3 id={headingId}>Your decision: {GATE_LABEL[gate]}</h3>
+      {mergeOnGitHub ? (
+        <p>
+          The factory never merges into <span className="sf-mono">{task.baseBranch}</span>. Merge the PR on GitHub to finish this task.
+          {task.prUrl ? (
+            <>
+              {" "}
+              <a href={task.prUrl} target="_blank" rel="noreferrer noopener">Open the PR on GitHub (opens in a new tab)</a>
+            </>
+          ) : null}
+        </p>
+      ) : null}
       {seen === undefined ? (
         <p className="sf-empty">No {kind} to decide on yet.</p>
-      ) : decided ? (
+      ) : decided && !mergeOnGitHub ? (
         <p role="status">
           {decided.decision === "approve" ? "Approval recorded" : "Changes requested"} for {kind}{" "}
           <span className="sf-mono">v{decided.docVersion}</span>. The factory applies it at its next sync.
         </p>
       ) : (
-        <form onSubmit={submit} aria-labelledby={headingId}>
-          <p>
-            Deciding on {kind} <span className="sf-mono">v{seen}</span>
-          </p>
-          <label className="sf-field" htmlFor={commentId}>
-            <span>Comment (needed to request changes)</span>
-            <textarea id={commentId} className="sf-input" rows={3} value={comment} onChange={(event) => setComment(event.target.value)} />
-          </label>
-          <WriteProblemNotice problem={problem} onReload={() => void onReload()} />
-          {problem?.kind === "stale" ? (
-            <StaleDiff
-              docs={staleDocs}
-              kind={kind}
-              currentVersion={problem.currentVersion}
-              seenVersion={problem.seenVersion}
-              onRetry={loadStaleDocs}
-              onReview={reviewNewVersion}
-            />
+        <>
+          {decided ? (
+            <p role="status">
+              {decided.decision === "approve" ? "Approval recorded" : "Changes requested"} for {kind}{" "}
+              <span className="sf-mono">v{decided.docVersion}</span>. The factory applies a request for changes at its next sync.
+            </p>
           ) : null}
-          <div className="sf-actions">
-            <button type="submit" className="sf-button sf-button-primary" disabled={busy}>Approve</button>
-            <button type="button" className="sf-button" disabled={busy} onClick={() => void decide("changes")}>Request changes</button>
-          </div>
-        </form>
+          <form onSubmit={submit} aria-labelledby={headingId}>
+            <p>
+              Deciding on {kind} <span className="sf-mono">v{seen}</span>
+            </p>
+            <label className="sf-field" htmlFor={commentId}>
+              <span>Comment (needed to request changes)</span>
+              <textarea id={commentId} className="sf-input" rows={3} value={comment} onChange={(event) => setComment(event.target.value)} />
+            </label>
+            <WriteProblemNotice problem={problem} onReload={() => void onReload()} />
+            {problem?.kind === "stale" ? (
+              <StaleDiff
+                docs={staleDocs}
+                kind={kind}
+                currentVersion={problem.currentVersion}
+                seenVersion={problem.seenVersion}
+                onRetry={loadStaleDocs}
+                onReview={reviewNewVersion}
+              />
+            ) : null}
+            <div className="sf-actions">
+              {mergeOnGitHub ? null : <button type="submit" className="sf-button sf-button-primary" disabled={busy}>Approve</button>}
+              <button type="button" className="sf-button" disabled={busy} onClick={() => void decide("changes")}>Request changes</button>
+            </div>
+          </form>
+        </>
       )}
     </section>
   );
