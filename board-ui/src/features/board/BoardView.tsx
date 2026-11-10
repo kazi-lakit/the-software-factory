@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { createTask, isMainRef, type FactoryRepo, type Status, type Task } from "@factory/core";
+import { createTask, isMainRef, markReady, type FactoryRepo, type Status, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { clearUnsent, hasUnsent, keepUnsent, useUnsent } from "../../lib/unsent";
 import { useFactories, useSelectedFactory, type FactoryEntry } from "../factories/useFactories";
@@ -114,6 +114,8 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, [prefill]);
   const [notice, setNotice] = useState("");
+  // Set when a task was created but could not be marked ready; the form is gone by then, so the Board shows it.
+  const [readyProblem, setReadyProblem] = useState<WriteProblem>();
   const newTaskButton = useRef<HTMLButtonElement>(null);
   // After a create the form is gone: focus returns to the button that opened it.
   const [refocusNewTask, setRefocusNewTask] = useState(false);
@@ -187,6 +189,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
           onClick={() => {
             // Closing the form drops a link it has not used yet, so a later open does not apply it.
             if (creating) setLink(undefined);
+            setReadyProblem(undefined);
             setCreating(!creating);
           }}
         >
@@ -194,6 +197,12 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
         </button>
       </div>
       <p className="sf-visually-hidden" role="status">{notice}</p>
+      {readyProblem ? (
+        <>
+          <WriteProblemNotice problem={readyProblem} />
+          <p className="sf-problem" role="alert">The task was created but not marked ready.</p>
+        </>
+      ) : null}
 
       {creating ? (
         <NewTaskPanel
@@ -208,7 +217,8 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             setLink(undefined);
             setCreating(false);
           }}
-          onCreated={(task) => {
+          onCreated={(task, problem) => {
+            setReadyProblem(problem);
             setLink(undefined);
             setCreating(false);
             setRefocusNewTask(true);
@@ -300,7 +310,7 @@ type PanelProps = {
   id: string;
   link: LinkChoice | undefined;
   onClose: () => void;
-  onCreated: (task: Task) => void;
+  onCreated: (task: Task, readyProblem?: WriteProblem) => void;
   onLinkUsed: () => void;
   picked: string;
 };
@@ -342,6 +352,8 @@ function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start
   const [problem, setProblem] = useState<WriteProblem>();
   const [baseProblem, setBaseProblem] = useState("");
   const [busy, setBusy] = useState(false);
+  // Plain state, not unsent text: a refresh drops it.
+  const [readyNow, setReadyNow] = useState(false);
   const invalidate = useInvalidateAfterWrite();
 
   /** The base follows the repo's own base branch until the owner types another. */
@@ -366,14 +378,23 @@ function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start
     setBaseProblem("");
     setBusy(true);
     try {
-      const task = await createTask(boardStore, now, { baseBranch: base, description, factoryId: entry.def.factoryId, repo: repo.repoId, title });
+      let task = await createTask(boardStore, now, { baseBranch: base, description, factoryId: entry.def.factoryId, repo: repo.repoId, title });
+      // The task exists now. If it cannot be marked ready it stays in the inbox, and the Board says so once the form is gone.
+      let readyProblem: WriteProblem | undefined;
+      if (readyNow) {
+        try {
+          task = await markReady(boardStore, now, task.taskId);
+        } catch (error) {
+          readyProblem = describeWriteError(error);
+        }
+      }
       clearTitle();
       clearDescription();
       clearFactory();
       clearRepo();
       clearBase();
       void invalidate();
-      onCreated(task);
+      onCreated(task, readyProblem);
     } catch (error) {
       setProblem(describeWriteError(error));
     } finally {
@@ -383,6 +404,7 @@ function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start
 
   return (
     <form id={id} className="sf-form sf-panel" aria-label="New task" onSubmit={(event) => void submit(event)}>
+      <h3 className="sf-page-title">New task</h3>
       <label className="sf-field" htmlFor={`${id}-title`}>
         <span>Title</span>
         <input id={`${id}-title`} className="sf-input" autoFocus value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -418,6 +440,10 @@ function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start
           />
         </label>
       </div>
+      <label className="sf-switch">
+        <input type="checkbox" role="switch" checked={readyNow} onChange={(event) => setReadyNow(event.target.checked)} />
+        <span>Mark ready now</span>
+      </label>
       {note ? <p role="status">{note}</p> : null}
       {baseProblem ? <p className="sf-problem" role="alert">{baseProblem}</p> : null}
       <WriteProblemNotice problem={problem} />
