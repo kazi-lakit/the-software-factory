@@ -1,10 +1,10 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { createTask, type FactoryRepo, type Status, type Task } from "@factory/core";
+import { createTask, isMainRef, type FactoryRepo, type Status, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { clearUnsent, hasUnsent, keepUnsent, useUnsent } from "../../lib/unsent";
 import { useFactories, useSelectedFactory, type FactoryEntry } from "../factories/useFactories";
-import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
+import { describeWriteError, NEVER_MAIN_BASE, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 import { FactoryPicker } from "./FactoryPicker";
 import { COLUMNS, isTestTask, MUTED, STATUS_LABEL } from "./status";
 import { TaskCard } from "./TaskCard";
@@ -317,8 +317,8 @@ function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start
     setProblem(undefined);
     // A blank base branch is the repo's own base branch.
     const base = baseBranch.trim() || repo.baseBranch;
-    if (base.toLowerCase() === "main") {
-      setBaseProblem("The factory never uses main as a base branch. Pick another.");
+    if (isMainRef(base)) {
+      setBaseProblem(NEVER_MAIN_BASE);
       return;
     }
     setBaseProblem("");

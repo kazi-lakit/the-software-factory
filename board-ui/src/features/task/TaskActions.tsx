@@ -2,12 +2,12 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FormEvent, KeyboardEvent } from "react";
 import {
-  canMove, cancelTask, editTask, EDITABLE_STATUSES, markReady, type RepoId, type Task, type TaskEdit
+  canMove, cancelTask, editTask, EDITABLE_STATUSES, isMainRef, markReady, type RepoId, type Task, type TaskEdit
 } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { clearUnsent, hasUnsent, useUnsent } from "../../lib/unsent";
 import { useFactories } from "../factories/useFactories";
-import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "./writeOutcome";
+import { describeWriteError, NEVER_MAIN_BASE, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "./writeOutcome";
 
 type Reload = () => unknown;
 
@@ -172,6 +172,7 @@ function EditForm({ onDone, onReload, task }: { onDone: () => void; onReload: Re
   const value = (field: EditField) => fields[field][0];
   const setter = (field: EditField) => fields[field][1];
   const [problem, setProblem] = useState<WriteProblem>();
+  const [baseProblem, setBaseProblem] = useState("");
   const [busy, setBusy] = useState(false);
   const invalidate = useInvalidateAfterWrite();
   // The task's own factory's repos; the current repo stays listed even when its factory is not visible.
@@ -186,6 +187,11 @@ function EditForm({ onDone, onReload, task }: { onDone: () => void; onReload: Re
     if (busy) return;
     const patch: TaskEdit = {};
     for (const field of ownChanges()) Object.assign(patch, { [field]: field === "repo" ? (value(field) as RepoId) : value(field) });
+    if (patch.baseBranch !== undefined && isMainRef(patch.baseBranch)) {
+      setBaseProblem(NEVER_MAIN_BASE);
+      return;
+    }
+    setBaseProblem("");
     setBusy(true);
     setProblem(undefined);
     try {
@@ -252,10 +258,15 @@ function EditForm({ onDone, onReload, task }: { onDone: () => void; onReload: Re
             id={`${formId}-base`}
             className="sf-input sf-mono"
             value={value("baseBranch")}
-            onChange={(event) => setter("baseBranch")(event.target.value)}
+            aria-invalid={baseProblem ? true : undefined}
+            onChange={(event) => {
+              setter("baseBranch")(event.target.value);
+              setBaseProblem("");
+            }}
           />
         </label>
       </div>
+      {baseProblem ? <p className="sf-problem" role="alert">{baseProblem}</p> : null}
       <WriteProblemNotice problem={problem} onReload={() => void reload()} />
       <div className="sf-actions">
         <button type="submit" className="sf-button sf-button-primary" disabled={busy}>Save</button>

@@ -3,7 +3,7 @@ import {
 } from './boardStore.js';
 import { GATE_DOC } from './gates.js';
 import { diffEvents } from './history.js';
-import { PROTECTED_BRANCHES } from './branches.js';
+import { isMainRef } from './branches.js';
 import { DEFAULT_SETTINGS } from './defaults.js';
 import { isValidId, validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from './factories.js';
 import { validateImportFile, type ImportFile } from './importFile.js';
@@ -50,6 +50,8 @@ export const SETTING_RANGES = {
   maxCostPerTaskUsd: { min: 0, max: 1000, integer: false },
 } as const;
 
+/** Every creator and the edit refuse `main` as a task base, in any form. */
+const NEVER_MAIN = 'the factory never targets main';
 const invalid = (message: string): never => {
   throw new OwnerActionError('invalid', message);
 };
@@ -126,6 +128,7 @@ async function insertTask(
   if (typeof input.description !== 'string') invalid('description must be text');
   if (!isRepoId(input.repo)) invalid(`repo must be a repo id (${REPO_ID_RULE})`);
   if (input.baseBranch !== undefined && !nonBlank(input.baseBranch)) invalid('base branch must not be blank');
+  if (input.baseBranch !== undefined && isMainRef(input.baseBranch)) invalid(NEVER_MAIN);
   await requireFactory(store, input.factoryId);
   await requireRepo(store, input.factoryId, input.repo);
   const at = now().toISOString();
@@ -144,8 +147,6 @@ export async function createTask(
 }
 
 export const CORE_NEW_ACTOR = 'core · new';
-const normalizeRef = (ref: string) => ref.trim().toLowerCase().replace(/^refs\/heads\//, '').replace(/^origin\//, '');
-const MAIN = PROTECTED_BRANCHES[2];
 
 /**
  * `factory new`: the one task the core may insert, run by the owner from their session. Starts in inbox unless `ready`;
@@ -154,7 +155,7 @@ const MAIN = PROTECTED_BRANCHES[2];
 export async function createTaskAsCore(
   store: BoardStore, now: () => Date, input: { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string; ready?: boolean },
 ): Promise<Task> {
-  if (typeof input.baseBranch === 'string' && normalizeRef(input.baseBranch) === MAIN) invalid('the factory never targets main');
+  if (typeof input.baseBranch === 'string' && isMainRef(input.baseBranch)) invalid(NEVER_MAIN);
   const { ready, baseBranch, ...rest } = input;
   return insertTask(
     store, now, { ...rest, ...(typeof baseBranch === 'string' ? { baseBranch: baseBranch.trim() } : {}), status: ready ? 'ready' : 'inbox' },
@@ -237,6 +238,7 @@ export async function editTask(store: BoardStore, now: () => Date, taskId: strin
     throw new OwnerActionError('not-editable', `${taskId} is ${task.status}; only inbox and ready tasks can be edited`);
   }
   if (task.version !== expectedVersion) throw new VersionConflictError(taskId, expectedVersion, task.version);
+  if (clean.baseBranch !== undefined && clean.baseBranch !== task.baseBranch && isMainRef(clean.baseBranch)) invalid(NEVER_MAIN);
   if (!EDITABLE_FIELDS.some((f) => f in clean && canon(clean[f]) !== canon(task[f]))) return task;
   if (clean.repo !== undefined && clean.repo !== task.repo) await requireRepo(store, task.factoryId, clean.repo);
   return ownerUpdate(store, now, task, clean, 'edited');

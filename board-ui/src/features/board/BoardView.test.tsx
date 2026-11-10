@@ -416,12 +416,12 @@ describe("BoardView New task with several factories", () => {
     expect(base).toHaveValue("release/1");
   });
 
-  it("refuses_main_as_the_base_inline", async () => {
+  it.each([" Main ", "origin/main", "refs/heads/main"])("refuses_main_as_the_base_inline (%j)", async (value) => {
     renderBoard();
     fireEvent.click(await screen.findByRole("button", { name: "New task" }));
     const form = await openNewForm();
     fireEvent.change(within(form).getByLabelText("Title"), { target: { value: "T" } });
-    fireEvent.change(within(form).getByLabelText("Base branch"), { target: { value: " Main " } });
+    fireEvent.change(within(form).getByLabelText("Base branch"), { target: { value } });
     fireEvent.click(within(form).getByRole("button", { name: "Create task" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("never uses main");
     expect(await fakeBoard().owner.listTasks()).toEqual([]);

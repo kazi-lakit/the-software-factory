@@ -17,6 +17,16 @@ export function isProtected(ref: string, protectedBranches: readonly string[] = 
   return name === 'main' || protectedBranches.includes(name);
 }
 
+/** A base or branch name as typed: trimmed, lowercased, without a `refs/heads/` or `origin/` prefix. */
+export function normalizeRef(ref: string): string {
+  return ref.trim().toLowerCase().replace(/^refs\/heads\//, '').replace(/^origin\//, '');
+}
+
+/** True when the ref names `main` in any form (`Main`, `origin/main`, `refs/heads/main`). `main` is never a task base. */
+export function isMainRef(ref: string): boolean {
+  return normalizeRef(ref) === 'main';
+}
+
 export function assertPushAllowed(branch: string, protectedBranches: readonly string[] = PROTECTED_BRANCHES): void {
   if (isProtected(branch, protectedBranches)) throw new ProtectedBranchError(branch);
 }

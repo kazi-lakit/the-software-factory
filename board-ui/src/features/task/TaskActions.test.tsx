@@ -88,6 +88,20 @@ describe("TaskActions", () => {
     await waitFor(() => expect(screen.queryByRole("form", { name: "Edit task" })).not.toBeInTheDocument());
   });
 
+  it.each(["main", " Main ", "origin/main", "refs/heads/main"])("refuses_main_as_the_base_inline (%j)", async (base) => {
+    const task = await seedTask();
+    const edit = vi.spyOn(fakeBoard().owner, "updateTask");
+    renderActions(task);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const form = screen.getByRole("form", { name: "Edit task" });
+    fireEvent.change(within(form).getByLabelText("Base branch"), { target: { value: base } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent("never uses main");
+    expect(within(form).getByLabelText("Base branch")).toHaveAttribute("aria-invalid", "true");
+    expect(edit).not.toHaveBeenCalled();
+    expect(await stored(task)).toMatchObject({ baseBranch: task.baseBranch, version: task.version });
+  });
+
   it("keeps_the_edit_on_a_conflict", async () => {
     const task = await seedTask({ title: "Old title" });
     renderActions(task);

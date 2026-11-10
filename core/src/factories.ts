@@ -1,4 +1,5 @@
 // Pure (no Node API): the browser entry validates factory definitions with it.
+import { isMainRef } from './branches.js';
 import { ChecksSchema, type Checks } from './checksSchema.js';
 
 export interface FactoryDef {
@@ -96,7 +97,7 @@ export function validateFactoryRepo(input: unknown, def: FactoryDef): Validated<
   if (remote === null || remote === '') return fail('remote must not be blank');
   const baseBranch = text(input, 'baseBranch', 'dev');
   if (baseBranch === null || baseBranch === '') return fail('baseBranch must not be blank');
-  if (baseBranch === 'main' || baseBranch.replace(/^origin\//, '') === 'main') return fail('main is never a base');
+  if (isMainRef(baseBranch)) return fail('main is never a base');
   const parsed = ChecksSchema.safeParse(input.checks);
   if (!parsed.success) {
     const issue = parsed.error.issues[0]!;

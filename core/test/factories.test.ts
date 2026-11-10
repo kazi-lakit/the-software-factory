@@ -61,8 +61,8 @@ describe('validateFactoryDef', () => {
 
 describe('validateFactoryRepo', () => {
   const def = defOf('delta');
-  test('main is never a base', () => {
-    const r = validateFactoryRepo({ repoId: 'api', remote: 'r', baseBranch: 'main', checks }, def);
+  test.each(['main', 'refs/heads/main', 'origin/main', ' Main '])('main is never a base (%j)', (baseBranch) => {
+    const r = validateFactoryRepo({ repoId: 'api', remote: 'r', baseBranch, checks }, def);
     expect(r).toEqual({ ok: false, error: 'main is never a base' });
   });
   test('rejects a bad repoId', () => {

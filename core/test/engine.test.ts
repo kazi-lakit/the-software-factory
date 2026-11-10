@@ -874,6 +874,18 @@ describe('ship', () => {
     });
   });
 
+  test.each(['main', 'origin/main', 'refs/heads/main'])('base %s blocks the task before the PAT check and pushes nothing', async (base) => {
+    const asked: string[] = [];
+    const s = setup({ githubFor: () => { asked.push('github'); return new FakeGitHub(); } });
+    await s.store.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: false } }, repos: {} } } });
+    await put(s.store, { status: 'review', stage: 'ship', branch: 'factory/T-1-add-widget' }, base);
+    await nextTicket(s.engine);
+    asked.length = 0;
+    expect(await s.engine.ship('T-1')).toMatchObject({ status: 'blocked', stage: 'ship', blockedReason: 'base main is never a target', prUrl: null });
+    expect(s.git.pushes).toEqual([]);
+    expect(asked).toEqual([]); // no GitHub client, so no PAT read
+  });
+
   test('ships from the task base', async () => {
     const { engine, git } = await atShip('feature/x', true);
     await engine.ship('T-1');

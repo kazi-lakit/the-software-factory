@@ -76,6 +76,10 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       ['an unknown repo', { repo: 'Nope!' as RepoId }],
       ['an empty base branch', { baseBranch: ' ' }],
       ['a description that is not text', { description: 7 as unknown as string }],
+      ['base main', { baseBranch: 'main' }],
+      ['base origin/main', { baseBranch: 'origin/main' }],
+      ['base refs/heads/main', { baseBranch: 'refs/heads/main' }],
+      ['base " Main "', { baseBranch: ' Main ' }],
     ])('refuses %s', async (_what, bad) => {
       const { owner } = setup();
       const err = await createTask(owner, now, { factoryId: 'blocks', title: 'X', description: '', repo: 'data', ...bad }).catch((e: unknown) => e);
@@ -302,6 +306,10 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       ['a description that is not text', { description: 7 }],
       ['an unknown repo', { repo: 'Nope!' }],
       ['an empty base branch', { baseBranch: '' }],
+      ['base main', { baseBranch: 'main' }],
+      ['base origin/main', { baseBranch: 'origin/main' }],
+      ['base refs/heads/main', { baseBranch: 'refs/heads/main' }],
+      ['base " Main "', { baseBranch: ' Main ' }],
       ['a non-boolean gate override', { gateOverrides: { spec: 'yes' } }],
       ['an unknown gate', { gateOverrides: { deploy: true } }],
       ['a field that is not the owner\'s', { status: 'ready' }],
@@ -495,9 +503,9 @@ describe.each(fixtures)('createTaskAsCore (%s)', (_name, make) => {
     expect(await core.listTasks()).toEqual([]);
   });
 
-  test('the owner createTask may still name any base', async () => {
+  test('the owner createTask refuses base main too', async () => {
     const { owner } = setup();
-    expect((await createTask(owner, now, { ...input, baseBranch: 'main' })).baseBranch).toBe('main');
+    await expect(createTask(owner, now, { ...input, baseBranch: 'main' })).rejects.toThrow('the factory never targets main');
   });
 
   test.each([

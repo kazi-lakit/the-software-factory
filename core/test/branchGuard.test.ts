@@ -9,7 +9,9 @@ import {
   ProtectedBranchError,
   assertPushAllowed,
   branchName,
+  isMainRef,
   isProtected,
+  normalizeRef,
 } from '../src/branchGuard.js';
 import { loadRepoConfig } from '../src/repoConfig.js';
 
@@ -31,6 +33,19 @@ describe('branch guard', () => {
     expect(isProtected('refs/remotes/origin/main')).toBe(true);
     expect(isProtected('remotes/origin/stg')).toBe(true);
     expect(isProtected('refs/remotes/origin/factory/T-1-x')).toBe(false);
+  });
+
+  test('normalizeRef trims, lowercases and drops refs/heads/ and origin/', () => {
+    expect(normalizeRef(' Refs/Heads/Feature/X ')).toBe('feature/x');
+    expect(normalizeRef('ORIGIN/dev')).toBe('dev');
+  });
+
+  test.each(['main', ' Main ', 'origin/main', 'refs/heads/main', 'ORIGIN/MAIN'])('isMainRef(%j) is true', (ref) => {
+    expect(isMainRef(ref)).toBe(true);
+  });
+
+  test.each(['dev', 'feature/main', 'main2', ''])('isMainRef(%j) is false', (ref) => {
+    expect(isMainRef(ref)).toBe(false);
   });
 
   test('branchName', () => {

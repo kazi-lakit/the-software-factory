@@ -1,5 +1,5 @@
 import { parseAgentResult } from './agentResult.js';
-import { assertPushAllowed, branchName, ProtectedBranchError } from './branchGuard.js';
+import { assertPushAllowed, branchName, isMainRef, ProtectedBranchError } from './branchGuard.js';
 import { formatReport, runChecks, type Exec } from './checks.js';
 import { claim, claimExpired, release, renew } from './claims.js';
 import { AGENT_FOR, DEFAULT_SETTINGS } from './defaults.js';
@@ -304,6 +304,8 @@ export class Engine {
     const settings = this.settingsFor(await retry(() => store.getSettings()), claimed);
     const block = (task: Task, reason: string) =>
       this.apply(task, this.decideFor(task, { kind: 'limit', reason }, settings), this.coreActor);
+    // Defence in depth: the creators and the edit refuse main, but a row written another way must still never reach it.
+    if (isMainRef(claimed.baseBranch)) return block(claimed, 'base main is never a target');
     try {
       const github = this.deps.githubFor(def.patAccount);
       await github.ensureReady?.(); // before any push: a missing PAT must not leave a pushed branch behind

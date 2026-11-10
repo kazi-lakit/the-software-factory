@@ -16,6 +16,12 @@ describe('browser entry', () => {
     expect(inputs.some((i) => i.endsWith('src/owner.ts'))).toBe(true);
   });
 
+  it('exports isMainRef for the Board\'s base checks', async () => {
+    const entry = await import('../src/browser.js');
+    expect(entry.isMainRef('refs/heads/main')).toBe(true);
+    expect(entry.isMainRef('dev')).toBe(false);
+  });
+
   it('exports the Blocks data errors so the Board can tell them apart', async () => {
     const entry = await import('../src/browser.js');
     const data = await import('../src/blocks/data.js');

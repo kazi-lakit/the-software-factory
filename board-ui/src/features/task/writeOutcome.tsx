@@ -5,6 +5,9 @@ import {
 } from "@factory/core";
 import { BOARD_KEY } from "../board/useBoard";
 
+/** The inline refusal of a base branch that names main (New task and the edit form; the core refuses it too). */
+export const NEVER_MAIN_BASE = "The factory never uses main as a base branch. Pick another.";
+
 /** Owner actions take a clock; the page uses real time. */
 export const now = (): Date => new Date();
 
