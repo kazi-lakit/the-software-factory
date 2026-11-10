@@ -26,8 +26,8 @@ Allowed tools: `--allowedTools "Bash(HUSKY=0 node:*)" "Bash(node:*)" "Bash(print
 
 ## Observation: run 1's renew hook used the Blocks store
 
-`runs/T-2/renew.log` read `error: blocks: getFactoryTasks failed (HTTP 400)`, while `runs/T-1/renew.log` read `T-1 claimed until ...`. The renew hook runs `cli.js --store <session.store> renew`, and `session.store` comes from the session file the model writes in step 3 of `skills/run/SKILL.md` (the output of `printenv FACTORY_STORE`). In run 1 the model evidently wrote `blocks`; the core commands themselves (`next`, `complete`) used the file store (the task is in `spec_review` in `.factory/board.json`). No code path in the plugin sets `blocks` by itself, and the cause could not be reproduced from the logs, so nothing was changed. Risk: a model-written store value can send the background renew to the live Blocks project. See the report's concerns.
+`runs/T-2/renew.log` read `error: blocks: getFactoryTasks failed (HTTP 400)`, while `runs/T-1/renew.log` read `T-1 claimed until ...`. The renew hook runs `cli.js --store <session.store> renew`, and `session.store` comes from the session file the model writes in step 3 of `skills/run/SKILL.md` (the output of `printenv FACTORY_STORE`). In run 1 the model evidently wrote `blocks`; the core commands themselves (`next`, `complete`) used the file store (the task is in `spec_review` in `.factory/board.json`). No code path in the plugin sets `blocks` by itself, and the cause could not be reproduced from the logs, so nothing was changed in the smoke run itself. Risk: a model-written store value can send the background renew to the live Blocks project. Fixed afterwards in dd47ad8 (ruling R12): the hook now takes the store from its own environment, not the session file.
 
 ## Defects
 
-None fixed. No core or plugin test changed.
+One: the renew hook took the store from the model-written session file. Fixed in dd47ad8 (ruling R12): renew now takes `FACTORY_STORE` from its own environment (default `blocks`, validated as `file` or `blocks`), and the session file no longer carries `store`. Covered by `plugin/test/session.test.mjs`.
