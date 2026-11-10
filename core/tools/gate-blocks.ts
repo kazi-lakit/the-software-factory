@@ -299,7 +299,7 @@ export const STEPS: Step[] = [
     label: '14 FactoryHealth: owner insert and edit forbidden, core insert and edit ok',
     async run(d, c) {
       const row = (factoryId: string) => ({ factoryId, patPresent: 0, checkedAt: new Date().toISOString(), version: 1, writeId: '' });
-      const ownerId = 'GATE-gate-owner';
+      const ownerId = `GATE-${c.suffix}-owner`; // per run: a row left by a misconfigured run must not fail later runs
       const denied = await d.owner.insert('FactoryHealth', row(ownerId));
       expect(denied.kind === 'forbidden', `owner insert of FactoryHealth answered ${denied.kind}`);
       expect((await d.core.list('FactoryHealth', { factoryId: ownerId }, ['version'])).length === 0, 'refused owner insert of FactoryHealth left a row');

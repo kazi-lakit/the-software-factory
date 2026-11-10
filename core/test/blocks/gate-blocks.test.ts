@@ -23,7 +23,7 @@ function setup(over: { onStatus?: (taskId: string) => { code: number; stdout: st
     log: (l) => lines.push(l),
     suffix: () => 'abcd1234',
   };
-  return { deps, lines, owner };
+  return { deps, lines, owner, storage };
 }
 
 describe('runGate', () => {
@@ -126,6 +126,18 @@ describe('runGate', () => {
     (deps.owner as FakeBlocksData).grant('FactoryHealth', 'insert');
     expect(await runGate(deps)).toBe(false);
     expect(lines.filter((l) => l.includes('FAIL')).map((l) => l.split(' ')[0])).toEqual(['14']);
+  });
+
+  it('step 14 probes the owner insert with a per-run id, so a row left by a misconfigured run does not fail later runs (M7)', async () => {
+    const { deps, owner, storage } = setup();
+    (deps.owner as FakeBlocksData).grant('FactoryHealth', 'insert');
+    expect(await runGate(deps)).toBe(false);
+    expect(owner.rows('FactoryHealth').map((r) => r.factoryId)).toContain('GATE-abcd1234-owner');
+    // The rules are fixed: the owner has its normal access again. The next run has its own suffix.
+    const fixed = new FakeBlocksData('factory-owner', { storage });
+    const lines: string[] = [];
+    expect(await runGate({ ...deps, owner: fixed, ownerStore: new BlocksStore(fixed, 'owner'), log: (l) => lines.push(l), suffix: () => 'ffff0000' })).toBe(true);
+    expect(lines.find((l) => l.startsWith('14 '))).toMatch(/: pass$/);
   });
 
   it('step 15 FAILs when the column rule lacks factoryId', async () => {
