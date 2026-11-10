@@ -19,7 +19,7 @@ const BASH_DENY = [
   [/api\.github\.com/, 'GitHub API'],
   [/scratchpad\/selise\/(blocks|vaults)/i, 'checkouts and vault are off limits'],
   [/vaultS/i, 'checkouts and vault are off limits'],
-  [/(^|[\s'"=:/])\.\.(\/\.\.)*\/+(blocks|vaultS)\b/i, 'checkouts and vault are off limits'],
+  [/(^|[\s'"=:/])\.\.(\/\.\.)*\/+(blocks|vaultS)(?=$|[\/\s'\";&|)])/i, 'checkouts and vault are off limits'],
   [/\.git\/hooks|hooksPath|--no-verify/, 'git hooks'],
 ];
 const BASH_DENY_AGENT = [
@@ -56,9 +56,9 @@ export function realish(p, realpath = fs.realpathSync) {
   }
 }
 
-/** True when the command names the worktree as `cd "<wt>"`, `cd <wt>`, `-C "<wt>"` or `-C <wt>`. */
+/** True when the command names the worktree or a subfolder as `cd "<wt>"`, `cd <wt>/sub`, `-C "<wt>"` or `-C <wt>`. */
 function namesWorktree(cmd, wt) {
-  const re = new RegExp(`(?:\\bcd|(?:^|\\s)-C)\\s+(["']?)${escapeRe(wt)}\\1(?=$|[\\s;&|)])`);
+  const re = new RegExp(`(?:\\bcd|(?:^|\\s)-C)\\s+(["']?)${escapeRe(wt)}(?:\\/[^\\s"';&|)]*)?\\1(?=$|[\\s;&|)])`);
   return re.test(cmd);
 }
 

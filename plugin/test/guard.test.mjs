@@ -143,6 +143,36 @@ describe('guard decide', () => {
     });
   }
 
+  describe('worktree subfolders and Blocks.slnx', () => {
+    const w3 = `${root}/.clones/worktrees/T-3`;
+    const s3 = { taskId: 'T-3', step: 'implement', worktree: w3 };
+    const abs = '/Users/x/scratchpad/selise/the-software-factory/.clones/worktrees/T-3';
+    const table = [
+      ['cd wt quoted', bash(`cd "${w3}" && git commit -m x`, impl), false],
+      ['cd wt/server quoted', bash(`cd "${w3}/server" && git commit -m x`, impl), false],
+      ['cd wt/server bare', bash(`cd ${w3}/server && git commit -m x`, impl), false],
+      ['-C wt/client quoted', bash(`git -C "${w3}/client" add src/a.ts`, impl), false],
+      ['cd wt/ trailing slash', bash(`cd "${w3}/" && git commit -m x`, impl), false],
+      ['cd T-30 lookalike', bash(`cd "${root}/.clones/worktrees/T-30" && git commit -m x`, impl), true],
+      ['cd root', bash(`cd "${root}" && git commit -m x`, impl), true],
+      ['dotnet test ../../Blocks.slnx', bash(`cd "${w3}/server/src" && dotnet test ../../Blocks.slnx`, impl), false],
+      ['dotnet build ../Blocks.slnx', bash('dotnet build ../Blocks.slnx', impl), false],
+      ['cd ../blocks/blocks-data', bash('cd ../blocks/blocks-data && git status', impl), true],
+      ['ls ../../blocks/', bash('ls ../../blocks/', impl), true],
+      ['ls ../blocks', bash('ls ../blocks', impl), true],
+      ['ls ../blocks main', bash('ls ../blocks'), true],
+      ['echo >> ../vaultS', bash('echo x >> ../vaultS/journal/a.md', impl), true],
+      ['cat ../VAULTS', bash('cat ../VAULTS/x.md', impl), true],
+      ['absolute wt Blocks.slnx', bash(`dotnet test ${abs}/Blocks.slnx`, impl), false],
+    ];
+    for (const [name, input, deny] of table) {
+      it(name, () => {
+        const sess = name.startsWith('absolute') ? { ...s3, worktree: abs } : s3;
+        expect(run(input, sess).deny).toBe(deny);
+      });
+    }
+  });
+
   it('implementer write with null session is denied', () => {
     const r = run(write(`${wt}/a`, impl), null);
     expect(r).toEqual({ deny: true, reason: expect.stringContaining('no active factory step') });
