@@ -840,6 +840,13 @@ textarea.sf-input {
   white-space: nowrap;
 }
 
+.sf-card-waiting {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-size-small);
+  margin: 2px 0 0;
+}
+
 .sf-card-cta {
   align-self: flex-start;
   background: transparent;
@@ -1495,4 +1502,10 @@ textarea.sf-input {
 
 .sf-gh-logged-out {
   font-weight: 600;
+}
+
+.sf-deps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
 }

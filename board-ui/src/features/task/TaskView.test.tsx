@@ -235,3 +235,17 @@ describe("TaskView page layout", () => {
     expect(steps[index]).toBe("waiting");
   });
 });
+
+describe("TaskView dependencies", () => {
+  it("links_each_dependency_with_its_status", async () => {
+    const { owner } = fakeBoard();
+    const dep = await seedTask({ title: "Dep" }, "build", { stage: "build" });
+    const t = await owner.createTask({ dependsOn: [dep.taskId], description: "", factoryId: "blocks", repo: "data", title: "Child" });
+    const { onNavigate } = renderTask(t.taskId);
+    const link = await screen.findByRole("link", { name: new RegExp(dep.taskId) });
+    expect(link).toHaveAttribute("href", `/tasks/${dep.taskId}`);
+    await waitFor(() => expect(link.closest("li")).toHaveTextContent("Build"));
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledWith(`/tasks/${dep.taskId}`);
+  });
+});

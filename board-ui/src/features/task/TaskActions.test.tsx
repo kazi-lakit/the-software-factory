@@ -194,3 +194,22 @@ describe("TaskActions styling", () => {
     expect(screen.getByRole("button", { name: "Yes, cancel it" })).toHaveClass("sf-button-danger");
   });
 });
+
+describe("TaskActions dependencies", () => {
+  it("saves_changed_dependencies_of_an_inbox_task", async () => {
+    const dep = await seedTask({ title: "Dep" });
+    const task = await seedTask({ title: "Child" });
+    renderActions(task);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: new RegExp(dep.taskId) }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(async () => expect((await stored(task)).dependsOn).toEqual([dep.taskId]));
+  });
+
+  it("has_no_picker_for_a_spec_task", async () => {
+    await seedTask({ title: "Dep" });
+    const task = await seedTask({}, "spec", { stage: "spec" });
+    renderActions(task);
+    expect(screen.queryByRole("group", { name: "Depends on" })).not.toBeInTheDocument();
+  });
+});

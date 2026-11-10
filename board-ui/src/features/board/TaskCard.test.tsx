@@ -165,4 +165,14 @@ describe("TaskCard factory tag", () => {
     render(<TaskCard task={task({ factoryId: "delta" })} onNavigate={vi.fn()} />);
     expect(screen.getByText("T-7")).toBeInTheDocument();
   });
+
+  it("shows_what_a_task_is_waiting_on", () => {
+    render(<TaskCard task={task({ status: "ready" })} waitingOn={["T-3", "T-4"]} onNavigate={vi.fn()} />);
+    expect(screen.getByText("Waiting on T-3, T-4")).toBeInTheDocument();
+  });
+
+  it("shows_no_waiting_badge_without_dependencies", () => {
+    render(<TaskCard task={task({ status: "ready" })} onNavigate={vi.fn()} />);
+    expect(screen.queryByText(/Waiting on/)).not.toBeInTheDocument();
+  });
 });
