@@ -26,10 +26,14 @@ blocks iam roles create --name "Factory Owner" --slug factory-owner --descriptio
 
 ## 3. Tables, fields, indexes
 
-Repeat this for each table: `FactoryTask`, `FactoryDoc`, `FactoryApproval`, `FactorySettings`, `FactoryRun`, `FactoryEvent`, `FactorySpike`.
+There are 10 tables: `FactoryTask`, `FactoryDoc`, `FactoryApproval`, `FactorySettings`, `FactoryRun`, `FactoryEvent`, `FactorySpike`, and (plan 6, multiple factories) `FactoryDef`, `FactoryRepo` and `FactoryHealth`. Each table's fields are in `blocks/data/factory/<Table>.fields.json` and its unique index is in `blocks/data/factory/indexes.json`. The core generates these files; `cd core && npm run -s blocks:resources -- --check` confirms they are current.
+
+**Warning:** a new table is open to any signed-in project user until step 4 deploys its rules. `FactoryRepo.checks` holds shell commands that the core runs on the owner's Mac. Run step 4 in the same sitting, straight after this step, before anything else touches the project.
+
+For each new table, create the schema, then its fields:
 
 ```bash
-S=FactoryTask
+S=FactoryDef     # then FactoryRepo, then FactoryHealth
 blocks data schema info save --schema-name $S --collection-name ${S}s --schema-type 1 --dry-run   # then --yes; note the schema id it prints
 blocks data schema fields --schema-id <id> --file blocks/data/factory/$S.fields.json --dry-run    # then --yes
 ```
@@ -45,10 +49,33 @@ Each table has one unique index:
 | FactoryRun | runId | factory_run_runid_unique |
 | FactoryEvent | eventId | factory_event_eventid_unique |
 | FactorySpike | spikeKey | factory_spike_spikekey_unique |
+| FactoryDef | factoryId | factory_def_factoryid_unique |
+| FactoryRepo | repoKey | factory_repo_repokey_unique |
+| FactoryHealth | factoryId | factory_health_factoryid_unique |
 
 ```bash
 blocks data schema indexes create --schema-id <id> --fields <field> --unique --name <index name> --dry-run   # then --yes
 ```
+
+For the three new tables:
+
+```bash
+blocks data schema indexes create --schema-id <FactoryDef id>    --fields factoryId --unique --name factory_def_factoryid_unique --dry-run     # then --yes
+blocks data schema indexes create --schema-id <FactoryRepo id>   --fields repoKey   --unique --name factory_repo_repokey_unique --dry-run      # then --yes
+blocks data schema indexes create --schema-id <FactoryHealth id> --fields factoryId --unique --name factory_health_factoryid_unique --dry-run  # then --yes
+```
+
+### Existing tables (a project set up before plan 6)
+
+`FactoryTask` and `FactoryEvent` gain a `factoryId` field, and the description of `FactorySettings.scope` changes. `schema fields` adds and updates fields, so save each table's regenerated file again. Find each schema id with `blocks data schema list --json` (or `blocks data schema get-by-name <Table> --json`).
+
+```bash
+blocks data schema fields --schema-id <FactoryTask id>     --file blocks/data/factory/FactoryTask.fields.json --dry-run       # then --yes (adds factoryId)
+blocks data schema fields --schema-id <FactoryEvent id>    --file blocks/data/factory/FactoryEvent.fields.json --dry-run      # then --yes (adds factoryId)
+blocks data schema fields --schema-id <FactorySettings id> --file blocks/data/factory/FactorySettings.fields.json --dry-run   # then --yes (scope description)
+```
+
+Then create the three new tables above, then step 4 at once.
 
 ## 4. Access rules (do this straight after step 3: until then the tables are open to any signed-in project user)
 
@@ -57,6 +84,7 @@ blocks data validate
 blocks data rules deploy --dry-run       # then --yes
 blocks data reload --dry-run             # then --yes
 blocks data schema aggregation --schema-name FactoryApproval   # every operation should say Custom
+blocks data schema aggregation --schema-name FactoryRepo       # every operation should say Custom
 ```
 
 ## 5. Your account gets the owner role
@@ -87,7 +115,7 @@ Paste the tenantId and anything that failed. Don't paste the client secret, the 
 ```bash
 cd ~/scratchpad/selise/the-software-factory/core
 npm run -s blocks:spike-doc-size -- --confirm-synthetic-writes
-npm run -s blocks:gate -- --confirm-synthetic-writes        # asks for your Blocks email and password (hidden)
+npm run -s blocks:gate -- --confirm-synthetic-writes        # asks for your Blocks email and password (hidden); steps 1-15 must pass
 ```
 
 Paste both outputs. They show only sizes or step labels with ok/pass/FAIL.

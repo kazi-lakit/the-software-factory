@@ -406,12 +406,19 @@
 
 The owner runs these steps, and the executor watches `factory status` and the Board.
 
-1. The executor:
-   - runs `blocks data rules deploy --dry-run` and shows the owner the diff of the three new tables, the two `factoryId` fields and the CLS change;
-   - on the owner's OK, runs `rules deploy --yes` and `data reload`;
-   - runs the gate (the owner enters the password): steps 1–14 pass.
+1. Blocks first, in one sitting, in this order (see `docs/setup/blocks-project-setup.md` steps 3 and 4 for the exact commands):
+   1. The schemas, fields and indexes: the three new tables `FactoryDef` (unique `factoryId`), `FactoryRepo` (unique `repoKey`) and `FactoryHealth` (unique `factoryId`), the new `factoryId` field on `FactoryTask` and `FactoryEvent`, and the `FactorySettings.scope` description. Each command runs `--dry-run` first, then `--yes` after the owner's OK.
+   2. `blocks data rules deploy --yes` and `blocks data reload --yes` straight away (after the `--dry-run` diff of the three new tables, the two `factoryId` fields and the CLS change). Until the rules are deployed the new tables are open to any project user, and `FactoryRepo.checks` holds commands the core runs.
+   3. The gate (the owner enters the password): steps 1–15 pass.
+   4. Only then any core command against Blocks.
+   5. No `/factory:run` with the new code (the owner's installed plugin included) until `factory migrate --check` shows `create-factory: already`.
 2. The executor redeploys the Board (push `dev`, `blocks release deploy --wait`) after the owner's OK.
-3. `node core/dist/cli.js migrate --dry-run`, then `migrate --yes`. Every step reads `now`, then on a second run `already`. The owner removes `repos/` (`git rm -r repos`) in a normal session.
-4. On the Board, the owner adds factory `tsf` (or `mods`) with a repo and its PAT account, and saves its PAT with `security add-generic-password -U -s the-software-factory -a github-pat:<id> -w`. `factory status` shows `PAT present`.
+3. The migrate (R10 flow):
+   1. `node core/dist/cli.js migrate --export <file>` writes the `blocks` factory and its repos as an import file (no secrets);
+   2. on the Board, Settings → Factories → Import, with that file;
+   3. `node core/dist/cli.js migrate --yes` copies the PAT in the Keychain;
+   4. `node core/dist/cli.js migrate --check` shows no step `pending` (`create-factory: already`);
+   5. the owner removes `repos/` (`git rm -r repos`) in a normal session.
+4. On the Board, the owner adds factory `tsf` (or `mods`) with a repo and its PAT account, and saves its PAT with `security add-generic-password -U -s the-software-factory -a github-pat:<id> -w`. `factory status` shows `PAT present`. Prerequisite: that repo needs a non-`main` base branch on GitHub (for example `dev`), because `main` is never a base; the factory's own repo has only `main` today.
 5. `/factory:new tsf: <small change>`, then **Mark ready**, then `/factory:run tsf`, step by step until `pr_open` in that factory's repo.
 6. Record the results in the vault overview (plan 6 section). On any failure, fix it and repeat the step.
