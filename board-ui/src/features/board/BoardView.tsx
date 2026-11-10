@@ -95,6 +95,8 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const [repo, setRepo] = useState("");
   const [view, setView] = useBoardView();
   const [showTest, setShowTest] = useState(false);
+  // Phones show one lane at a time. In memory only: a reload selects Needs you again.
+  const [selectedLane, setSelectedLane] = useState<LaneId>("needs-you");
   const [expanded, setExpanded] = useState<ReadonlySet<Status>>(new Set());
   // Expansion is not remembered: leaving All stages collapses Done and Cancelled again.
   useEffect(() => {
@@ -239,11 +241,30 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
       {board.data ? <WaitingStrip tasks={waiting} showFactory={all} onNavigate={onNavigate} /> : null}
 
       {board.data && view === "lanes" ? (
+        <>
+        <div role="group" aria-label="Lane" className="sf-pills">
+          {LANES.map((lane) => (
+            <button
+              key={lane.id}
+              type="button"
+              className="sf-pill"
+              aria-pressed={selectedLane === lane.id}
+              onClick={() => setSelectedLane(lane.id)}
+            >
+              {lane.name} <span className="sf-count sf-mono">{byLane.get(lane.id)?.length ?? 0}</span>
+            </button>
+          ))}
+        </div>
         <div className="sf-lanes">
           {LANES.map((lane) => {
             const tasks = byLane.get(lane.id) ?? [];
             return (
-              <section key={lane.id} className={`sf-lane${lane.id === "needs-you" ? " sf-lane-needs-you" : ""}`} aria-label={lane.name}>
+              <section
+                key={lane.id}
+                className={`sf-lane${lane.id === "needs-you" ? " sf-lane-needs-you" : ""}`}
+                aria-label={lane.name}
+                data-selected={selectedLane === lane.id ? "true" : "false"}
+              >
                 <div className="sf-lane-head">
                   <h3 className="sf-label sf-lane-name">{lane.name}</h3>
                   <span className="sf-count sf-mono">{tasks.length}</span>
@@ -260,6 +281,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             );
           })}
         </div>
+        </>
       ) : null}
 
       {board.data && view === "stages" ? (

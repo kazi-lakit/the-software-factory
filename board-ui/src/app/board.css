@@ -1388,6 +1388,11 @@ textarea.sf-input {
   }
 }
 
+/* Lane pills show on phones only (see the phone block at the end). */
+.sf-pills {
+  display: none;
+}
+
 /* Waiting for you */
 .sf-strip {
   background: var(--sf-accent-soft);

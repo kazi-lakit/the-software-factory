@@ -982,3 +982,74 @@ describe("BoardView top bar Cancel", () => {
     expect(last(leads)).toBeNull();
   });
 });
+
+describe("BoardView lane pills", () => {
+  const NAMES = ["Needs you", "Queued", "Working", "Done", "Stopped"];
+  const group = () => screen.getByRole("group", { name: "Lane" });
+  const pill = (name: string) => within(group()).getByRole("button", { name: new RegExp(`^${name}`) });
+  const section = (name: string) => screen.getByRole("region", { name });
+  const seedTwo = async () => {
+    await seedTask({ title: "Spec rev" }, "spec_review", { stage: "spec" });
+    await seedTask({ title: "PR task" }, "pr_open");
+    await seedTask({ title: "Building" }, "build");
+  };
+
+  it("shows_lane_pills_in_order_with_counts_and_Needs_you_pressed_by_default", async () => {
+    await seedTwo();
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    const buttons = within(group()).getAllByRole("button");
+    expect(buttons.map((b) => b.textContent)).toEqual(["Needs you 2", "Queued 0", "Working 1", "Done 0", "Stopped 0"]);
+    expect(buttons.every((b) => b.classList.contains("sf-pill"))).toBe(true);
+    expect(group()).toHaveClass("sf-pills");
+    for (const name of NAMES) expect(pill(name)).toHaveAttribute("aria-pressed", name === "Needs you" ? "true" : "false");
+  });
+
+  it("clicking_Working_selects_it_deselects_Needs_you_and_flips_data_selected", async () => {
+    await seedTwo();
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    fireEvent.click(pill("Working"));
+    expect(pill("Working")).toHaveAttribute("aria-pressed", "true");
+    expect(pill("Needs you")).toHaveAttribute("aria-pressed", "false");
+    expect(section("Working")).toHaveAttribute("data-selected", "true");
+    expect(section("Needs you")).toHaveAttribute("data-selected", "false");
+  });
+
+  it("each_lane_section_has_data_selected_true_only_for_the_selected_lane", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Needs you" });
+    expect(NAMES.map((n) => section(n).getAttribute("data-selected"))).toEqual(["true", "false", "false", "false", "false"]);
+  });
+
+  it("switching_pills_does_not_call_listTasks_again", async () => {
+    await seedTwo();
+    const spy = vi.spyOn(fakeBoard().owner, "listTasks");
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    const before = spy.mock.calls.length;
+    for (const name of ["Working", "Done", "Needs you"]) fireEvent.click(pill(name));
+    expect(spy.mock.calls.length).toBe(before);
+  });
+
+  it("All_stages_renders_no_pill_group", async () => {
+    showStages();
+    await seedTwo();
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    expect(screen.queryByRole("group", { name: "Lane" })).not.toBeInTheDocument();
+  });
+
+  it("the_selected_lane_resets_to_Needs_you_on_remount_and_is_not_stored", async () => {
+    await seedTwo();
+    const first = renderBoard();
+    await screen.findAllByText("Spec rev");
+    const keys = Object.keys(window.localStorage).sort();
+    fireEvent.click(pill("Done"));
+    expect(Object.keys(window.localStorage).sort()).toEqual(keys);
+    first.unmount();
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    expect(pill("Needs you")).toHaveAttribute("aria-pressed", "true");
+  });
+});
