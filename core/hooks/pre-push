@@ -4,8 +4,10 @@
 # Without that file the old default (dev stg main) applies.
 common=$(git rev-parse --git-common-dir 2>/dev/null)
 set -f
+# An unreadable list fails closed: the default applies.
+list=$(cat "$common/factory-protected-branches" 2>/dev/null) || list="dev stg"
 if [ -n "$common" ] && [ -f "$common/factory-protected-branches" ]; then
-  protected="$(cat "$common/factory-protected-branches") main"
+  protected="$list main"
 else
   protected="dev stg main"
 fi

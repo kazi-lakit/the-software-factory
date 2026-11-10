@@ -47,6 +47,11 @@ describe('validateFactoryDef', () => {
     expect(r.value.patAccount).toBe('github-pat:delta');
     expect(r.value.active).toBe(true);
   });
+  test('the blocks-credential account is reserved', () => {
+    const r = validateFactoryDef(defInput({ patAccount: 'blocks-credential' }));
+    expect(r).toMatchObject({ ok: false });
+    expect(JSON.stringify(r)).toContain('patAccount blocks-credential is reserved');
+  });
   test('a non-empty gitEmail needs an @', () => {
     expect(validateFactoryDef(defInput({ gitEmail: 'nope' })).ok).toBe(false);
     expect(validateFactoryDef(defInput({ gitEmail: '' })).ok).toBe(true);

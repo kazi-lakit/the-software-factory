@@ -18,6 +18,16 @@ export class SecretMissingError extends Error {
   }
 }
 
+/** A factory's PAT is not in the Keychain. */
+export class PatMissingError extends SecretMissingError {
+  constructor(public readonly account: string) {
+    super(`PAT ${account} not in Keychain`);
+    this.name = 'PatMissingError';
+  }
+}
+
+export const RESERVED_PAT_ACCOUNT = 'blocks-credential';
+
 const SERVICE = 'the-software-factory';
 
 /** Reads a secret from the macOS Keychain; `name` is the account (`blocks-credential`, or a factory's `patAccount`). Error messages never include command output. */

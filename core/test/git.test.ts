@@ -140,6 +140,21 @@ describe('LocalGitRepos', () => {
       expect(globalConfig()).toBe(before);
     });
 
+    test('on reuse a changed identity is rewritten, a cleared one is unset, and the list is refreshed', async () => {
+      const api = repoFixture('reuse', 'api', { remote: bare });
+      const read = (wt: string, key: string) => {
+        try { return execFileSync('git', ['config', '--worktree', key], { cwd: wt, stdio: 'pipe' }).toString().trim(); } catch { return ''; }
+      };
+      const wt = await repos.worktree('reuse', api, 'T-20', 'factory/T-20-x', ['dev', 'main'], { gitName: 'N', gitEmail: 'one@example.com' });
+      expect(read(wt, 'user.email')).toBe('one@example.com');
+      await repos.worktree('reuse', api, 'T-20', 'factory/T-20-x', ['rel', 'main'], { gitName: 'N', gitEmail: 'two@example.com' });
+      expect(read(wt, 'user.email')).toBe('two@example.com');
+      expect(readFileSync(join(root, '.clones', 'reuse', 'api', '.git', 'factory-protected-branches'), 'utf8')).toBe('rel\nmain\n');
+      await repos.worktree('reuse', api, 'T-20', 'factory/T-20-x', ['rel', 'main'], { gitName: '', gitEmail: '' });
+      expect(read(wt, 'user.email')).toBe('');
+      expect(read(wt, 'user.name')).toBe('');
+    });
+
     test('without an identity nothing is written and worktreeConfig stays off', async () => {
       const wt = await repos.worktree('plain', repoFixture('plain', 'api', { remote: bare }), 'T-12', 'factory/T-12-x', ['dev', 'main'], { gitName: '', gitEmail: '' });
       expect(existsSync(join(wt, '.git'))).toBe(true);

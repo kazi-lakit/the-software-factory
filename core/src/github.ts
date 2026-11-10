@@ -7,6 +7,8 @@ export type GitHubFor = (patAccount: string) => GitHub;
 export type PrState = 'open' | 'merged' | 'closed';
 
 export interface GitHub {
+  /** Resolves the credential up front; rejects with PatMissingError when the factory has none. Clients without a lazy credential omit it. */
+  ensureReady?(): Promise<void>;
   openPr(p: { remote: string; head: string; base: string; title: string; body: string }): Promise<{ url: string; number: number }>;
   /** The open PR from `head` into `base` in the remote's repo, or null. */
   findOpenPr(p: { remote: string; head: string; base: string }): Promise<{ url: string; number: number } | null>;

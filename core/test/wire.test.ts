@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 import type { BlocksCredential } from '../src/blocks/credential.js';
+import { PatMissingError, SecretMissingError } from '../src/secrets.js';
 import { FakeGitHub } from '../src/github.js';
 import { lazyGitHubFor, LazyBlocksStore, wire } from '../src/wire.js';
 import { MemoryStore, type BoardStore } from '../src/store.js';
@@ -93,6 +94,14 @@ describe('lazyGitHubFor', () => {
     await a.prState('https://github.com/o/r/pull/1').catch(() => undefined);
     expect(reads).toEqual(['github-pat:a']);
     expect(made).toEqual(['pat-github-pat:a']);
+  });
+
+  test('a missing secret becomes PatMissingError, and the reserved account is refused', async () => {
+    const githubFor = lazyGitHubFor(async () => { throw new SecretMissingError('x not found'); }, () => new FakeGitHub());
+    const err = await githubFor('github-pat:a').ensureReady!().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(PatMissingError);
+    expect(err).toMatchObject({ account: 'github-pat:a', message: 'PAT github-pat:a not in Keychain' });
+    expect(() => githubFor('blocks-credential')).toThrow('patAccount blocks-credential is reserved');
   });
 
   test('a failed read is not cached', async () => {

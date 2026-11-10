@@ -10,7 +10,7 @@ import { diffEvents } from './history.js';
 import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
 import type { Checks } from './checksSchema.js';
 import type { FactoryConfig, FactoryDef, FactoryRepo } from './factories.js';
-import { SecretMissingError } from './secrets.js';
+import { PatMissingError, SecretMissingError } from './secrets.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from './limits.js';
 import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
 import {
@@ -305,17 +305,20 @@ export class Engine {
     const block = (task: Task, reason: string) =>
       this.apply(task, this.decideFor(task, { kind: 'limit', reason }, settings), this.coreActor);
     try {
-      return await this.shipTo(this.deps.githubFor(def.patAccount), def, cfg, claimed, branch, settings, block);
+      const github = this.deps.githubFor(def.patAccount);
+      await github.ensureReady?.(); // before any push: a missing PAT must not leave a pushed branch behind
+      return await this.shipTo({ github, def, cfg, claimed, branch, settings, block });
     } catch (e) {
       // No PAT for this factory: block the task until the owner adds the Keychain item and answers. Other factories are unaffected.
-      if (!(e instanceof SecretMissingError)) throw e;
-      return block(await this.claimedAt(taskId, 'ship'), `PAT ${def.patAccount} not in Keychain`);
+      if (!(e instanceof PatMissingError)) throw e;
+      return block(await this.claimedAt(taskId, 'ship'), `PAT ${e.account} not in Keychain`);
     }
   }
 
-  private async shipTo(
-    github: GitHub, def: FactoryDef, cfg: FactoryRepo, claimed: Task, branch: string, settings: Settings, block: (task: Task, reason: string) => Promise<Task>,
-  ): Promise<Task> {
+  private async shipTo(c: {
+    github: GitHub; def: FactoryDef; cfg: FactoryRepo; claimed: Task; branch: string; settings: Settings; block: (task: Task, reason: string) => Promise<Task>;
+  }): Promise<Task> {
+    const { github, def, cfg, claimed, branch, settings, block } = c;
     const taskId = claimed.taskId;
 
     // A task returned from pr_open already has a PR: reuse it while open. If it merged meanwhile, the commits

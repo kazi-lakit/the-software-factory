@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -87,6 +87,21 @@ describe('pre-push hook', () => {
         expect(r.stderr).toContain(`factory: push to ${b} refused`);
       }
       expect(push('dev').status).toBe(0);
+    });
+
+    test('an unreadable list fails closed to dev, stg and main', () => {
+      git(clone, 'commit', '--allow-empty', '-m', 'new work'); // else git skips the hook as up to date
+      writeFileSync(file(), 'rel\n');
+      chmodSync(file(), 0o000);
+      try {
+        for (const b of ['dev', 'stg', 'main']) {
+          const r = push(b);
+          expect(r.status, b).not.toBe(0);
+          expect(r.stderr).toContain(`factory: push to ${b} refused`);
+        }
+      } finally {
+        chmodSync(file(), 0o600);
+      }
     });
 
     test('reads the file from a worktree through the common dir', () => {

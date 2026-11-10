@@ -32,6 +32,11 @@ async function git(cwd: string | undefined, args: string[]): Promise<string> {
   }
 }
 
+/** The list the pre-push hook reads (through the common git dir, so worktrees find it too). */
+function writeProtectedList(clone: string, protectedBranches: readonly string[]): void {
+  writeFileSync(join(clone, '.git', 'factory-protected-branches'), protectedBranches.map((b) => `${b}\n`).join(''));
+}
+
 async function branchExists(clone: string, branch: string): Promise<boolean> {
   try {
     await execFileP('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { cwd: clone });
@@ -58,14 +63,16 @@ export class LocalGitRepos implements GitRepos {
     copyFileSync(HOOK_PATH, hook);
     chmodSync(hook, 0o755);
     // The hook reads the factory's list from here (through the common git dir, so worktrees find it too).
-    writeFileSync(join(clone, '.git', 'factory-protected-branches'), protectedBranches.map((b) => `${b}\n`).join(''));
+    writeProtectedList(clone, protectedBranches);
     return clone;
   }
 
   async worktree(factoryId: string, repo: FactoryRepo, taskId: string, branch: string, protectedBranches: string[], identity?: GitIdentity): Promise<string> {
     const path = join(this.root, '.clones', 'worktrees', taskId);
     if (existsSync(path)) {
-      await this.setIdentity(join(this.root, '.clones', factoryId, repo.repoId), path, identity);
+      const clone = join(this.root, '.clones', factoryId, repo.repoId);
+      writeProtectedList(clone, protectedBranches);
+      await this.setIdentity(clone, path, identity);
       return path;
     }
     const clone = await this.ensureClone(factoryId, repo, protectedBranches);
@@ -81,13 +88,19 @@ export class LocalGitRepos implements GitRepos {
     return path;
   }
 
-  /** Sets user.name / user.email in the worktree's own config; the owner's global config is never touched. */
+  /** Sets user.name / user.email in the worktree's own config, and unsets one the factory cleared; the owner's global config is never touched. */
   private async setIdentity(clone: string, worktree: string, identity?: GitIdentity): Promise<void> {
     const values: [string, string][] = [['user.name', identity?.gitName ?? ''], ['user.email', identity?.gitEmail ?? '']];
-    if (values.every(([, v]) => v === '')) return;
-    const on = await execFileP('git', ['config', '--get', 'extensions.worktreeConfig'], { cwd: clone }).then((r) => r.stdout.trim() === 'true', () => false);
-    if (!on) await git(clone, ['config', 'extensions.worktreeConfig', 'true']);
-    for (const [key, value] of values) if (value !== '') await git(worktree, ['config', '--worktree', key, value]);
+    if (values.some(([, v]) => v !== '')) {
+      const on = await execFileP('git', ['config', '--local', '--get', 'extensions.worktreeConfig'], { cwd: clone }).then((r) => r.stdout.trim() === 'true', () => false);
+      if (!on) await git(clone, ['config', '--local', 'extensions.worktreeConfig', 'true']);
+    }
+    const enabled = await execFileP('git', ['config', '--local', '--get', 'extensions.worktreeConfig'], { cwd: clone }).then((r) => r.stdout.trim() === 'true', () => false);
+    if (!enabled) return;
+    for (const [key, value] of values) {
+      if (value !== '') await git(worktree, ['config', '--worktree', key, value]);
+      else await execFileP('git', ['config', '--worktree', '--unset', key], { cwd: worktree }).catch(() => undefined); // exit 5: nothing to unset
+    }
   }
 
   async push(worktreePath: string, branch: string, protectedBranches?: readonly string[]): Promise<void> {

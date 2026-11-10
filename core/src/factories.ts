@@ -71,6 +71,7 @@ export function validateFactoryDef(input: unknown): Validated<FactoryDef> {
   if (gitName === null || gitEmail === null || docsPath === null || patAccount === null) {
     return fail('gitName, gitEmail, docsPath and patAccount must be text');
   }
+  if (patAccount === 'blocks-credential') return fail('patAccount blocks-credential is reserved');
   if (gitEmail !== '' && !gitEmail.includes('@')) return fail('gitEmail must contain @');
   const rawBranches = input.protectedBranches ?? ['dev', 'stg', 'main'];
   if (!Array.isArray(rawBranches) || !rawBranches.every((b) => typeof b === 'string')) return fail('protectedBranches must be a list of branch names');

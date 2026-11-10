@@ -10,7 +10,7 @@ import { Engine } from './engine.js';
 import { LocalGitRepos } from './git.js';
 import { OctokitGitHub, type GitHub, type GitHubFor } from './github.js';
 import { FactoryConfig } from './factories.js';
-import { readSecret } from './secrets.js';
+import { PatMissingError, readSecret, RESERVED_PAT_ACCOUNT, SecretMissingError } from './secrets.js';
 import { FileStore, type BoardStore } from './store.js';
 import type { Mode } from './types.js';
 
@@ -43,11 +43,17 @@ class LazyGitHub implements GitHub {
   ) {}
   private get gh(): Promise<GitHub> {
     if (!this.inner) {
-      const loading = this.read(this.account).then((pat) => this.make(pat));
+      const loading = this.read(this.account).then(
+        (pat) => this.make(pat),
+        (e: unknown) => { throw e instanceof SecretMissingError && !(e instanceof PatMissingError) ? new PatMissingError(this.account) : e; },
+      );
       loading.catch(() => { if (this.inner === loading) this.inner = undefined; });
       this.inner = loading;
     }
     return this.inner;
+  }
+  async ensureReady() {
+    await this.gh;
   }
   async openPr(p: Parameters<GitHub['openPr']>[0]) {
     return (await this.gh).openPr(p);
@@ -70,6 +76,7 @@ export function lazyGitHubFor(
 ): GitHubFor {
   const clients = new Map<string, GitHub>();
   return (account) => {
+    if (account === RESERVED_PAT_ACCOUNT) throw new Error(`patAccount ${RESERVED_PAT_ACCOUNT} is reserved`);
     let c = clients.get(account);
     if (!c) clients.set(account, (c = new LazyGitHub(account, read, make)));
     return c;
