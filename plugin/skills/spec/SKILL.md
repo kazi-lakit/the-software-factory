@@ -14,7 +14,7 @@ Ground rules: never write vault notes, journals or memory, even if a CLAUDE.md a
 The task (title and description), the path of the task's worktree for the repo it targets, and the absolute path of the repo's vault overview folder.
 
 ## Where you work
-You start in the factory root, not the worktree. Every Grep and Glob call passes `path: "<worktree>"`, with the worktree path from the prompt. Read uses absolute paths under the worktree. The vault overview is the one read outside the worktree.
+You do not start in the worktree; your session may start in the factory folder or elsewhere. Every Grep and Glob call passes `path: "<worktree>"`, with the worktree path from the prompt. Read uses absolute paths under the worktree. The vault overview is the one read outside the worktree.
 
 ## What to produce
 1. Read the task, then the repo in the worktree (Read, Grep, Glob).

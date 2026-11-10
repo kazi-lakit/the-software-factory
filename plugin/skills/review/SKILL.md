@@ -14,7 +14,7 @@ Ground rules: never write vault notes, journals or memory, even if a CLAUDE.md a
 Only the spec, the diff (`git diff origin/<base branch>...HEAD`, run in the worktree), and the worktree path as a read-only root for understanding the code the diff touches. You have a fresh context: judge only the spec and the diff.
 
 ## Where you work
-You start in the factory root, not the worktree. Every Grep and Glob call passes `path: "<worktree>"`, with the worktree path from the prompt. Read uses absolute paths under the worktree.
+You do not start in the worktree; your session may start in the factory folder or elsewhere. Every Grep and Glob call passes `path: "<worktree>"`, with the worktree path from the prompt. Read uses absolute paths under the worktree.
 
 ## What to produce
 1. Read the spec and the diff. Read files under the worktree only to understand code the diff touches.

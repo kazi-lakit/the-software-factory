@@ -74,7 +74,8 @@ describe('stage skills work in the worktree (I2)', () => {
       const text = read(`skills/${step}/SKILL.md`);
       expect(text).toContain('path: "<worktree>"');
       expect(text).toMatch(/Read[^\n]*absolute paths/);
-      expect(text).toMatch(/starts? in the factory root/);
+      expect(text).toContain('You do not start in the worktree; your session may start in the factory folder or elsewhere');
+      expect(text).not.toMatch(/start in the factory root/);
     });
   }
   it('build runs every Bash command in the worktree with a long timeout (I1)', () => {
@@ -86,6 +87,10 @@ describe('stage skills work in the worktree (I2)', () => {
   it('build commits with the HUSKY=0 prefix in the worktree', () => {
     const text = read('skills/build/SKILL.md');
     expect(text).toContain('`cd "<worktree>" && HUSKY=0 git commit');
+  });
+  it('build runs every check command with HUSKY=0 exported in the worktree', () => {
+    const text = read('skills/build/SKILL.md');
+    expect(text).toContain('`cd "<worktree>" && export HUSKY=0 && <check>`');
   });
   it('review reads the worktree read-only, matching the dispatch prompt (I3)', () => {
     const text = read('skills/review/SKILL.md');

@@ -40,7 +40,7 @@ describe('run skill', () => {
   it('takes the factory root from printenv FACTORY_ROOT in step 0', () => {
     const step0 = body.match(/^0\. .*$/m)[0];
     expect(step0).toContain('`printenv FACTORY_ROOT`');
-    expect(step0).toContain('`factory: factory root not found; set FACTORY_ROOT or start in the factory folder`');
+    expect(step0).toContain('`factory: factory root not found or session env missing; set FACTORY_ROOT or restart the session`');
     expect(body).toContain('replace `<root>` with the printed path');
   });
 

@@ -14,7 +14,7 @@ Ground rules: never write vault notes, journals or memory, even if a CLAUDE.md a
 The approved spec, the repo it targets, and the path of the task's worktree.
 
 ## Where you work
-You start in the factory root, not the worktree. Every Grep and Glob call passes `path: "<worktree>"`, with the worktree path from the prompt. Read uses absolute paths under the worktree.
+You do not start in the worktree; your session may start in the factory folder or elsewhere. Every Grep and Glob call passes `path: "<worktree>"`, with the worktree path from the prompt. Read uses absolute paths under the worktree.
 
 ## What to produce
 1. Read the spec, then the repo in the worktree (Read, Grep, Glob) to find the real files, patterns and test setup.
