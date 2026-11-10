@@ -64,9 +64,11 @@ If the stage agent errors or returns nothing, the skill records nothing and prin
 
 ## Create a task from a prompt
 
-`/factory:new <what you want done>` drafts a task from your words (repo, base branch, title, description with acceptance criteria) and prints one Board link. Open it: the New task form is filled in. Check it, click **Create task**, then **Mark ready**, then run `/factory:run`. The skill never creates a task and never touches the Board; the draft is only saved under `runs/.drafts/` in the factory folder (ignored by git).
+`/factory:new [--ready] <what you want done>` drafts a task from your words (repo, base branch, title, description with acceptance criteria) and creates it on the Board by running `factory new` from your session. The task starts in **inbox**; click **Mark ready** on the Board, then run `/factory:run`. With `--ready` it starts in ready, so you can run `/factory:run` straight away. Its history reads `core · new`. After creation the factory still can't edit the title, description, repo, base branch or gate overrides; only you can, on the Board. A stage agent can't run `factory new`: the guard denies the factory CLI to agents.
 
-The link goes to `https://dfrsgz-eseqz.slsblx.com` unless `FACTORY_BOARD_URL` is set in the shell that starts `claude`. The link works only once the Board page with the pre-fill change is deployed; before that it opens the plain Board.
+This needs the Blocks rules to let the factory core insert a task (`blocks/data/rules.json`, regenerated with `npm run -s blocks:resources`). You deploy them; until then `factory new` fails with a one-line error.
+
+If `factory new` fails, the skill shows the error and falls back to one pre-filled Board link: open it, check the form, click **Create task**, then **Mark ready**. The link goes to `https://dfrsgz-eseqz.slsblx.com` unless `FACTORY_BOARD_URL` is set in the shell that starts `claude`, and it works only once the Board page with the pre-fill change is deployed. The draft files are saved under `runs/.drafts/` in the factory folder (ignored by git).
 
 ## Safety layers
 

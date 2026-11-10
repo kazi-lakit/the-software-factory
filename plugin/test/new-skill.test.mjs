@@ -17,9 +17,9 @@ describe('new skill', () => {
   it('has the frontmatter', () => {
     expect(m).not.toBeNull();
     expect(fm.name).toBe('new');
-    expect(fm.description).toBe("Draft a factory task from the user's words and give a Board link to create it (use only when the user runs /factory:new)");
-    expect(fm['argument-hint']).toBe('<what you want done>');
-    expect(fm['allowed-tools']).toBe('Read, Write, Bash(node:*), Bash(printenv:*)');
+    expect(fm.description).toBe("Draft a factory task from the user's words and create it on the Board (use only when the user runs /factory:new)");
+    expect(fm['argument-hint']).toBe('[--ready] <what you want done>');
+    expect(fm['allowed-tools']).toBe('Read, Write, Bash(node:*), Bash(HUSKY=0 node:*), Bash(printenv:*)');
   });
 
   it('is started only by the user', () => {
@@ -57,6 +57,39 @@ describe('new skill', () => {
     expect(body).toMatch(/Create task/);
     expect(body).toMatch(/Mark ready/);
     expect(body).toContain('/factory:run');
+  });
+
+  it('creates the task with the CLI from a description file', () => {
+    const step4 = body.match(/^4\. .*$/m)[0];
+    expect(step4).toContain('HUSKY=0 node "<root>/core/dist/cli.js" --mode session new --repo <repo> --base <base> --title "<title>" --description-file');
+    expect(step4).toContain('runs/.drafts/${CLAUDE_SESSION_ID}.md');
+    expect(step4).not.toContain('--store');
+    expect(body.match(/^3\. .*$/m)[0]).toContain('${CLAUDE_SESSION_ID}.md');
+  });
+
+  it('adds --ready only when the user asked for it, and strips the flag from the prompt', () => {
+    expect(body.match(/^2\. .*$/m)[0]).toMatch(/--ready[^\n]*remove the flag from the prompt/);
+    expect(body.match(/^4\. .*$/m)[0]).toMatch(/Add `--ready`[^\n]*only if the user's arguments contained `--ready`/);
+    expect(body.match(/--ready/g).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('strips quote, backtick, dollar and backslash from the title', () => {
+    expect(body).toContain('Strip every `"`, backtick, `$` and backslash from the title');
+  });
+
+  it('shows the CLI line and what to do next', () => {
+    const step5 = body.match(/^5\. .*$/m)[0];
+    expect(step5).toContain('`T-3 created in inbox`');
+    expect(step5).toMatch(/inbox[^\n]*\*\*Mark ready\*\*[^\n]*\/factory:run/);
+    expect(step5).toMatch(/in ready[^\n]*run `\/factory:run`/);
+  });
+
+  it('falls back to the Board link when the CLI fails', () => {
+    const step5 = body.match(/^5\. .*$/m)[0];
+    expect(step5).toMatch(/failed, show its one-line error/);
+    expect(step5).toContain('link.mjs');
+    expect(step5).toContain('${CLAUDE_SKILL_DIR}');
+    expect(step5).toMatch(/Create task/);
   });
 
   it('never targets main', () => {

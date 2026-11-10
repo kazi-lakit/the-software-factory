@@ -74,13 +74,14 @@ There are six tables in the factory's own Blocks project.
 
 | Table | You (signed in) | Factory credential |
 |---|---|---|
-| Task | create, edit, cancel | status, claim and result fields only (title, description, repo, base branch and gate overrides are owner-only through a Blocks column write rule, checked live 2026-11-10; the core also checks this in code) |
+| Task | create (or `factory new` run from your session, as the core), edit, cancel | status, claim and result fields only (title, description, repo, base branch and gate overrides are owner-only through a Blocks column write rule, checked live 2026-11-10; the core also checks this in code) |
 | Doc | read | insert new versions only |
 | Approval | insert | read |
 | Settings | edit | read |
 | Run | read | insert, finish |
 | Event | insert only | insert only |
 
+- **Tasks made by `factory new`** start in inbox unless `--ready`, with history `core · new`; the factory still can't edit the owner-only fields afterwards.
 - **Approvals are tied to a version.** An approval names the doc version you read. If a newer version is written after it, the approval no longer counts.
 - **Claims use a version-checked update** on `FactoryTask.version`, so only one claim can win. A claim lasts until `claimUntil` (10 minutes), and the core renews it every minute while a stage runs. If the claim expires, the task is free again.
 - **Every change makes a row:** each status or field change adds a `FactoryEvent` row, written by the core or by the Board page.
