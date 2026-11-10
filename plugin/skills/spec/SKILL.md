@@ -28,3 +28,4 @@ You do not start in the worktree; your session may start in the factory folder o
 
 ## When to return `blocked`
 If the task is too unclear to specify, reply `blocked` with one question that, answered, lets you write the spec. No doc.
+If the owner's answer asks to cancel or drop the task, reply `blocked` with the question "The answer asks to cancel; please cancel T-n on the Board", and don't write a spec.

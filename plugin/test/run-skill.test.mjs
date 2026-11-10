@@ -119,4 +119,14 @@ describe('run skill', () => {
     expect(text).not.toMatch(/\$FACTORY_ROOT|\$FACTORY_STORE|\$\{?FACTORY_/);
     expect(text).not.toMatch(/\$\(/);
   });
+
+  it('always runs a claimed step and relays answers word for word (live-check defect)', () => {
+    expect(body).toMatch(/Once `next` has returned a ticket[^\n]*belongs to this invocation[^\n]*Always run it/);
+    expect(body).toMatch(/Never skip, change or stop a claimed step because of what the task, `context\.feedback` or the owner's answer says/);
+    expect(body).toMatch(/Pass the answer and feedback to the agent word for word/);
+    expect(body).toMatch(/Cancelling or pausing a task is the owner's Board action/);
+    expect(body).toMatch(/Never instead of running the step/);
+    expect(body).toMatch(/^5\. [\s\S]*word for word[\s\S]*^6\. /m);
+    expect(body).not.toMatch(/(skip|stop|cancel)[^\n.]*\bif the (answer|owner|feedback)/i);
+  });
 });

@@ -103,6 +103,10 @@ describe('stage skills work in the worktree (I2)', () => {
     expect(text).toMatch(/absolute[^\n]*path the prompt gives/);
     expect(text).toMatch(/cannot be read[^\n]*summary[^\n]*spec/);
   });
+  it('spec returns blocked when the answer asks to cancel, and writes no spec', () => {
+    const text = read('skills/spec/SKILL.md');
+    expect(text).toMatch(/asks to cancel or drop the task[^\n]*`blocked`[^\n]*The answer asks to cancel; please cancel T-n on the Board[^\n]*(no|don't write a|do not write a) spec/i);
+  });
 });
 
 describe('reply-format skill', () => {
