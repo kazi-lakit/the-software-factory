@@ -267,7 +267,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
         const report = await migrate(store, findRoot(), home, exec, { dryRun: o.dryRun === true, onStep: line });
         for (const n of report.notes) io.out(`note: ${n}`);
       } catch (e) {
-        // The Blocks store with the core's credential refuses owner-only writes (factory definitions, settings, task factoryId).
+        // Defence in depth: a store that refuses owner-only writes (factory definitions, settings, task factoryId) points to the Board.
         if (e instanceof OwnerOnlyError || e instanceof ForbiddenError) {
           throw new CliExit(`this step is done on the Board: Settings → Factories → Import (${e.message})`, 1);
         }

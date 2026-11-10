@@ -13,7 +13,7 @@ export const LEGACY_FACTORY_ID = 'blocks';
 
 export interface MigrateStep {
   name: string;
-  /** `already`: nothing to do (or done before). `now`: done by this run (with `dryRun`, would be). `skipped`: nothing to act on. `pending`: an owner step still to do (check and Blocks runs). */
+  /** `already`: nothing to do (or done before). `now`: done by this run (with `dryRun`, would be). `skipped`: nothing to act on. `pending`: an owner step still to do (an import on the Board, or gh auth login). */
   done: 'already' | 'now' | 'skipped' | 'pending';
   detail: string;
 }
