@@ -157,7 +157,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   }
 
   return (
-    <div className="sf-view">
+    <div className={view === "stages" ? "sf-view sf-view-stages" : "sf-view"}>
       <div className="sf-toolbar">
         <h2>Board</h2>
         <FactoryPicker
