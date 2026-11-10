@@ -2,7 +2,7 @@
 name: run
 description: Run one step of the software factory (use only when the user runs /factory:run)
 argument-hint: [<factory>|T-12] [--loop]
-allowed-tools: Bash(HUSKY=0 node:*), Bash(printenv:*), Bash(rm -f:*), Bash(git -C:*), Agent, Read, Write
+allowed-tools: Bash(HUSKY=0 node:*), Bash(printenv:*), Bash(rm -f:*), Bash(git -C:*), Agent, SendMessage, Read, Write
 ---
 
 # Run one factory step
@@ -32,5 +32,6 @@ This session's id is `${CLAUDE_SESSION_ID}`. The factory root, written `<root>` 
    - If the Agent tool reports that the agent is still running, wait for it to finish before going on.
    - If the Agent call errored, or returned no final message from the agent, do not run `complete`. Delete the session file, print `factory: agent error: <one line>; re-run /factory:run <task> to retry` and stop.
    - The SubagentStop hook writes the reply file `<root>/runs/<task>/<step>.reply.md`. If it is missing, write the text the Agent tool returned to that path with the Write tool, copied unchanged. Never compose or edit a reply, even one that looks malformed; the core handles a malformed reply.
+   - Read the reply file and look for both `<factory-result>` and `</factory-result>`. If either is missing, the agent forgot its result block: ask that same agent at most once, with SendMessage to the agent's id from the Agent call, and this exact message, word for word: "Your reply ended without the `<factory-result>` block, so the factory cannot record this step. Do not redo, change or add any work, and do not run any tool. Reply again with your final reply only, in the reply format: the same summary, the `<factory-result>` JSON block and, if your stage writes a doc, the `<factory-doc>` block." Wait for its answer. The restated reply replaces the reply file by the SubagentStop hook, as before; if the reply file did not change, write the restated text the agent returned to it with the Write tool, copied unchanged. If the SendMessage call fails, leave the reply file as it is. Do not ask a second time: run `complete` whatever the reply file holds, and the core blocks the task if it is still malformed.
    - Run `HUSKY=0 node "<root>/core/dist/cli.js" --mode <mode> complete <task> <step> --reply "<root>/runs/<task>/<step>.reply.md"`.
 7. Print the CLI's line (for example `T-12 spec_review`), delete the session file and stop. One step per invocation. If `complete` reports a `ClaimError` or a `StageError`, report it as it is, delete the session file and stop; do not retry.
