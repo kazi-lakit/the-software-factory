@@ -101,4 +101,13 @@ describe("buildQaLog review fixes", () => {
     const entries = buildQaLog([ev("question", "First?"), ev("answer", "1"), ev("question", "Second?")], "Reworded?");
     expect(entries.map((e) => e.question)).toEqual(["First?"]);
   });
+
+  it("keeps_an_older_unanswered_question_and_drops_only_the_latest_question_even_when_answered", () => {
+    const entries = buildQaLog([ev("question", "Q1?"), ev("question", "Q2?"), ev("answer", "yes")], "Q2?");
+    expect(entries.map((e) => [e.question, e.answer])).toEqual([["Q1?", null]]);
+  });
+
+  it("marks_recommended_when_the_answer_differs_only_by_extra_spaces", () => {
+    expect(buildQaLog([ev("question", LETTERED), ev("answer", "A.  main:   fits")], null)[0]?.mark).toBe("recommended");
+  });
 });

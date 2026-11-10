@@ -85,6 +85,12 @@ describe("AnswerPanel layout", () => {
     for (const radio of screen.getAllByRole("radio")) expect(radio).not.toBeChecked();
   });
 
+  it("puts_only_the_first_line_in_the_heading_and_the_rest_as_text", async () => {
+    await renderPanel("Which base branch?\nThe repo has dev and stg.");
+    expect(screen.getByRole("heading", { level: 3 }).textContent).toBe("Which base branch?");
+    expect(screen.getByText("The repo has dev and stg.").tagName).toBe("P");
+  });
+
   it("plain_text_question_shows_only_the_heading_and_textarea", async () => {
     await renderPanel("Should I continue?");
     expect(screen.getByRole("heading", { name: "Should I continue?" })).toBeInTheDocument();

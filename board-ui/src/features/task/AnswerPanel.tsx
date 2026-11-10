@@ -63,11 +63,15 @@ function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryE
     }
   }
 
+  const [headingLine = "", ...more] = parsed.prompt.split("\n");
+  const restLines = more.join("\n").trim();
+
   return (
     <section className="sf-panel sf-panel-needs-you" aria-labelledby={headingId}>
       {task.question ? (
         <>
-          <h3 id={headingId} className="sf-question-title">{parsed.prompt || "Choose an answer"}</h3>
+          <h3 id={headingId} className="sf-question-title">{headingLine || "Choose an answer"}</h3>
+          {restLines ? <p className="sf-question-more">{restLines}</p> : null}
           {asker ? <p className="sf-muted sf-asker" data-testid="asker">{asker}</p> : null}
         </>
       ) : (

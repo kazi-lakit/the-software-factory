@@ -19,12 +19,13 @@ export function askerName(actor: string): string {
 function markOf(options: ReturnType<typeof parseQuestion>["options"], answer: string): QaMark {
   const marked = options.filter((option) => option.recommended);
   if (marked.length !== 1) return "none";
-  return answer.trim() === optionText(marked[0]!) ? "recommended" : "not-recommended";
+  const collapse = (text: string) => text.replace(/\s+/g, " ").trim();
+  return collapse(answer) === collapse(optionText(marked[0]!)) ? "recommended" : "not-recommended";
 }
 
 /**
  * The earlier questions with their answers, newest first. `events` are oldest first. An answer pairs with the
- * latest question before it; the question still open (`openQuestion`) is left out.
+ * latest question before it; while a question is open (`openQuestion`) the latest question event, the one that set it, is left out.
  */
 export function buildQaLog(events: readonly FactoryEvent[], openQuestion: string | null): QaEntry[] {
   const asked: { event: FactoryEvent; answer: FactoryEvent | null }[] = [];
@@ -39,15 +40,7 @@ export function buildQaLog(events: readonly FactoryEvent[], openQuestion: string
       if (last && last.answer === null) last.answer = event;
     }
   }
-  if (openQuestion !== null) {
-    const unanswered = (i: number) => asked[i]!.answer === null;
-    let drop = -1;
-    for (let i = asked.length - 1; i >= 0 && drop < 0; i--) {
-      if (unanswered(i) && (asked[i]!.event.to ?? "").trim() === openQuestion.trim()) drop = i;
-    }
-    for (let i = asked.length - 1; i >= 0 && drop < 0; i--) if (unanswered(i)) drop = i;
-    if (drop >= 0) asked.splice(drop, 1);
-  }
+  if (openQuestion !== null && asked.length > 0) asked.pop();
   return asked
     .map(({ answer, event }, index): QaEntry => {
       const parsed = parseQuestion(event.to ?? "");
