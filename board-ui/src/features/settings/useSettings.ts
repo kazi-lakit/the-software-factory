@@ -8,6 +8,8 @@ export const SETTINGS_KEY = ["settings"] as const;
 export function useSettings() {
   return useQuery({
     queryFn: () => boardStore.getSettings(),
-    queryKey: SETTINGS_KEY
+    queryKey: SETTINGS_KEY,
+    // The shell's pause indicator follows the stored value, so a change from the CLI shows up without a reload.
+    refetchInterval: 30_000
   });
 }
