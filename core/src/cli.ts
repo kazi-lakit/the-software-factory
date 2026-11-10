@@ -43,7 +43,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .name('factory')
     .description('Drive the software factory engine')
     .option('--mode <mode>', 'sdk | loop | session', 'session')
-    .option('--store <store>', 'file | blocks', process.env.FACTORY_STORE ?? 'file')
+    .option('--store <store>', 'file | blocks', process.env.FACTORY_STORE || 'file')
     .exitOverride()
     .configureOutput({ writeOut: (s) => io.out(s.replace(/\n$/, '')), writeErr: (s) => io.err(s.replace(/\n$/, '')) });
 
@@ -61,9 +61,10 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .description('claim the next piece of work and print its ticket')
     .option('--json', 'print JSON')
     .action(async (task: string | undefined, o: { json?: boolean }, cmd: Command) => {
-      const { engine } = await open(cmd);
+      const { engine, store } = await open(cmd);
       const ticket = await engine.next(task);
-      if (!ticket) return io.out('nothing to do');
+      // A paused factory also returns no ticket: say so, so a loop's owner is not left guessing.
+      if (!ticket) return io.out((await store.getSettings()).global.paused ? 'paused' : 'nothing to do');
       if (o.json) return printJson(ticket);
       io.out(`${ticket.taskId} ${ticket.step} (worktree ${ticket.worktree})`);
     });

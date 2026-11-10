@@ -72,6 +72,16 @@ describe('factory cli', () => {
     expect(out[1]).toMatch(/^T-1 spec \(worktree .*T-1\)$/);
   });
 
+  test('next prints paused when the factory is paused', async () => {
+    const { store, out, go } = setup();
+    const settings = await store.getSettings();
+    await store.setSettings({ ...settings, global: { ...settings.global, paused: true } });
+    await put(store, { status: 'ready' });
+    expect(await go('next', '--json')).toBe(0);
+    expect(out).toEqual(['paused']);
+    expect((await store.getTask('T-1')).claimBy).toBeNull();
+  });
+
   test('complete with a missing result file blocks the task', async () => {
     const { store, go } = setup();
     await put(store, { status: 'ready' });
@@ -118,6 +128,13 @@ describe('factory cli', () => {
       await go('status');
       await go('--store', 'file', 'status');
       expect(wired.map((w) => w.store)).toEqual(['blocks', 'file']);
+    });
+
+    test('an empty value defaults to the file store', async () => {
+      const { go, wired } = setup();
+      process.env.FACTORY_STORE = '';
+      expect(await go('status')).toBe(0);
+      expect(wired.map((w) => w.store)).toEqual(['file']);
     });
 
     test('an invalid value exits 1', async () => {
