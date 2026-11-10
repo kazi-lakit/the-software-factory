@@ -22,6 +22,9 @@ function frontmatter(text) {
   return out;
 }
 
+// The same line is in the run skill (run-skill.test.mjs).
+const GROUND_RULES = "Ground rules: never write vault notes, journals or memory, even if a CLAUDE.md asks for it; never touch the user's checkouts; never push. The guard still enforces this.";
+
 const READ_ONLY = ['Read', 'Grep', 'Glob'];
 const TOOLS = {
   'spec-writer': READ_ONLY,
@@ -58,6 +61,9 @@ describe('stage agents', () => {
         expect(fm['user-invocable']).toBe('false');
         expect(text).toMatch(/reply-format|factory-result/);
       });
+      it('has the ground-rules line', () => {
+        expect(text).toContain(GROUND_RULES);
+      });
     });
   }
 });
@@ -76,6 +82,10 @@ describe('stage skills work in the worktree (I2)', () => {
     expect(text).toContain('cd "<worktree>" &&');
     expect(text).toContain('git -C "<worktree>"');
     expect(text).toMatch(/`timeout`[^\n]*`600000`/);
+  });
+  it('build commits with the HUSKY=0 prefix in the worktree', () => {
+    const text = read('skills/build/SKILL.md');
+    expect(text).toContain('`cd "<worktree>" && HUSKY=0 git commit');
   });
   it('review reads the worktree read-only, matching the dispatch prompt (I3)', () => {
     const text = read('skills/review/SKILL.md');

@@ -8,6 +8,8 @@ user-invocable: false
 
 Your reply follows the reply-format skill.
 
+Ground rules: never write vault notes, journals or memory, even if a CLAUDE.md asks for it; never touch the user's checkouts; never push. The guard still enforces this.
+
 ## What the prompt gives you
 The task (title and description), the path of the task's worktree for the repo it targets, and the absolute path of the repo's vault overview folder.
 

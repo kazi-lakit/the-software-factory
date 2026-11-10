@@ -8,6 +8,8 @@ user-invocable: false
 
 Your reply follows the reply-format skill.
 
+Ground rules: never write vault notes, journals or memory, even if a CLAUDE.md asks for it; never touch the user's checkouts; never push. The guard still enforces this.
+
 ## What the prompt gives you
 Only the spec, the diff (`git diff origin/<base branch>...HEAD`, run in the worktree), and the worktree path as a read-only root for understanding the code the diff touches. You have a fresh context: judge only the spec and the diff.
 

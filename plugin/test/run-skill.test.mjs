@@ -9,6 +9,8 @@ const text = fs.readFileSync(path.join(pluginDir, 'skills/run/SKILL.md'), 'utf8'
 const m = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
 const fmText = m ? m[1] : '';
 const body = m ? m[2] : '';
+// The same line is in every stage skill (agents.test.mjs).
+const GROUND_RULES = "Ground rules: never write vault notes, journals or memory, even if a CLAUDE.md asks for it; never touch the user's checkouts; never push. The guard still enforces this.";
 const fm = Object.fromEntries(
   fmText.split('\n').map((l) => l.match(/^([\w-]+):\s*(.*)$/)).filter(Boolean).map((k) => [k[1], k[2].trim()]),
 );
@@ -19,7 +21,7 @@ describe('run skill', () => {
     expect(fm.name).toBe('run');
     expect(fm.description).toBe('Run one step of the software factory (use only when the user runs /factory:run)');
     expect(fm['argument-hint']).toBe('[T-12] [--loop]');
-    expect(fm['allowed-tools']).toBe('Bash(node:*), Bash(printenv:*), Bash(rm -f:*), Bash(git -C:*), Agent, Read, Write');
+    expect(fm['allowed-tools']).toBe('Bash(HUSKY=0 node:*), Bash(printenv:*), Bash(rm -f:*), Bash(git -C:*), Agent, Read, Write');
     expect(fmText).not.toContain('disable-model-invocation');
   });
 
@@ -29,10 +31,32 @@ describe('run skill', () => {
   });
 
   it('mentions the CLI, reply file, session file and every agent type', () => {
-    for (const s of ['--mode', '--reply', 'nothing to do', 'runs/.sessions/', '${CLAUDE_PROJECT_DIR}', '${CLAUDE_SESSION_ID}', 'core/dist/cli.js']) {
+    for (const s of ['--mode', '--reply', 'nothing to do', '<root>/runs/.sessions/${CLAUDE_SESSION_ID}.json', '<root>/repos/<repo>.yaml', '${CLAUDE_SESSION_ID}', '<root>/core/dist/cli.js']) {
       expect(body).toContain(s);
     }
     for (const agent of Object.values(AGENT_FOR)) expect(body).toContain(`factory:${agent}`);
+  });
+
+  it('takes the factory root from printenv FACTORY_ROOT in step 0', () => {
+    const step0 = body.match(/^0\. .*$/m)[0];
+    expect(step0).toContain('`printenv FACTORY_ROOT`');
+    expect(step0).toContain('`factory: factory root not found; set FACTORY_ROOT or start in the factory folder`');
+    expect(body).toContain('replace `<root>` with the printed path');
+  });
+
+  it('never uses CLAUDE_PROJECT_DIR', () => {
+    expect(text).not.toContain('CLAUDE_PROJECT_DIR');
+  });
+
+  it('runs every core command with the HUSKY=0 prefix', () => {
+    const cmds = [...body.matchAll(/`([^`]*core\/dist\/cli\.js[^`]*)`/g)].map((m) => m[1]);
+    expect(cmds.length).toBeGreaterThanOrEqual(4);
+    for (const c of cmds) expect(c).toMatch(/^HUSKY=0 node "<root>\/core\/dist\/cli\.js"/);
+    for (const verb of ['next', 'check', 'ship', 'complete']) expect(cmds.some((c) => c.includes(` ${verb} `) || c.endsWith(` ${verb}`))).toBe(true);
+  });
+
+  it('has the ground-rules line', () => {
+    expect(body).toContain(GROUND_RULES);
   });
 
   it('checks the session env first (M1)', () => {
@@ -72,10 +96,10 @@ describe('run skill', () => {
   });
 
   it('quotes every path argument (M5)', () => {
-    expect(body).toContain('--reply "${CLAUDE_PROJECT_DIR}/runs/<task>/<step>.reply.md"');
+    expect(body).toContain('--reply "<root>/runs/<task>/<step>.reply.md"');
     for (const line of body.split('\n')) {
-      for (const m of line.matchAll(/`((?:node|rm -f|git -C) [^`]*)`/g)) {
-        expect(m[1], line).not.toMatch(/(^|\s)\$\{CLAUDE_PROJECT_DIR\}/);
+      for (const m of line.matchAll(/`((?:HUSKY=0 node|rm -f|git -C) [^`]*)`/g)) {
+        expect(m[1], line).not.toMatch(/(^|\s)<root>/);
       }
     }
   });
