@@ -1,6 +1,6 @@
 # the-software-factory: factory sessions
 
-A factory session is a Claude Code session started in this folder with `--plugin-dir plugin` to run `/factory:factory` (see `plugin/README.md`). These rules apply to factory sessions and to every agent they start. They override the parent folder's instructions for these sessions.
+A factory session is a Claude Code session started in this folder with `--plugin-dir plugin` to run `/factory:run` (see `plugin/README.md`). These rules apply to factory sessions and to every agent they start. They override the parent folder's instructions for these sessions.
 
 - A factory session runs only the factory. Do no other work in it.
 - Never write vault notes, journals or memory, wherever the vault lives. The spec writer may read the vault overview; nothing writes there.

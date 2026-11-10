@@ -10,11 +10,13 @@ Run on 2026-11-10, Claude Code 2.1.319, from a throwaway factory root `/private/
 - Symlinks `core` and `plugin` to the real folders.
 - `FACTORY_ROOT=/private/tmp/factory-smoke node core/dist/cli.js dev add --repo data --title "Add a line to README"` printed `T-1`; `dev ready T-1` printed `T-1 ready`.
 
+The command was renamed from its original name to `/factory:run` after this smoke run; the commands below use the new name.
+
 ## Runs (cwd `/private/tmp/factory-smoke`, `FACTORY_STORE=file`, stdin from `/dev/null`)
 
 Allowed tools for runs 1 and 2: `--allowedTools "Bash(node:*)" "Bash(printenv:*)" "Bash(rm -f:*)" "Bash(git -C:*)" Agent Read Write Grep Glob`.
 
-1. `claude -p --plugin-dir plugin <allowed> -- "/factory:factory"`
+1. `claude -p --plugin-dir plugin <allowed> -- "/factory:run"`
    - Output ended `T-1 spec_review`.
    - `runs/T-1/spec.reply.md` existed (a `<factory-result>` block and a `<factory-doc>` spec); `node core/dist/cli.js status` showed `spec_review: 1`.
    - The SubagentStop hook wrote the reply (the skill never wrote it itself).

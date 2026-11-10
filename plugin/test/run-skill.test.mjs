@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { AGENT_FOR } from '../../core/src/defaults.ts';
 
 const pluginDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const text = fs.readFileSync(path.join(pluginDir, 'skills/factory/SKILL.md'), 'utf8');
+const text = fs.readFileSync(path.join(pluginDir, 'skills/run/SKILL.md'), 'utf8');
 const m = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
 const fmText = m ? m[1] : '';
 const body = m ? m[2] : '';
@@ -13,11 +13,11 @@ const fm = Object.fromEntries(
   fmText.split('\n').map((l) => l.match(/^([\w-]+):\s*(.*)$/)).filter(Boolean).map((k) => [k[1], k[2].trim()]),
 );
 
-describe('factory skill', () => {
+describe('run skill', () => {
   it('has the frontmatter and no disable-model-invocation', () => {
     expect(m).not.toBeNull();
-    expect(fm.name).toBe('factory');
-    expect(fm.description).toBe('Run one step of the software factory (use only when the user runs /factory:factory)');
+    expect(fm.name).toBe('run');
+    expect(fm.description).toBe('Run one step of the software factory (use only when the user runs /factory:run)');
     expect(fm['argument-hint']).toBe('[T-12] [--loop]');
     expect(fm['allowed-tools']).toBe('Bash(node:*), Bash(printenv:*), Bash(rm -f:*), Bash(git -C:*), Agent, Read, Write');
     expect(fmText).not.toContain('disable-model-invocation');
@@ -64,7 +64,7 @@ describe('factory skill', () => {
 
   it('never composes a reply and stops on an agent error (I5)', () => {
     expect(body).toContain('run_in_background: false');
-    expect(body).toContain('factory: agent error: <one line>; re-run /factory:factory <task> to retry');
+    expect(body).toContain('factory: agent error: <one line>; re-run /factory:run <task> to retry');
     expect(body).toMatch(/do not run `complete`/);
     expect(body).toMatch(/unchanged/);
     expect(body).toMatch(/Never compose or edit a reply/);

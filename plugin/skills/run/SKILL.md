@@ -1,6 +1,6 @@
 ---
-name: factory
-description: Run one step of the software factory (use only when the user runs /factory:factory)
+name: run
+description: Run one step of the software factory (use only when the user runs /factory:run)
 argument-hint: [T-12] [--loop]
 allowed-tools: Bash(node:*), Bash(printenv:*), Bash(rm -f:*), Bash(git -C:*), Agent, Read, Write
 ---
@@ -26,7 +26,7 @@ The factory root is `${CLAUDE_PROJECT_DIR}` and this session's id is `${CLAUDE_S
    For `review`, give the reviewer only the spec, the output of `git -C "<worktree>" diff origin/<context.task.baseBranch>...HEAD`, and the worktree path as a read-only root for understanding the code the diff touches, with the Grep, Glob and Read rules above. Nothing else.
 6. Record the agent's reply.
    - If the Agent tool reports that the agent is still running, wait for it to finish before going on.
-   - If the Agent call errored, or returned no final message from the agent, do not run `complete`. Delete the session file, print `factory: agent error: <one line>; re-run /factory:factory <task> to retry` and stop.
+   - If the Agent call errored, or returned no final message from the agent, do not run `complete`. Delete the session file, print `factory: agent error: <one line>; re-run /factory:run <task> to retry` and stop.
    - The SubagentStop hook writes the reply file `${CLAUDE_PROJECT_DIR}/runs/<task>/<step>.reply.md`. If it is missing, write the text the Agent tool returned to that path with the Write tool, copied unchanged. Never compose or edit a reply, even one that looks malformed; the core handles a malformed reply.
    - Run `node "${CLAUDE_PROJECT_DIR}/core/dist/cli.js" --mode <mode> complete <task> <step> --reply "${CLAUDE_PROJECT_DIR}/runs/<task>/<step>.reply.md"`.
 7. Print the CLI's line (for example `T-12 spec_review`), delete the session file and stop. One step per invocation. If `complete` reports a `ClaimError` or a `StageError`, report it as it is, delete the session file and stop; do not retry.

@@ -17,20 +17,20 @@ Never run factory sessions or loops with `--dangerously-skip-permissions`. With 
 
 ### Long checks
 
-The `check` step runs the repo's check commands in one Bash call, which the skill gives a timeout of 600000 ms (10 minutes, the Bash tool's default maximum). The implementer runs the same commands with the same timeout. If the checks need longer, set `BASH_MAX_TIMEOUT_MS` and `BASH_DEFAULT_TIMEOUT_MS` in the shell that starts `claude`, for example `BASH_MAX_TIMEOUT_MS=1800000 BASH_DEFAULT_TIMEOUT_MS=1800000 claude --plugin-dir plugin ...`. The skill passes `timeout` `600000` explicitly, which overrides the default, so also raise that value in step 4 of `skills/factory/SKILL.md`.
+The `check` step runs the repo's check commands in one Bash call, which the skill gives a timeout of 600000 ms (10 minutes, the Bash tool's default maximum). The implementer runs the same commands with the same timeout. If the checks need longer, set `BASH_MAX_TIMEOUT_MS` and `BASH_DEFAULT_TIMEOUT_MS` in the shell that starts `claude`, for example `BASH_MAX_TIMEOUT_MS=1800000 BASH_DEFAULT_TIMEOUT_MS=1800000 claude --plugin-dir plugin ...`. The skill passes `timeout` `600000` explicitly, which overrides the default, so also raise that value in step 4 of `skills/run/SKILL.md`.
 
-If the timeout kills a check, no report is written and the task stays at `check`, claimed by this session. Recover with `/factory:factory T-n` in the same session, which keeps the same claimant and re-runs the step. A new session has a new claimant, so it can take the task only after the claim lapses (10 minutes). Nothing renews the claim during `check`; checks longer than the claim let another session take the task (planned for the next core plan).
+If the timeout kills a check, no report is written and the task stays at `check`, claimed by this session. Recover with `/factory:run T-n` in the same session, which keeps the same claimant and re-runs the step. A new session has a new claimant, so it can take the task only after the claim lapses (10 minutes). Nothing renews the claim during `check`; checks longer than the claim let another session take the task (planned for the next core plan).
 
 ## Run the factory (modes 2 and 3)
 
 A factory session needs a built core: run `cd core && npm run build` once (and after core changes), because `core/dist/` is not committed.
 
-- Mode 3, one step by hand: `/factory:factory`, or `/factory:factory T-12` for one task.
-- Mode 2, steady loop: `/loop 2m /factory:factory --loop`.
+- Mode 3, one step by hand: `/factory:run`, or `/factory:run T-12` for one task.
+- Mode 2, steady loop: `/loop 2m /factory:run --loop`.
 
 Each run does one step of one task and stops. Pause stops new claims and the skill reports `factory: paused`; a step that is already running still finishes. If the skill reports `factory: session env missing`, the session start hook's environment did not apply (for example after `/clear` or a resume): restart the factory session.
 
-If the stage agent errors or returns nothing, the skill records nothing and prints `factory: agent error: ...`. Re-run `/factory:factory T-n` in the same session to retry; the open run is reused.
+If the stage agent errors or returns nothing, the skill records nothing and prints `factory: agent error: ...`. Re-run `/factory:run T-n` in the same session to retry; the open run is reused.
 
 ### Known limits
 
