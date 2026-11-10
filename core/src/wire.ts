@@ -10,7 +10,7 @@ import { Engine } from './engine.js';
 import { LocalGitRepos } from './git.js';
 import { OctokitGitHub, type GitHub, type GitHubFor } from './github.js';
 import { FactoryConfig } from './factories.js';
-import { PatMissingError, readSecret, isReservedPatAccount, RESERVED_PAT_ACCOUNT, SecretMissingError } from './secrets.js';
+import { GhLoginMissingError, readGhToken, realExecFile, SecretMissingError, type ExecFile } from './secrets.js';
 import { FileStore, type BoardStore } from './store.js';
 import type { Mode } from './types.js';
 
@@ -44,19 +44,19 @@ export function findRoot(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = p
   }
 }
 
-/** One GitHub client per Keychain account, each created on its first call, so commands that never touch GitHub need no PAT. A failed read is not cached. */
+/** One GitHub client per gh login, each created on its first call, so commands that never touch GitHub read no token. A failed read is not cached. */
 class LazyGitHub implements GitHub {
   private inner: Promise<GitHub> | undefined;
   constructor(
-    private readonly account: string,
-    private readonly read: (account: string) => Promise<string>,
-    private readonly make: (pat: string) => GitHub,
+    private readonly user: string,
+    private readonly read: (user: string) => Promise<string>,
+    private readonly make: (token: string) => GitHub,
   ) {}
   private get gh(): Promise<GitHub> {
     if (!this.inner) {
-      const loading = this.read(this.account).then(
-        (pat) => this.make(pat),
-        (e: unknown) => { throw e instanceof SecretMissingError && !(e instanceof PatMissingError) ? new PatMissingError(this.account) : e; },
+      const loading = this.read(this.user).then(
+        (token) => this.make(token),
+        (e: unknown) => { throw e instanceof SecretMissingError && !(e instanceof GhLoginMissingError) ? new GhLoginMissingError(this.user) : e; },
       );
       loading.catch(() => { if (this.inner === loading) this.inner = undefined; });
       this.inner = loading;
@@ -80,16 +80,17 @@ class LazyGitHub implements GitHub {
   }
 }
 
-/** `GitHubFor` over the Keychain: lazy, and one client per account. */
+/** `GitHubFor` over the gh CLI logins (`gh auth token --user <ghUser>`): lazy, and one client per login. */
 export function lazyGitHubFor(
-  read: (account: string) => Promise<string> = (account) => readSecret(account),
-  make: (pat: string) => GitHub = (pat) => new OctokitGitHub(pat),
+  read?: (user: string) => Promise<string>,
+  make: (token: string) => GitHub = (token) => new OctokitGitHub(token),
+  exec: ExecFile = realExecFile,
 ): GitHubFor {
+  const readToken = read ?? ((user: string) => readGhToken(user, exec));
   const clients = new Map<string, GitHub>();
-  return (account) => {
-    if (isReservedPatAccount(account)) throw new Error(`ghUser ${RESERVED_PAT_ACCOUNT} is reserved`);
-    let c = clients.get(account);
-    if (!c) clients.set(account, (c = new LazyGitHub(account, read, make)));
+  return (user) => {
+    let c = clients.get(user);
+    if (!c) clients.set(user, (c = new LazyGitHub(user, readToken, make)));
     return c;
   };
 }

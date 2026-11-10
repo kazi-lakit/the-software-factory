@@ -1,13 +1,13 @@
 import { Octokit } from '@octokit/rest';
 import { isProtected, ProtectedBranchError } from './branchGuard.js';
 
-/** The client for a factory's PAT (its Keychain account). */
+/** The client for a factory's gh login (its `ghUser`). */
 export type GitHubFor = (ghUser: string) => GitHub;
 
 export type PrState = 'open' | 'merged' | 'closed';
 
 export interface GitHub {
-  /** Resolves the credential up front; rejects with PatMissingError when the factory has none. Clients without a lazy credential omit it. */
+  /** Resolves the credential up front; rejects with GhLoginMissingError when the factory's gh login is not logged in. Clients without a lazy credential omit it. */
   ensureReady?(): Promise<void>;
   openPr(p: { remote: string; head: string; base: string; title: string; body: string }): Promise<{ url: string; number: number }>;
   /** The open PR from `head` into `base` in the remote's repo, or null. */

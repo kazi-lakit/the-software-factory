@@ -10,7 +10,7 @@ import { IllegalInputError } from '../src/machine.js';
 import { FactoryConfig, type FactoryDef, type FactoryRepo } from '../src/factories.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
 import { nextTicket } from './nextTicket.js';
-import { PatMissingError, SecretMissingError } from '../src/secrets.js';
+import { GhLoginMissingError, SecretMissingError } from '../src/secrets.js';
 import { BlocksStore, DocTooLargeError, MAX_DOC_BYTES } from '../src/blocks/store.js';
 import { FakeBlocksData } from '../src/blocks/fakeData.js';
 import { PROTECTED_TASK_FIELDS } from '../src/blocks/schema.js';
@@ -243,9 +243,9 @@ describe('next across factories', () => {
     class AccountGitHub extends FakeGitHub {
       constructor(readonly account: string) { super(); }
     }
-    class MissingPatGitHub extends FakeGitHub {
-      constructor(private readonly account: string) { super(); }
-      private missing(): never { throw new PatMissingError(this.account); }
+    class NotLoggedInGitHub extends FakeGitHub {
+      constructor(private readonly user: string) { super(); }
+      private missing(): never { throw new GhLoginMissingError(this.user); }
       ensureReady(): Promise<void> { return this.missing(); }
       override openPr(): never { return this.missing(); }
       override findOpenPr(): never { return this.missing(); }
@@ -253,15 +253,15 @@ describe('next across factories', () => {
       override mergePr(): never { return this.missing(); }
     }
 
-    test('a missing PAT blocks only that factory\'s task; the other factory opens its PR with its own client', async () => {
-      const clients = new Map<string, GitHub>([['gh-a', new MissingPatGitHub('gh-a')], ['gh-b', new AccountGitHub('gh-b')]]);
+    test('a gh login that is not there blocks only that factory\'s task; the other factory opens its PR with its own client (R16)', async () => {
+      const clients = new Map<string, GitHub>([['gh-a', new NotLoggedInGitHub('gh-a')], ['gh-b', new AccountGitHub('gh-b')]]);
       const asked: string[] = [];
       const { store, engine, git } = setup({ ...TWO(), githubFor: (acct) => { asked.push(acct); return clients.get(acct)!; } });
       await putIn(store, 'a', { status: 'review', stage: 'ship', branch: 'factory/T-1-x' });
       await putIn(store, 'b', { status: 'review', stage: 'ship', branch: 'factory/T-2-x' });
       await store.setSettings({ factories: { b: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: true } }, repos: {} } } });
       await nextTicket(engine, 'T-1');
-      expect(await engine.ship('T-1')).toMatchObject({ status: 'blocked', blockedReason: 'PAT gh-a not in Keychain' });
+      expect(await engine.ship('T-1')).toMatchObject({ status: 'blocked', blockedReason: 'gh account gh-a is not logged in (run: gh auth login)' });
       expect(git.pushes).toEqual([]);
       await nextTicket(engine, 'T-2');
       expect(await engine.ship('T-2')).toMatchObject({ status: 'pr_open', prUrl: 'https://github.com/org/api/pull/1' });
@@ -1345,7 +1345,7 @@ describe('withRetry', () => {
   });
 
   test('never retries a SecretMissingError', async () => {
-    const fn = vi.fn().mockRejectedValue(new SecretMissingError('github-pat not found in Keychain'));
+    const fn = vi.fn().mockRejectedValue(new SecretMissingError('blocks-credential not found in Keychain'));
     await expect(withRetry(fn, { tries: 3, baseMs: 500 })).rejects.toBeInstanceOf(SecretMissingError);
     expect(fn).toHaveBeenCalledTimes(1);
   });

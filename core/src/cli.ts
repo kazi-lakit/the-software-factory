@@ -7,7 +7,7 @@ import { parseAgentReply } from './agentReply.js';
 import { NO_FACTORIES, UnknownFactoryError, type Engine } from './engine.js';
 import { GATE_DOC } from './gates.js';
 import * as owner from './owner.js';
-import { isReservedPatAccount, realExecFile, type ExecFile } from './secrets.js';
+import { realExecFile, type ExecFile } from './secrets.js';
 import { isValidId } from './factories.js';
 import { buildImport, checkMigration, hasEntry, migrate } from './migrate.js';
 import { ForbiddenError, OwnerOnlyError } from './boardStore.js';
@@ -167,7 +167,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       const loaded = new Set(s.factories.map((f) => f.factoryId));
       for (const d of await store.listFactoryDefs()) {
         if (!loaded.has(d.factoryId)) continue;
-        const ok = !isReservedPatAccount(d.ghUser) && (await hasEntry(exec, d.ghUser).catch(() => false));
+        const ok = await hasEntry(exec, d.ghUser).catch(() => false);
         present.set(d.factoryId, ok);
         try {
           await store.setFactoryHealth({ factoryId: d.factoryId, ghLoggedIn: ok, checkedAt: new Date().toISOString() });

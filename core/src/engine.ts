@@ -10,7 +10,7 @@ import { diffEvents } from './history.js';
 import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
 import type { Checks } from './checksSchema.js';
 import type { FactoryConfig, FactoryDef, FactoryRepo } from './factories.js';
-import { PatMissingError, SecretMissingError } from './secrets.js';
+import { GhLoginMissingError, SecretMissingError } from './secrets.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from './limits.js';
 import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
 import {
@@ -22,7 +22,7 @@ import type { AgentResult, AgentStep, DocKind, FactoryEvent, Gate, Mode, Setting
 export interface EngineDeps {
   store: BoardStore;
   git: GitRepos;
-  /** The GitHub client for a factory's PAT account. */
+  /** The GitHub client for a factory's gh login (`ghUser`). */
   githubFor: GitHubFor;
   /** The factory definitions, read from the store each time `next`, `sync` or `status` runs. */
   factories: () => Promise<FactoryConfig>;
@@ -345,12 +345,12 @@ export class Engine {
     if (isMainRef(claimed.baseBranch)) return block(claimed, 'base main is never a target');
     try {
       const github = this.deps.githubFor(def.ghUser);
-      await github.ensureReady?.(); // before any push: a missing PAT must not leave a pushed branch behind
+      await github.ensureReady?.(); // before any push: a missing gh login must not leave a pushed branch behind
       return await this.shipTo({ github, def, cfg, claimed, branch, settings, block });
     } catch (e) {
-      // No PAT for this factory: block the task until the owner adds the Keychain item and answers. Other factories are unaffected.
-      if (!(e instanceof PatMissingError)) throw e;
-      return block(await this.claimedAt(taskId, 'ship'), `PAT ${e.account} not in Keychain`);
+      // The factory's gh login is not logged in: block the task until the owner runs gh auth login and answers. Other factories are unaffected.
+      if (!(e instanceof GhLoginMissingError)) throw e;
+      return block(await this.claimedAt(taskId, 'ship'), e.message);
     }
   }
 

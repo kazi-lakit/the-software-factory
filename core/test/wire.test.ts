@@ -1,7 +1,7 @@
 import { resolve } from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 import type { BlocksCredential } from '../src/blocks/credential.js';
-import { PatMissingError, SecretMissingError } from '../src/secrets.js';
+import { GhLoginMissingError, SecretMissingError, type ExecFile } from '../src/secrets.js';
 import { FakeGitHub } from '../src/github.js';
 import { lazyGitHubFor, LazyBlocksStore, wire } from '../src/wire.js';
 import { MemoryStore, type BoardStore } from '../src/store.js';
@@ -104,23 +104,40 @@ describe('lazyGitHubFor', () => {
     const reads: string[] = [];
     const made: string[] = [];
     const githubFor = lazyGitHubFor(async (acct) => { reads.push(acct); return `pat-${acct}`; }, (pat) => { made.push(pat); return new FakeGitHub(); });
-    const a = githubFor('github-pat:a');
-    expect(githubFor('github-pat:a')).toBe(a);
-    expect(githubFor('github-pat:b')).not.toBe(a);
+    const a = githubFor('user-a');
+    expect(githubFor('user-a')).toBe(a);
+    expect(githubFor('user-b')).not.toBe(a);
     expect(reads).toEqual([]);
     await a.prState('https://github.com/o/r/pull/1').catch(() => undefined);
     await a.prState('https://github.com/o/r/pull/1').catch(() => undefined);
-    expect(reads).toEqual(['github-pat:a']);
-    expect(made).toEqual(['pat-github-pat:a']);
+    expect(reads).toEqual(['user-a']);
+    expect(made).toEqual(['pat-user-a']);
   });
 
-  test('a missing secret becomes PatMissingError, and the reserved account is refused', async () => {
+  test('a missing login becomes GhLoginMissingError with the gh text (R16)', async () => {
     const githubFor = lazyGitHubFor(async () => { throw new SecretMissingError('x not found'); }, () => new FakeGitHub());
-    const err = await githubFor('github-pat:a').ensureReady!().catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(PatMissingError);
-    expect(err).toMatchObject({ account: 'github-pat:a', message: 'PAT github-pat:a not in Keychain' });
-    expect(() => githubFor(' Blocks-Credential ')).toThrow('ghUser blocks-credential is reserved');
-    expect(() => githubFor('blocks-credential')).toThrow('ghUser blocks-credential is reserved');
+    const err = await githubFor('user-a').ensureReady!().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GhLoginMissingError);
+    expect(err).toMatchObject({ user: 'user-a', message: 'gh account user-a is not logged in (run: gh auth login)' });
+  });
+
+  test('by default it reads the token of the factory login with gh auth token (R16)', async () => {
+    const calls: Array<[string, string[]]> = [];
+    const exec: ExecFile = async (file, args) => { calls.push([file, args]); return { code: 0, stdout: 'tok\n', stderr: '' }; };
+    const made: string[] = [];
+    const githubFor = lazyGitHubFor(undefined, (tok) => { made.push(tok); return new FakeGitHub(); }, exec);
+    await githubFor('octocat').ensureReady!();
+    expect(calls).toEqual([['gh', ['auth', 'token', '--hostname', 'github.com', '--user', 'octocat']]]);
+    expect(made).toEqual(['tok']);
+  });
+
+  test('blocks-credential is just a name now: no Keychain read, no reservation (R16)', async () => {
+    const calls: string[] = [];
+    const exec: ExecFile = async (file) => { calls.push(file); return { code: 1, stdout: '', stderr: '' }; };
+    const githubFor = lazyGitHubFor(undefined, () => new FakeGitHub(), exec);
+    const err = await githubFor('blocks-credential').ensureReady!().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GhLoginMissingError);
+    expect(calls).toEqual(['gh']);
   });
 
   test('a failed read is not cached', async () => {

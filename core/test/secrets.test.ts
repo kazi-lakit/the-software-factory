@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { githubUser, readGhToken, readSecret, SecretMissingError, type ExecFile } from '../src/secrets.js';
+import { GhLoginMissingError, readGhToken, readSecret, SecretMissingError, type ExecFile } from '../src/secrets.js';
 
 describe('readSecret', () => {
   test('runs security with the exact args and trims the trailing newline', async () => {
@@ -8,8 +8,8 @@ describe('readSecret', () => {
       calls.push([file, args]);
       return { code: 0, stdout: 'tok123\n', stderr: '' };
     };
-    expect(await readSecret('github-pat', exec)).toBe('tok123');
-    expect(calls).toEqual([['security', ['find-generic-password', '-s', 'the-software-factory', '-a', 'github-pat', '-w']]]);
+    expect(await readSecret('blocks-credential', exec)).toBe('tok123');
+    expect(calls).toEqual([['security', ['find-generic-password', '-s', 'the-software-factory', '-a', 'blocks-credential', '-w']]]);
   });
 
   test('non-zero exit rejects with the exact message and leaks no output', async () => {
@@ -50,10 +50,18 @@ describe('readGhToken', () => {
   });
 });
 
-describe('githubUser', () => {
-  test('defaults to kazi-lakit and honours FACTORY_GH_USER', () => {
-    expect(githubUser({})).toBe('kazi-lakit');
-    expect(githubUser({ FACTORY_GH_USER: 'someone' })).toBe('someone');
-    expect(githubUser({ FACTORY_GH_USER: '' })).toBe('kazi-lakit');
+describe('GhLoginMissingError', () => {
+  test('is a SecretMissingError naming the login, with the readGhToken text (R16)', () => {
+    const e = new GhLoginMissingError('octocat');
+    expect(e).toBeInstanceOf(SecretMissingError);
+    expect(e.user).toBe('octocat');
+    expect(e.name).toBe('GhLoginMissingError');
+    expect(e.message).toBe('gh account octocat is not logged in (run: gh auth login)');
+  });
+
+  test('readGhToken rejects with it', async () => {
+    const err = await readGhToken('octocat', async () => ({ code: 1, stdout: '', stderr: '' })).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GhLoginMissingError);
+    expect(err).toMatchObject({ user: 'octocat' });
   });
 });

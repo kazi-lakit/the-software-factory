@@ -27,38 +27,28 @@ export class SecretMissingError extends Error {
   }
 }
 
-/** A factory's PAT is not in the Keychain. */
-export class PatMissingError extends SecretMissingError {
-  constructor(public readonly account: string) {
-    super(`PAT ${account} not in Keychain`);
-    this.name = 'PatMissingError';
+/** A factory's gh login is not logged in on this machine (no token from `gh auth token`). */
+export class GhLoginMissingError extends SecretMissingError {
+  constructor(public readonly user: string) {
+    super(`gh account ${user} is not logged in (run: gh auth login)`);
+    this.name = 'GhLoginMissingError';
   }
 }
-
-export const RESERVED_PAT_ACCOUNT = 'blocks-credential';
-
-/** True for the reserved account, ignoring case and surrounding spaces. */
-export const isReservedPatAccount = (account: string): boolean => account.trim().toLowerCase() === RESERVED_PAT_ACCOUNT;
 
 export const KEYCHAIN_SERVICE = 'the-software-factory';
 const SERVICE = KEYCHAIN_SERVICE;
 
-/** Reads a secret from the macOS Keychain; `name` is the account (`blocks-credential`, or a factory's `ghUser`). Error messages never include command output. */
+/** Reads a secret from the macOS Keychain; `name` is the account (`blocks-credential`). Error messages never include command output. */
 export async function readSecret(name: string, exec: ExecFile = realExecFile): Promise<string> {
   const { code, stdout } = await exec('security', ['find-generic-password', '-s', SERVICE, '-a', name, '-w']);
   if (code !== 0) throw new SecretMissingError(`${name} not found in Keychain (service ${SERVICE})`);
   return stdout.replace(/\r?\n$/, '');
 }
 
-/** The gh CLI login whose token the factory uses for GitHub API calls: `FACTORY_GH_USER`, else `kazi-lakit`. */
-export function githubUser(env: NodeJS.ProcessEnv = process.env): string {
-  return env.FACTORY_GH_USER || 'kazi-lakit';
-}
-
 /** Reads the GitHub token of a gh CLI login (`gh auth token`). Error messages never include command output. */
 export async function readGhToken(user: string, exec: ExecFile = realExecFile): Promise<string> {
   const { code, stdout } = await exec('gh', ['auth', 'token', '--hostname', 'github.com', '--user', user]);
   const token = stdout.trim();
-  if (code !== 0 || !token) throw new SecretMissingError(`gh account ${user} is not logged in (run: gh auth login)`);
+  if (code !== 0 || !token) throw new GhLoginMissingError(user);
   return token;
 }
