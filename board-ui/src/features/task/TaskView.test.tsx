@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAllUnsent } from "../../lib/unsent";
+import { factory } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
 import { TaskView } from "./TaskView";
 
@@ -108,5 +109,16 @@ describe("TaskView", () => {
     expect(await screen.findByText(/was not found/)).toHaveTextContent("Task T-404 was not found.");
     fireEvent.click(screen.getByRole("link", { name: "Back to the Board" }));
     expect(onNavigate).toHaveBeenCalledWith("/");
+  });
+});
+
+describe("TaskView factory", () => {
+  it("shows_the_factory_name_next_to_the_repo", async () => {
+    resetFakeBoard(factory("delta", ["api"], { name: "Delta team" }));
+    const task = await seedTask({ factoryId: "delta", repo: "api" });
+    renderTask(task.taskId);
+    const header = await screen.findByRole("region", { name: "Task details" });
+    await waitFor(() => expect(within(header).getByText("Factory").nextElementSibling).toHaveTextContent("Delta team"));
+    expect(within(header).getByText("Repo").nextElementSibling).toHaveTextContent("api");
   });
 });

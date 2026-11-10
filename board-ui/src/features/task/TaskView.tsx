@@ -7,6 +7,7 @@ import { AnswerPanel } from "./AnswerPanel";
 import { DocVersions } from "./DocVersions";
 import { GatePanel } from "./GatePanel";
 import { TaskActions } from "./TaskActions";
+import { useFactories } from "../factories/useFactories";
 import { useTask } from "./useTask";
 
 const GITHUB = "https://github.com/";
@@ -110,6 +111,8 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
 
 function TaskHeader({ onReload, task }: { onReload: () => Promise<Task | undefined>; task: Task }) {
   const prUrl = githubUrl(task.prUrl);
+  // The factory's name when it is visible, else its id.
+  const factoryName = useFactories().byId.get(task.factoryId)?.def.name ?? task.factoryId;
   // After a cancel the Cancel button is gone; focus lands on the task's heading instead of the page.
   const heading = useRef<HTMLHeadingElement>(null);
   return (
@@ -117,6 +120,7 @@ function TaskHeader({ onReload, task }: { onReload: () => Promise<Task | undefin
       <h2 ref={heading} tabIndex={-1}>{task.title}</h2>
       <dl className="sf-facts">
         <div><dt>Task</dt><dd className="sf-mono">{task.taskId}</dd></div>
+        <div><dt>Factory</dt><dd>{factoryName}</dd></div>
         <div><dt>Repo</dt><dd>{task.repo}</dd></div>
         <div><dt>Base</dt><dd className="sf-mono">{task.baseBranch}</dd></div>
         <div><dt>Branch</dt><dd className="sf-mono">{task.branch ?? "—"}</dd></div>

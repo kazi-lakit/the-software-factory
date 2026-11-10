@@ -841,3 +841,33 @@ textarea.sf-input {
     width: 100%;
   }
 }
+
+/* Waiting for you */
+.sf-strip {
+  background: var(--sf-accent-soft);
+  border: 1px solid var(--sf-accent);
+  border-radius: var(--sf-radius);
+  margin-bottom: 12px;
+  padding: 8px 12px;
+}
+
+.sf-strip-list {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sf-strip-item {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.sf-strip-id,
+.sf-strip-status {
+  color: var(--sf-muted);
+  font-size: var(--sf-size-small);
+}

@@ -6,18 +6,15 @@ import type { ReactElement } from "react";
 import type { BoardStore, RepoId, Status, Task } from "@factory/core";
 import { BlocksStore } from "../../../core/src/blocks/store";
 import { FakeBlocksData, newFakeStorage } from "../../../core/src/blocks/fakeData";
-import { seed, seedBlocksFactories } from "../../../core/test/factoryFixtures";
-import { REPO_IDS } from "../lib/repoIds";
+import { blocksFactories, seedBlocksFactories, type Factories } from "./factories";
 
 type FakeBoard = { owner: BlocksStore; core: BlocksStore; ownerData: FakeBlocksData };
 
 let current: FakeBoard | undefined;
 
 /** A fresh shared project: the owner's store (what the page uses) and the core's (to move tasks and write docs). */
-export function resetFakeBoard(): FakeBoard {
+export function resetFakeBoard(factories: Factories = blocksFactories()): FakeBoard {
   const storage = newFakeStorage();
-  // plan 6 Task 7/8 replaces this: the factory and its repos come from the store.
-  const factories = seed("blocks", [...REPO_IDS]);
   const ownerData = new FakeBlocksData("factory-owner", { storage });
   seedBlocksFactories(ownerData, factories);
   current = {
@@ -47,12 +44,12 @@ export const proxyBoardStore = new Proxy({} as BoardStore, {
 
 /** Creates a task as the owner, then (as the core) moves it to `status` with the given core fields. */
 export async function seedTask(
-  input: { title?: string; description?: string; repo?: RepoId } = {},
+  input: { title?: string; description?: string; factoryId?: string; repo?: RepoId } = {},
   status: Status = "inbox",
   coreFields: Partial<Task> = {}
 ): Promise<Task> {
   const { core, owner } = fakeBoard();
-  const task = await owner.createTask({ factoryId: "blocks", description: input.description ?? "", repo: input.repo ?? "data", title: input.title ?? "A task" });
+  const task = await owner.createTask({ factoryId: input.factoryId ?? "blocks", description: input.description ?? "", repo: input.repo ?? "data", title: input.title ?? "A task" });
   if (status === "inbox" && Object.keys(coreFields).length === 0) return task;
   return core.updateTask(task.taskId, task.version, { status, ...coreFields });
 }

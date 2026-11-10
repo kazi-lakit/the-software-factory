@@ -41,3 +41,13 @@ describe("TaskCard", () => {
     expect(onNavigate).toHaveBeenCalledWith("/tasks/T-7");
   });
 });
+
+describe("TaskCard factory tag", () => {
+  it("tags_the_id_with_the_factory_only_when_asked", () => {
+    render(<TaskCard task={task({ factoryId: "delta" })} showFactory onNavigate={vi.fn()} />);
+    expect(screen.getByText("delta · T-7")).toBeInTheDocument();
+    cleanup();
+    render(<TaskCard task={task({ factoryId: "delta" })} onNavigate={vi.fn()} />);
+    expect(screen.getByText("T-7")).toBeInTheDocument();
+  });
+});

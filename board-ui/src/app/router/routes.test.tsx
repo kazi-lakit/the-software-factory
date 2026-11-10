@@ -29,11 +29,19 @@ vi.mock("../../lib/board", () => ({
     getSettings: vi.fn(async () => ({ factories: { blocks: { factory: { gates: { spec: true, plan: true, pr: true }, maxParallel: 1, maxTurnsPerStage: 1, maxCostPerTaskUsd: 1, paused: false }, repos: {} } } })),
     getTask: vi.fn(async (id: string) => ({
       answer: null, attempt: 0, baseBranch: "dev", blockedReason: null, branch: null, claimBy: null, claimUntil: null, costUsd: 0, description: "",
-      gateOverrides: {}, prUrl: null, question: null, repo: "data", stage: null, status: "inbox", taskId: id, title: "Routed task", version: 1
+      factoryId: "blocks", gateOverrides: {}, prUrl: null, question: null, repo: "data", stage: null, status: "inbox", taskId: id, title: "Routed task", version: 1
     })),
     listApprovals: vi.fn(async () => []),
     listDocs: vi.fn(async () => []),
     listEvents: vi.fn(async () => []),
+    listFactoryDefs: vi.fn(async () => [{
+      active: true, docsPath: "/docs", factoryId: "blocks", gitEmail: "f@example.com", gitName: "Factory", name: "Blocks",
+      patAccount: "github-pat:blocks", protectedBranches: ["dev", "stg", "main"], version: 1
+    }]),
+    listFactoryRepos: vi.fn(async () => [{
+      baseBranch: "dev", checks: { client: { build: "b", cwd: "c", install: "i", lint: "l", test: "t", typecheck: "tc" }, e2e: "off", server: { build: "b", cwd: "s", test: "t" } },
+      factoryId: "blocks", remote: "git@github.com:org/iam.git", repoId: "iam", version: 1
+    }]),
     listRuns: vi.fn(async () => []),
     listTasks: vi.fn(async () => [])
   }

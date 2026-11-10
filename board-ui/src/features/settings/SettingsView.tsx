@@ -6,8 +6,7 @@ import {
   type Gate, type RepoId, type RepoSettings, type RepoSettingsPatch, type Settings, type StoredSettings
 } from "@factory/core";
 import { boardStore } from "../../lib/board";
-import { BLOCKS_FACTORY, blocksSettings } from "../../lib/blocksSettings";
-import { REPO_IDS } from "../../lib/repoIds";
+import { BLOCKS_FACTORY, blocksSettings, REPO_IDS } from "../../lib/blocksSettings";
 import { HISTORY_KEY } from "../history/useHistory";
 import { describeWriteError, now, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 import { SETTINGS_KEY, useSettings } from "./useSettings";

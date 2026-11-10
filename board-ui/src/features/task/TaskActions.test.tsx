@@ -2,6 +2,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenError, VersionConflictError, type Task } from "@factory/core";
 import { clearAllUnsent } from "../../lib/unsent";
+import { factory, merge } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
 import { TaskActions } from "./TaskActions";
 
@@ -150,5 +151,17 @@ describe("TaskActions", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel task" }));
     fireEvent.click(screen.getByRole("button", { name: "Yes, cancel it" }));
     await waitFor(() => expect(onCancelled).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("TaskActions edit with several factories", () => {
+  it("lists_only_the_tasks_factorys_repos", async () => {
+    resetFakeBoard(merge(factory("alpha", ["api", "web"]), factory("delta", ["api", "ui"])));
+    const task = await seedTask({ factoryId: "delta", repo: "api" });
+    renderActions(task);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const repo = within(screen.getByRole("form", { name: "Edit task" })).getByLabelText("Repo");
+    await waitFor(() => expect(within(repo).getAllByRole("option").map((o) => o.textContent)).toEqual(["api", "ui"]));
+    expect(repo).toHaveValue("api");
   });
 });

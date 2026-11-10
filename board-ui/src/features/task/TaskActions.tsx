@@ -5,7 +5,7 @@ import {
   canMove, cancelTask, editTask, EDITABLE_STATUSES, markReady, type RepoId, type Task, type TaskEdit
 } from "@factory/core";
 import { boardStore } from "../../lib/board";
-import { REPO_IDS } from "../../lib/repoIds";
+import { useFactories } from "../factories/useFactories";
 import { clearUnsent, hasUnsent, useUnsent } from "../../lib/unsent";
 import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "./writeOutcome";
 
@@ -174,6 +174,9 @@ function EditForm({ onDone, onReload, task }: { onDone: () => void; onReload: Re
   const [problem, setProblem] = useState<WriteProblem>();
   const [busy, setBusy] = useState(false);
   const invalidate = useInvalidateAfterWrite();
+  // The task's own factory's repos; the current repo stays listed even when its factory is not visible.
+  const factoryRepos = useFactories().byId.get(task.factoryId)?.repos.map((r) => r.repoId) ?? [];
+  const repoOptions = factoryRepos.includes(value("repo")) ? factoryRepos : [value("repo"), ...factoryRepos];
 
   /** Only the owner's own changes, so a save never writes back a value someone else changed meanwhile. */
   const ownChanges = (): EditField[] => EDIT_FIELDS.filter((field) => value(field) !== origin[field]);
@@ -240,7 +243,7 @@ function EditForm({ onDone, onReload, task }: { onDone: () => void; onReload: Re
         <label className="sf-field" htmlFor={`${formId}-repo`}>
           <span>Repo</span>
           <select id={`${formId}-repo`} className="sf-select" value={value("repo")} onChange={(event) => setter("repo")(event.target.value)}>
-            {REPO_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
+            {repoOptions.map((id) => <option key={id} value={id}>{id}</option>)}
           </select>
         </label>
         <label className="sf-field" htmlFor={`${formId}-base`}>
