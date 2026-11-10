@@ -10,7 +10,7 @@ function task(over: Partial<Task> = {}): Task {
   return {
     taskId: 'T-1', factoryId: 'blocks', title: 't', description: 'd', repo: 'os', baseBranch: 'dev',
     status: 'ready', stage: null, branch: null, prUrl: null, attempt: 0,
-    blockedReason: null, question: null, answer: null, gateOverrides: {},
+    blockedReason: null, question: null, answer: null, gateOverrides: {}, dependsOn: [],
     claimBy: null, claimUntil: null, costUsd: 0, version: 1, ...over,
   };
 }

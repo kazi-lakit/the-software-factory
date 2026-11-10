@@ -10,7 +10,7 @@ export function followInApp(event: MouseEvent<HTMLAnchorElement>, href: string, 
 }
 
 /** `showFactory` (the Board shows every factory) tags the id with the task's factory. */
-export function TaskCard({ onNavigate, showFactory = false, task }: { onNavigate: (path: string) => void; showFactory?: boolean; task: Task }) {
+export function TaskCard({ onNavigate, showFactory = false, task, waitingOn = [] }: { onNavigate: (path: string) => void; showFactory?: boolean; task: Task; waitingOn?: string[] }) {
   const href = taskPath(task.taskId);
   const needsYou = NEEDS_YOU.has(task.status);
   const firstLine = task.status === "blocked" && task.question ? task.question.split("\n")[0]?.trim() : undefined;
@@ -36,6 +36,7 @@ export function TaskCard({ onNavigate, showFactory = false, task }: { onNavigate
           ))}
         </span>
       </div>
+      {waitingOn.length > 0 ? <p className="sf-card-waiting">Waiting on {waitingOn.join(", ")}</p> : null}
       {firstLine ? <p className="sf-card-question">{firstLine}</p> : null}
       {cta ? (
         <a className="sf-card-cta" href={href} onClick={(event) => followInApp(event, href, onNavigate)}>

@@ -92,6 +92,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     return makeEngine({ root: findRoot(), mode, store: kind, log: io.err });
   };
 
+  const depends = (v?: string) => (v === undefined ? {} : { dependsOn: v.split(',').map((x) => x.trim()).filter(Boolean) });
   const printJson = (v: unknown) => io.out(JSON.stringify(v, null, 2));
 
   program
@@ -105,7 +106,10 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
         throw e instanceof UnknownFactoryError ? new CliExit(e.message, 1, true) : e;
       });
       // Paused and inactive factories also return no ticket: say so, so a loop's owner is not left guessing.
-      if (outcome.kind === 'none') return io.out(outcome.reason === 'no-factories' ? NO_FACTORIES : outcome.reason);
+      if (outcome.kind === 'none') {
+        if (outcome.reason === 'waiting') return io.out(`${outcome.taskId} is waiting on ${outcome.waitingOn.join(', ')}`);
+        return io.out(outcome.reason === 'no-factories' ? NO_FACTORIES : outcome.reason);
+      }
       const { ticket } = outcome;
       if (o.json) return printJson(ticket);
       io.out(`${ticket.taskId} ${ticket.step} (worktree ${ticket.worktree})`);
@@ -202,8 +206,9 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .option('--description-file <path>', 'file with the task description')
     .option('--base <branch>', 'base branch (default dev; never main)')
     .option('--ready', 'start in ready instead of inbox')
+    .option('--depends-on <ids>', 'comma-separated task ids this task waits for')
     .option('--json', 'print the task as JSON')
-    .action(async (o: { factory?: string; repo: string; title: string; description?: string; descriptionFile?: string; base?: string; ready?: boolean; json?: boolean }, cmd: Command) => {
+    .action(async (o: { factory?: string; repo: string; title: string; description?: string; descriptionFile?: string; base?: string; ready?: boolean; dependsOn?: string; json?: boolean }, cmd: Command) => {
       if ((o.description === undefined) === (o.descriptionFile === undefined)) {
         throw new CliExit('pass exactly one of --description or --description-file', 1);
       }
@@ -218,7 +223,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       }
       const { store } = await open(cmd);
       const t = await owner.createTaskAsCore(store, () => new Date(), {
-        factoryId: await pickFactory(store, o.factory), title: o.title, description, repo, ...(o.base ? { baseBranch: o.base } : {}), ready: o.ready === true,
+        factoryId: await pickFactory(store, o.factory), title: o.title, description, repo, ...(o.base ? { baseBranch: o.base } : {}), ready: o.ready === true, ...depends(o.dependsOn),
       });
       if (o.json) return printJson(t);
       io.out(`${t.taskId} created in ${t.status}`);
@@ -289,11 +294,12 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .requiredOption('--title <title>', 'task title')
     .option('--description <text>', 'task description', '')
     .option('--base <branch>', 'base branch')
-    .action(async (o: { factory?: string; repo: string; title: string; description: string; base?: string }, cmd: Command) => {
+    .option('--depends-on <ids>', 'comma-separated task ids this task waits for')
+    .action(async (o: { factory?: string; repo: string; title: string; description: string; base?: string; dependsOn?: string }, cmd: Command) => {
       const repo = repoId('--repo', o.repo);
       const store = await openDev(cmd);
       const t = await owner.createTask(store, now, {
-        factoryId: await pickFactory(store, o.factory), title: o.title, description: o.description, repo, ...(o.base ? { baseBranch: o.base } : {}),
+        factoryId: await pickFactory(store, o.factory), title: o.title, description: o.description, repo, ...(o.base ? { baseBranch: o.base } : {}), ...depends(o.dependsOn),
       });
       io.out(t.taskId);
     });

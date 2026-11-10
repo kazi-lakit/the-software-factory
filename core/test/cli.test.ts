@@ -515,6 +515,31 @@ describe('migrate', () => {
   });
 });
 
+describe('dependencies', () => {
+  test('next T-2 prints what it waits on', async () => {
+    const { store, out, go } = setup();
+    await put(store, { status: 'inbox' });
+    await put(store, { status: 'ready', dependsOn: ['T-1'] });
+    expect(await go('next', 'T-2')).toBe(0);
+    expect(out).toEqual(['T-2 is waiting on T-1']);
+  });
+
+  test('new --depends-on stores the list', async () => {
+    const { store, go } = setup();
+    await put(store, {});
+    await put(store, {});
+    expect(await go('new', '--repo', 'data', '--title', 'X', '--description', 'd', '--depends-on', 'T-1, T-2')).toBe(0);
+    expect((await store.getTask('T-3')).dependsOn).toEqual(['T-1', 'T-2']);
+  });
+
+  test('dev add --depends-on stores the list', async () => {
+    const { store, go } = setup();
+    await put(store, {});
+    expect(await go('dev', 'add', '--repo', 'data', '--title', 'X', '--depends-on', 'T-1')).toBe(0);
+    expect((await store.getTask('T-2')).dependsOn).toEqual(['T-1']);
+  });
+});
+
 describe('new', () => {
   const dir = () => mkdtempSync(join(tmpdir(), 'factory-new-'));
 

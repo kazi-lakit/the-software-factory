@@ -6,6 +6,7 @@ import { AGENT_FOR, DEFAULT_SETTINGS } from './defaults.js';
 import { GATE_DOC, resolveGates, resolveSettings, shouldMerge, validApproval } from './gates.js';
 import type { GitRepos } from './git.js';
 import { PrBaseMismatchError, type GitHub, type GitHubFor } from './github.js';
+import { unfinishedDeps } from './dependencies.js';
 import { diffEvents } from './history.js';
 import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
 import type { Checks } from './checksSchema.js';
@@ -53,7 +54,8 @@ export interface Ticket {
 }
 
 /** `no-factories`: the Board has no factory definition at all (before the first Import); nothing was changed. */
-export type NextOutcome = { kind: 'ticket'; ticket: Ticket } | { kind: 'none'; reason: 'nothing to do' | 'paused' | 'inactive' | 'no-factories' };
+export type NextOutcome = { kind: 'ticket'; ticket: Ticket } | { kind: 'none'; reason: 'nothing to do' | 'paused' | 'inactive' | 'no-factories' }
+  | { kind: 'none'; reason: 'waiting'; taskId: string; waitingOn: string[] };
 
 /** What the CLI prints for `no-factories`. */
 export const NO_FACTORIES = 'no factories on the Board; run factory migrate --check';
@@ -251,10 +253,14 @@ export class Engine {
     if (target && targetDef) {
       if (this.settingsFor(stored, target).paused) return { kind: 'none', reason: 'paused' };
       if (!targetDef.active) return { kind: 'none', reason: 'inactive' };
+      // A named task not started yet waits for its dependencies; one past ready is never held back.
+      const waitingOn = target.status === 'ready' ? unfinishedDeps(target, tasks) : [];
+      if (waitingOn.length > 0) return { kind: 'none', reason: 'waiting', taskId: target.taskId, waitingOn };
     }
     const candidates = tasks
       .filter((t) => openIds.has(t.factoryId) && hasRoom(t.factoryId) && cfg.repo(t.factoryId, t.repo))
       .filter((t) => !this.settingsFor(stored, t).paused)
+      .filter((t) => taskId !== undefined || t.status !== 'ready' || unfinishedDeps(t, tasks).length === 0)
       .filter((t) => (taskId === undefined ? workable(t) && claimExpired(t, now()) : t.taskId === taskId && workable(t)))
       .sort((a, b) => taskNum(a.taskId) - taskNum(b.taskId));
 

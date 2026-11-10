@@ -9,9 +9,10 @@ import { describe, expect, it } from "vitest";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Counted when this guard was written (T-18). A new control makes the count test fail, so it is looked at. */
-const EXPECTED_CONTROLS = 42;
-const EXPECTED_FILES = 12;
+/** Counted when this guard was written (T-18). A new control makes the count test fail, so it is looked at.
+ *  +2 / +1 file: DependsOnPicker's checkboxes (task dependencies). */
+const EXPECTED_CONTROLS = 44;
+const EXPECTED_FILES = 13;
 
 /** Spreads props into the control and no file renders it, so there is no caller that could omit the class. */
 const EXEMPT: Record<string, string> = { "shared/ui/FormField.tsx": "unused scaffold wrapper; the guard below fails once something imports it" };

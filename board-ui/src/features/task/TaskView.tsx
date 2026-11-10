@@ -1,9 +1,10 @@
 import { useCallback, useId, useRef } from "react";
 import type { ReactNode } from "react";
-import { GATE_DOC, GATE_STATUS, NotFoundError, type FactoryEvent, type Gate, type Run, type Task } from "@factory/core";
-import { ageOf, formatCost, NEEDS_YOU, STATUS_LABEL } from "../board/status";
+import { GATE_DOC, GATE_STATUS, NotFoundError, unfinishedDeps, type FactoryEvent, type Gate, type Run, type Task } from "@factory/core";
+import { ageOf, formatCost, NEEDS_YOU, STATUS_LABEL, taskPath } from "../board/status";
 import { useTopBarLead } from "../../app/topBarLead";
 import { followInApp } from "../board/TaskCard";
+import { useBoard } from "../board/useBoard";
 import { useFactories } from "../factories/useFactories";
 import { AnswerPanel } from "./AnswerPanel";
 import { DocVersions } from "./DocVersions";
@@ -105,7 +106,7 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
           <Section title="Spec"><DocVersions label="Spec" docs={docs.spec} /></Section>
           <Section title="Plan"><DocVersions label="Plan" docs={docs.plan} /></Section>
         </div>
-        <Details task={task} events={events} />
+        <Details task={task} events={events} onNavigate={onNavigate} />
       </div>
       <Section title="Verify report"><DocVersions label="Verify report" docs={docs.verify} /></Section>
       <Section title="Review report"><DocVersions label="Review report" docs={docs.review} /></Section>
@@ -122,12 +123,34 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
   );
 }
 
-function Details({ events, task }: { events: readonly FactoryEvent[]; task: Task }) {
+function Details({ events, onNavigate, task }: { events: readonly FactoryEvent[]; onNavigate: (path: string) => void; task: Task }) {
   const last = events.at(-1);
+  const board = useBoard().data ?? [];
+  const waiting = task.status === "ready" ? unfinishedDeps(task, board) : [];
   return (
     <aside className="sf-details" aria-label="Details">
       <dl>
         <div><dt>Branch</dt><dd className="sf-mono">{task.branch ?? "—"}</dd></div>
+        {task.dependsOn.length > 0 ? (
+          <div>
+            <dt>Depends on</dt>
+            <dd>
+              <ul className="sf-deps">
+                {task.dependsOn.map((id) => {
+                  const dep = board.find((t) => t.taskId === id);
+                  const href = taskPath(id);
+                  return (
+                    <li key={id}>
+                      <a className="sf-mono" href={href} onClick={(event) => followInApp(event, href, onNavigate)}>{id}</a>
+                      {dep ? <span> {STATUS_LABEL[dep.status]}</span> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+              {waiting.length > 0 ? <span className="sf-badge">Waiting on {waiting.join(", ")}</span> : null}
+            </dd>
+          </div>
+        ) : null}
         <div><dt>Cost</dt><dd className="sf-mono">{formatCost(task.costUsd)}</dd></div>
         <div>
           <dt>Last event</dt>

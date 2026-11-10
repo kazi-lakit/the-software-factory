@@ -942,6 +942,31 @@ describe("New task form restyle and Mark ready now", () => {
   });
 });
 
+describe("BoardView dependencies", () => {
+  it("shows_a_waiting_badge_on_a_ready_task_whose_dependency_is_unfinished", async () => {
+    const { core, owner } = fakeBoard();
+    const dep = await seedTask({ title: "Dep" });
+    const t = await owner.createTask({ dependsOn: [dep.taskId], description: "", factoryId: "blocks", repo: "data", title: "Waiter" });
+    await core.updateTask(t.taskId, t.version, { status: "ready" });
+    renderBoard();
+    expect(await screen.findByText(`Waiting on ${dep.taskId}`)).toBeInTheDocument();
+  });
+
+  it("creates_a_task_with_the_picked_dependency", async () => {
+    const dep = await seedTask({ title: "Dep" });
+    renderBoard();
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    const form = screen.getByRole("form", { name: "New task" });
+    fireEvent.change(within(form).getByLabelText("Title"), { target: { value: "Child" } });
+    fireEvent.click(await within(form).findByRole("checkbox", { name: new RegExp(dep.taskId) }));
+    fireEvent.click(within(form).getByRole("button", { name: "Create task" }));
+    await waitFor(async () => {
+      const tasks = await fakeBoard().owner.listTasks();
+      expect(tasks.find((x) => x.title === "Child")?.dependsOn).toEqual([dep.taskId]);
+    });
+  });
+});
+
 describe("BoardView top bar Cancel", () => {
   function renderWithLead() {
     const leads: Array<Lead | null> = [];

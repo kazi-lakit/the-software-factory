@@ -22,6 +22,11 @@ describe('browser entry', () => {
     expect(entry.isMainRef('dev')).toBe(false);
   });
 
+  it('exports unfinishedDeps for the Board', async () => {
+    const entry = await import('../src/browser.js');
+    expect(entry.unfinishedDeps({ dependsOn: ['T-1'] }, [{ taskId: 'T-1', status: 'build' }])).toEqual(['T-1']);
+  });
+
   it('exports the Blocks data errors so the Board can tell them apart', async () => {
     const entry = await import('../src/browser.js');
     const data = await import('../src/blocks/data.js');

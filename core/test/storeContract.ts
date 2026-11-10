@@ -18,9 +18,19 @@ export function runStoreContract(
       const a = await mk(s);
       const b = await mk(s, 'b');
       expect([a.taskId, b.taskId]).toEqual(['T-1', 'T-2']);
-      expect(a).toMatchObject({ baseBranch: 'dev', status: 'inbox', stage: null, attempt: 0, gateOverrides: {}, costUsd: 0, version: 1, claimBy: null });
+      expect(a).toMatchObject({ baseBranch: 'dev', status: 'inbox', stage: null, attempt: 0, gateOverrides: {}, dependsOn: [], costUsd: 0, version: 1, claimBy: null });
       expect(await s.getTask('T-1')).toEqual(a);
       expect((await s.listTasks()).map((t) => t.taskId)).toEqual(['T-1', 'T-2']);
+    });
+    test('dependsOn defaults to [], is stored as given, and updates round-trip', async () => {
+      const s = await make();
+      const a = await mk(s);
+      expect(a.dependsOn).toEqual([]);
+      const b = await s.createTask({ factoryId: 'blocks', title: 'b', description: '', repo: 'data', dependsOn: ['T-1'] });
+      expect((await s.getTask(b.taskId)).dependsOn).toEqual(['T-1']);
+      const u = await s.updateTask(a.taskId, 1, { dependsOn: ['T-2'] });
+      expect(u.dependsOn).toEqual(['T-2']);
+      expect((await s.getTask(a.taskId)).dependsOn).toEqual(['T-2']);
     });
     test('createTask with status ready inserts a ready task; the default is inbox', async () => {
       const s = await make();
