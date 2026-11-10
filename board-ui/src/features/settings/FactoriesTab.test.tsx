@@ -134,6 +134,53 @@ describe("Factories tab", () => {
     expect((await owner().listEvents("-")).find((e) => e.field === "def.name")).toMatchObject({ from: "Delta", to: "Delta Two", factoryId: "delta", actor: "you" });
   });
 
+  it("shows_one_model_picker_per_stage_with_same_as_session_by_default", async () => {
+    await openFactoriesTab();
+    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
+    const form = await screen.findByRole("form", { name: "Add factory" });
+    for (const label of ["Spec model", "Plan model", "Build model", "Verify model", "Review model"]) {
+      const select = within(form).getByRole("combobox", { name: label });
+      expect(within(form).getByLabelText(label)).toBe(select);
+      expect(select).toHaveValue("");
+      expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["Same as session", "Opus", "Sonnet", "Haiku", "Fable"]);
+    }
+  });
+
+  it("saves_a_chosen_model_under_its_stage_and_leaves_same_as_session_out", async () => {
+    await openFactoriesTab();
+    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
+    const form = await screen.findByRole("form", { name: "Add factory" });
+    changeField("Factory id", "echo");
+    changeField("Name", "Echo");
+    changeField("Build model", "sonnet");
+    changeField("Review model", "fable");
+    fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
+    await screen.findByText("Created factory echo.");
+    const saved = (await owner().listFactoryDefs()).find((d) => d.factoryId === "echo");
+    expect(saved?.agentModels).toEqual({ build: "sonnet", review: "fable" });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit factory echo" }));
+    const edit = await screen.findByRole("form", { name: "Edit factory echo" });
+    expect(within(edit).getByLabelText("Build model")).toHaveValue("sonnet");
+    changeField("Build model", "");
+    fireEvent.click(within(edit).getByRole("button", { name: "Save factory" }));
+    await screen.findByText("Saved factory echo.");
+    const edited = (await owner().listFactoryDefs()).find((d) => d.factoryId === "echo");
+    expect(edited?.agentModels).toEqual({ review: "fable" });
+  });
+
+  it("a_factory_with_no_stage_entries_saves_no_agentModels", async () => {
+    await openFactoriesTab();
+    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
+    const form = await screen.findByRole("form", { name: "Add factory" });
+    changeField("Factory id", "echo");
+    changeField("Name", "Echo");
+    fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
+    await screen.findByText("Created factory echo.");
+    const saved = (await owner().listFactoryDefs()).find((d) => d.factoryId === "echo")!;
+    expect("agentModels" in saved).toBe(false);
+  });
+
   it("shows_the_changed_message_with_reload_on_a_conflict_and_reloads_the_latest", async () => {
     await openFactoriesTab();
     fireEvent.click(await screen.findByRole("button", { name: "Edit factory delta" }));
