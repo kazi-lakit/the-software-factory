@@ -29,14 +29,17 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
   const [picked] = useSelectedFactory();
   const factories = useFactories();
   const stored = settings.data?.factories ?? {};
-  // One factory picked: its own pause. All: every visible, valid factory that is paused, by id. A factory without stored
-  // settings is running, and settings of a factory that is gone or invalid do not count.
+  // One factory picked: its own pause. All: every paused factory, by id. A factory without stored settings is running.
+  // Once the list is known, settings of a factory that is gone or invalid do not count. While it loads, or if it failed,
+  // the settings alone say what is paused, so a paused factory is never shown as running.
+  const listKnown = !factories.loading && !(factories.error && factories.byId.size === 0);
   const pausedIds = Object.entries(stored)
-    .filter(([id, entry]) => factories.byId.has(id) && (picked === "all" || picked === id) && entry.factory.paused === true)
+    .filter(([id, entry]) => (!listKnown || factories.byId.has(id)) && (picked === "all" || picked === id) && entry.factory.paused === true)
     .map(([id]) => id);
+  const listFailed = !factories.loading && Boolean(factories.error) && factories.byId.size === 0;
   const paused = pausedIds.length > 0;
   // Without settings the shell cannot say whether the factory runs; it says so rather than show nothing.
-  const pauseUnknown = !settings.data && settings.isError;
+  const pauseUnknown = (!settings.data && settings.isError) || listFailed;
   const pausedText = picked === "all" ? `${pausedIds.length === 1 ? "Factory" : "Factories"} paused: ${pausedIds.join(", ")}` : "Factory paused";
   const pauseText = paused ? pausedText : pauseUnknown ? "Pause state unknown" : "";
   const pauseClass = paused ? "sf-paused" : pauseUnknown ? "sf-paused-unknown" : "sf-paused-off";

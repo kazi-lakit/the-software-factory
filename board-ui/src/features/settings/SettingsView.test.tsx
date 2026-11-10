@@ -312,10 +312,6 @@ describe("Factory settings tab", () => {
     renderSettings();
     await screen.findByRole("table", { name: "Repo overrides" });
     expect(screen.getByLabelText("Factory", { selector: "select" })).toHaveValue("delta");
-    vi.restoreAllMocks();
-    // Storing again clears the in-page value, so later tests read localStorage.
-    renderSettings();
-    fireEvent.change((await screen.findAllByLabelText("Factory", { selector: "select" }))[0]!, { target: { value: "blocks" } });
   });
 
   it("shows_no_removed_repo_section_when_every_scope_has_its_repo", async () => {

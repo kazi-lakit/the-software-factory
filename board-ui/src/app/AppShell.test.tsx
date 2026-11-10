@@ -7,7 +7,7 @@ import { blocksClient } from "../lib/blocks/client";
 import { fetchSessionClaims, logout } from "../lib/blocks/auth";
 import { boardStore } from "../lib/board";
 import { defFixture } from "../test/factories";
-import { useSelectedFactory } from "../features/factories/useFactories";
+import { resetSelectedFactoryForTests, useSelectedFactory } from "../features/factories/useFactories";
 import { AppShell } from "./AppShell";
 import { AuthProvider } from "./providers/AuthProvider";
 
@@ -106,8 +106,28 @@ describe("AppShell", () => {
     renderShell();
     await waitFor(() => expect(getSettings).toHaveBeenCalled());
     await screen.findByText("Kazi Rahman");
-    await waitFor(() => expect(boardStore.listFactoryDefs).toHaveBeenCalled());
-    expect(screen.queryByText(/paused/)).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText(/paused/)).not.toBeInTheDocument());
+  });
+
+  it("shows_the_picked_factorys_pause_while_the_factory_list_is_still_loading", async () => {
+    vi.mocked(boardStore.listFactoryDefs).mockReturnValue(new Promise(() => undefined));
+    getSettings.mockResolvedValue(settings(false, { delta: true }));
+    window.localStorage.setItem("factory-board:factory", "delta");
+    renderShell();
+    expect(await screen.findByText("Factory paused")).toBeInTheDocument();
+  });
+
+  it("says_the_pause_state_is_unknown_when_the_factory_list_cannot_load", async () => {
+    vi.mocked(boardStore.listFactoryDefs).mockRejectedValue(new Error("blocks: unavailable"));
+    renderShell();
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("Pause state unknown"));
+  });
+
+  it("still_shows_a_paused_factory_when_the_factory_list_cannot_load", async () => {
+    vi.mocked(boardStore.listFactoryDefs).mockRejectedValue(new Error("blocks: unavailable"));
+    getSettings.mockResolvedValue(settings(true));
+    renderShell();
+    expect(await screen.findByText("Factory paused: blocks")).toBeInTheDocument();
   });
 
   it("follows_the_selected_factory_and_ignores_the_others", async () => {
@@ -118,6 +138,7 @@ describe("AppShell", () => {
     await screen.findByText("Kazi Rahman");
     expect(screen.queryByText(/paused/)).not.toBeInTheDocument();
     cleanup();
+    resetSelectedFactoryForTests();
     window.localStorage.setItem("factory-board:factory", "delta");
     renderShell();
     expect(await screen.findByText("Factory paused")).toBeInTheDocument();
@@ -156,6 +177,8 @@ describe("AppShell", () => {
 
   it("leaves_a_modified_click_to_the_browser", () => {
     const { onNavigate } = renderShell();
+    // jsdom cannot navigate: the browser's own handling of the click ends here.
+    document.addEventListener("click", (event) => event.preventDefault(), { once: true });
     fireEvent.click(screen.getByRole("link", { name: "History" }), { metaKey: true });
     expect(onNavigate).not.toHaveBeenCalled();
   });

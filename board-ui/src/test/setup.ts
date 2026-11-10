@@ -1,4 +1,10 @@
 import "@testing-library/jest-dom/vitest";
+import { afterEach, beforeEach } from "vitest";
+import { resetSelectedFactoryForTests } from "../features/factories/selectedFactory";
+
+// The picked factory is module state; each test starts from whatever localStorage holds.
+beforeEach(resetSelectedFactoryForTests);
+afterEach(resetSelectedFactoryForTests);
 
 // jsdom has no matchMedia; the app shell asks it for the mobile layout.
 if (!window.matchMedia) {

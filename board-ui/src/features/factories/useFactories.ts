@@ -1,11 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { FactoryConfig, type FactoryDef, type FactoryRepo } from "@factory/core";
 import { boardStore } from "../../lib/board";
 
 export const FACTORIES_KEY = ["board", "factories"] as const;
 export const FACTORY_HEALTH_KEY = ["board", "factory-health"] as const;
-export const SELECTED_FACTORY_KEY = "factory-board:factory";
 
 export type FactoryEntry = { def: FactoryDef; repos: FactoryRepo[] };
 /** A definition the Board cannot use, and why. The live gate's test rows (`GATE-…`) are never listed. */
@@ -46,36 +45,4 @@ export function useFactoryHealth() {
   });
 }
 
-// A pick made in this tab reaches every mounted view and the shell through these listeners. A pick made in another tab
-// is not followed while the page is open (it would remount keyed Settings forms and drop their drafts); it is read on the next load.
-const listeners = new Set<(value: string) => void>();
-// Set only when localStorage cannot be written (private mode): the pick still applies in this tab until it closes.
-let unstored: string | undefined;
-
-const read = (): string => {
-  if (unstored !== undefined) return unstored;
-  try {
-    return window.localStorage.getItem(SELECTED_FACTORY_KEY) || "all";
-  } catch {
-    return "all";
-  }
-};
-
-/** The factory picked on the Board (`'all'` for every factory), kept in localStorage; works without it. */
-export function useSelectedFactory(): [string | "all", (value: string | "all") => void] {
-  const [selected, setSelected] = useState(read);
-  useEffect(() => {
-    listeners.add(setSelected);
-    return () => void listeners.delete(setSelected);
-  }, []);
-  const set = useCallback((value: string | "all") => {
-    try {
-      window.localStorage.setItem(SELECTED_FACTORY_KEY, value);
-      unstored = undefined;
-    } catch {
-      unstored = value;
-    }
-    for (const listener of listeners) listener(value);
-  }, []);
-  return [selected, set];
-}
+export { resetSelectedFactoryForTests, SELECTED_FACTORY_KEY, useSelectedFactory } from "./selectedFactory";
