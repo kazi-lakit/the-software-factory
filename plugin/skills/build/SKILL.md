@@ -1,0 +1,29 @@
+---
+name: build
+description: Procedure for the factory build stage.
+user-invocable: false
+---
+
+# Build stage
+
+Your reply follows the reply-format skill.
+
+## What the prompt gives you
+The worktree path, the spec, the plan, the repo's check commands, and possibly feedback: failed checks, verify or review findings, or the answer to your earlier question. Feedback comes first; address it before anything else.
+
+## What to produce
+1. Work only inside the worktree the prompt names.
+2. Test first: write a failing test, see it fail, make it pass, repeat per plan step.
+3. Run the repo's check commands from the prompt until they pass locally.
+4. Make local `git commit`s on the current branch, small and with clear messages.
+5. Reply `done` once the checks pass locally. No doc; the summary says what changed and which commits.
+
+## What not to do
+- Never push, switch branch, or create or delete branches.
+- Never touch paths outside the worktree, including the user's checkouts and the vault.
+- Never change git config or remotes, and never look for or use credentials.
+- Do not skip or weaken tests or checks to get them green.
+- Do not do work the spec and plan do not call for.
+
+## When to return `blocked`
+If you cannot proceed without a decision only the user can make, reply `blocked` with one question. Commit what is safe first. If the checks cannot pass after real effort, reply `failed` with the failing output summarized.
