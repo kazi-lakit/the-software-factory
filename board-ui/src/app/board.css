@@ -492,7 +492,7 @@ textarea.sf-input {
 
 /* A panel that waits for the owner (gate, answer) is the accent's other use. */
 .sf-panel-needs-you {
-  border-left: 3px solid var(--sf-accent);
+  border-color: var(--sf-accent);
 }
 
 .sf-panel-needs-you form {
@@ -854,6 +854,99 @@ textarea.sf-input {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.sf-task-header h2 {
+  color: var(--sf-text);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.sf-task-meta {
+  align-items: baseline;
+  color: var(--sf-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.sf-stepper {
+  display: flex;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sf-stepper-item {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sf-stepper .sf-step {
+  width: 100%;
+}
+
+.sf-stepper-label {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
+.sf-stepper-item-waiting .sf-stepper-label {
+  color: var(--sf-accent-text);
+  font-weight: 700;
+}
+
+.sf-task-body {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.sf-task-body > * {
+  min-width: 0;
+}
+
+.sf-task-docs {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sf-details {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  padding: 12px;
+}
+
+.sf-details dl {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+
+.sf-details dt {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
+.sf-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .sf-facts {
@@ -1218,6 +1311,10 @@ textarea.sf-input {
 @media (max-width: 1099px) {
   .sf-lanes {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sf-task-body {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
