@@ -1,6 +1,14 @@
 // Pure (no Node API): the browser entry validates factory definitions with it.
 import { isMainRef } from './branches.js';
 import { ChecksSchema, type Checks } from './checksSchema.js';
+import type { AgentStep } from './types.js';
+
+/** The stages whose agent a factory can set a model for. */
+export const AGENT_STEPS: readonly AgentStep[] = ['spec', 'plan', 'build', 'verify', 'review'];
+/** The models a factory can choose for a stage agent. */
+export const AGENT_MODELS = ['opus', 'sonnet', 'haiku', 'fable'] as const;
+export type AgentModel = (typeof AGENT_MODELS)[number];
+export type AgentModels = Partial<Record<AgentStep, AgentModel>>;
 
 export interface FactoryDef {
   factoryId: string;
@@ -12,6 +20,8 @@ export interface FactoryDef {
   /** GitHub login of the gh CLI account whose token the factory opens PRs with. The Board stores the login, never a token. */
   ghUser: string;
   active: boolean;
+  /** Model per stage agent; a stage left out runs on the session's model. */
+  agentModels?: AgentModels;
   version: number;
 }
 
@@ -62,6 +72,18 @@ function text(input: Record<string, unknown>, key: string, fallback: string): st
   return typeof v === 'string' ? v.trim() : null;
 }
 
+function agentModelsOf(v: unknown): Validated<AgentModels | undefined> {
+  if (v === undefined || v === null) return { ok: true, value: undefined };
+  if (!isObject(v)) return fail('agentModels must map stages to models');
+  const out: AgentModels = {};
+  for (const [k, m] of Object.entries(v)) {
+    if (!(AGENT_STEPS as readonly string[]).includes(k)) return fail(`agentModels has an unknown stage: ${k}`);
+    if (!(AGENT_MODELS as readonly unknown[]).includes(m)) return fail(`agentModels.${k} must be one of ${AGENT_MODELS.join(', ')}`);
+    out[k as AgentStep] = m as AgentModel;
+  }
+  return { ok: true, value: Object.keys(out).length === 0 ? undefined : out };
+}
+
 export function validateFactoryDef(input: unknown): Validated<FactoryDef> {
   if (!isObject(input)) return fail('factory must be an object');
   const { factoryId } = input;
@@ -87,11 +109,13 @@ export function validateFactoryDef(input: unknown): Validated<FactoryDef> {
   if (typeof active !== 'boolean') return fail('active must be true or false');
   const version = input.version ?? 1;
   if (typeof version !== 'number' || !Number.isInteger(version) || version < 0) return fail('version must be a whole number');
+  const models = agentModelsOf(input.agentModels);
+  if (!models.ok) return models;
   return {
     ok: true,
     value: {
       factoryId, name, protectedBranches: ensureMain(rawBranches as string[]), gitName, gitEmail, docsPath,
-      ghUser, active, version,
+      ghUser, active, ...(models.value ? { agentModels: models.value } : {}), version,
     },
   };
 }

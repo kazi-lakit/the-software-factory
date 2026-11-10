@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { isProtected } from '../src/branches.js';
-import { DEFAULT_GH_USER, FactoryConfig, ensureMain, validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from '../src/factories.js';
+import { AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, FactoryConfig, ensureMain, validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from '../src/factories.js';
 import { loadFactoriesFromDir } from '../src/factoriesFs.js';
 
 const checks = {
@@ -76,6 +76,34 @@ describe('validateFactoryDef', () => {
     expect(validateFactoryDef(defInput({ gitEmail: 'nope' })).ok).toBe(false);
     expect(validateFactoryDef(defInput({ gitEmail: '' })).ok).toBe(true);
     expect(validateFactoryDef(defInput({ gitEmail: 'a@b.c' })).ok).toBe(true);
+  });
+  test('agentModels missing, null or empty leaves the field out', () => {
+    for (const input of [defInput(), defInput({ agentModels: undefined }), defInput({ agentModels: null }), defInput({ agentModels: {} })]) {
+      const r = validateFactoryDef(input);
+      expect(r.ok).toBe(true);
+      if (r.ok) expect('agentModels' in r.value).toBe(false);
+    }
+  });
+  test('accepts known stages mapped to known models', () => {
+    const all = { spec: 'opus', plan: 'sonnet', build: 'haiku', verify: 'fable', review: 'opus' };
+    expect(validateFactoryDef(defInput({ agentModels: all }))).toMatchObject({ ok: true, value: { agentModels: all } });
+    const one = validateFactoryDef(defInput({ agentModels: { build: 'haiku' } }));
+    expect(one.ok && one.value.agentModels).toEqual({ build: 'haiku' });
+  });
+  test.each(['x', 3, true, ['opus']])('refuses agentModels %j that is not a plain object', (agentModels) => {
+    expect(validateFactoryDef(defInput({ agentModels }))).toEqual({ ok: false, error: 'agentModels must map stages to models' });
+  });
+  test.each(['check', 'ship', 'Spec', 'other'])('refuses the unknown stage %j', (stage) => {
+    expect(validateFactoryDef(defInput({ agentModels: { [stage]: 'opus' } }))).toEqual({ ok: false, error: `agentModels has an unknown stage: ${stage}` });
+  });
+  test.each(['Opus', 'gpt', '', 3, null])('refuses the model %j', (model) => {
+    expect(validateFactoryDef(defInput({ agentModels: { build: model } }))).toEqual({
+      ok: false, error: 'agentModels.build must be one of opus, sonnet, haiku, fable',
+    });
+  });
+  test('exports the stage and model lists', () => {
+    expect(AGENT_STEPS).toEqual(['spec', 'plan', 'build', 'verify', 'review']);
+    expect(AGENT_MODELS).toEqual(['opus', 'sonnet', 'haiku', 'fable']);
   });
 });
 
