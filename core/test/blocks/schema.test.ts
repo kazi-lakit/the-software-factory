@@ -7,7 +7,7 @@ import { CORE_TASK_FIELDS } from '../../src/blocks/store.js';
 const coreRoot = fileURLToPath(new URL('../../', import.meta.url));
 
 const MATRIX = {
-  FactoryTask: { read: ['factory-owner', 'factory-core'], insert: ['factory-owner'], edit: ['factory-owner', 'factory-core'] },
+  FactoryTask: { read: ['factory-owner', 'factory-core'], insert: ['factory-owner', 'factory-core'], edit: ['factory-owner', 'factory-core'] },
   FactoryDoc: { read: ['factory-owner', 'factory-core'], insert: ['factory-core'] },
   FactoryApproval: { read: ['factory-owner', 'factory-core'], insert: ['factory-owner'] },
   FactorySettings: { read: ['factory-owner', 'factory-core'], insert: ['factory-owner'], edit: ['factory-owner'] },
@@ -56,6 +56,17 @@ describe('blocks schema', () => {
     expect(rules.security.filter(e => e.policyType === 1)).toEqual([{ schemaName: 'FactoryTask', operation: 2, policyType: 1, accessLevel: 3, fieldNames: ['title', 'description', 'repo', 'baseBranch', 'gateOverrides'] }]);
     expect(PROTECTED_TASK_FIELDS).toEqual(cls[0]!.fieldNames);
     for (const f of PROTECTED_TASK_FIELDS) expect(FIELDS.FactoryTask.map(x => x.name)).toContain(f);
+  });
+
+  it('the core may insert a FactoryTask, yet the CLS EDIT rule still protects the same fields for the owner only', () => {
+    expect(ACCESS.FactoryTask.insert).toEqual(['factory-owner', 'factory-core']);
+    const rules = generateRules() as Rules;
+    const insertRoles = rules.policies.filter(p => p.schemaName === 'FactoryTask' && p.policyType === 0 && p.operation === 1).map(p => p.ruleGroup.rules[0]!.staticValue[0]);
+    expect(insertRoles.sort()).toEqual(['factory-core', 'factory-owner']);
+    const cls = rules.policies.filter(p => p.policyType === 1);
+    expect(cls).toHaveLength(1);
+    expect(cls[0]!.fieldNames).toEqual(['title', 'description', 'repo', 'baseBranch', 'gateOverrides']);
+    expect(cls[0]!.ruleGroup.rules.map(r => r.staticValue)).toEqual([['factory-owner']]);
   });
 
   it('protected and core task fields are disjoint', () => {

@@ -51,7 +51,7 @@ export const UNIQUE: Record<SchemaName, string[]> = {
 const both: Role[] = ['factory-owner', 'factory-core'];
 /** Delete exists only on FactorySpike. */
 export const ACCESS: Record<SchemaName, Partial<Record<Operation, Role[]>>> = {
-  FactoryTask: { read: both, insert: ['factory-owner'], edit: both },
+  FactoryTask: { read: both, insert: both, edit: both },
   FactoryDoc: { read: both, insert: ['factory-core'] },
   FactoryApproval: { read: both, insert: ['factory-owner'] },
   FactorySettings: { read: both, insert: ['factory-owner'], edit: ['factory-owner'] },

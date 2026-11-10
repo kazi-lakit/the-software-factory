@@ -79,10 +79,10 @@ export const STEPS: Step[] = [
     },
   },
   {
-    label: '2 core insert FactoryTask forbidden',
+    label: '2 core insert FactoryTask ok (for `factory new`; the column rule must not block an insert)',
     async run(d, c) {
       const r = await d.core.insert('FactoryTask', taskRow(`GATE-${c.suffix}-core`, 'cancelled'));
-      expect(r.kind === 'forbidden', `core insert of FactoryTask answered ${r.kind}`);
+      expect(r.kind === 'inserted', `core insert of FactoryTask answered ${r.kind}`);
     },
   },
   {
