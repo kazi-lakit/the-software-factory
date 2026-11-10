@@ -413,19 +413,26 @@ function mergeSettings(current: RepoSettings, patch: RepoSettingsPatch): RepoSet
   return next as RepoSettings;
 }
 
-const DEF_FIELDS = ['name', 'protectedBranches', 'gitName', 'gitEmail', 'docsPath', 'ghUser', 'active'] as const;
+const DEF_FIELDS = ['name', 'protectedBranches', 'gitName', 'gitEmail', 'docsPath', 'ghUser', 'active', 'agentModels'] as const;
 const REPO_FIELDS = ['remote', 'baseBranch', 'checks'] as const;
 const eventText = (v: unknown): string => (typeof v === 'string' ? v : canon(v));
 
-/** One event per field whose value differs (every field on an insert, from null). */
+/**
+ * A field's value for history and import comparison. A missing agentModels is `{}` (every stage uses the session's model),
+ * so absent and empty compare equal and an event never says `undefined`.
+ */
+const fieldValue = <T extends object>(row: T, f: keyof T & string): unknown =>
+  f === 'agentModels' ? (row[f] ?? {}) : row[f];
+
+/** One event per field whose value differs (every field on an insert, from null, except an absent optional field). */
 function fieldEvents<T extends object>(
   fields: readonly (keyof T & string)[], before: T | null, after: T, factoryId: string, name: (f: string) => string, reason: string, at: string,
 ): FactoryEvent[] {
   return fields
-    .filter((f) => before === null || canon(before[f]) !== canon(after[f]))
+    .filter((f) => (before === null ? after[f] !== undefined : canon(fieldValue(before, f)) !== canon(fieldValue(after, f))))
     .map((f) => ({
       taskId: '-', factoryId, actor: OWNER_ACTOR, action: 'set' as const, field: name(f),
-      from: before === null ? null : eventText(before[f]), to: eventText(after[f]), reason, at,
+      from: before === null ? null : eventText(fieldValue(before, f)), to: eventText(fieldValue(after, f)), reason, at,
     }));
 }
 
@@ -486,7 +493,7 @@ export interface ImportResult {
 
 const rowPlan = <T extends object>(fields: readonly (keyof T & string)[], stored: T | undefined, wanted: T): ImportPlanRow => {
   if (!stored) return { action: 'create', differs: [] };
-  const differs = fields.filter((f) => canon(stored[f]) !== canon(wanted[f]));
+  const differs = fields.filter((f) => canon(fieldValue(stored, f)) !== canon(fieldValue(wanted, f)));
   return { action: differs.length === 0 ? 'already' : 'kept', differs };
 };
 
