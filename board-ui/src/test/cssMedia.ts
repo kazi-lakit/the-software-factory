@@ -180,3 +180,41 @@ export function outranked(css: string, elementOf: Record<string, string>, neverC
   }
   return found;
 }
+
+const notClassesOf = (selector: string): string[] => [...selector.matchAll(/:not\(\s*\.([\w-]+)\s*\)/g)].map((m) => m[1] as string);
+const tokensOf = (selector: string): string[] => selector.match(/:not\([^)]*\)|[.#]?[\w-]+|::?[\w-]+/g) ?? [];
+const allClasses = (selector: string): string[] => classesOf(selector.replace(/:(is|has|where)\([^()]*\)/g, ""));
+
+/**
+ * Phone rules that a later, strictly more specific phone rule overrides on the same property (T-18 H10:
+ * `.sf-form .sf-actions .sf-button` 44px came after and beat `.sf-action-bar .sf-button` 48px). Two selectors are
+ * compared only when they can match one element: their subjects share a class. A pair is skipped when one has `:not(.x)` and the other uses `.x`
+ * (they cannot overlap), when both set the same value (nothing is lost), or when the subjects carry different states (`:hover`, `[aria-current]`).
+ */
+export function phoneOutranked(css: string): string[] {
+  const rules = phoneRules(css);
+  const found: string[] = [];
+  rules.forEach((early, i) => {
+    for (const late of rules.slice(i + 1)) {
+      if (early.index === late.index && early.selector === late.selector) continue;
+      if (cmp(specificity(late.selector), specificity(early.selector)) <= 0) continue;
+      const es = subject(early.selector);
+      const ls = subject(late.selector);
+      const lAll = allClasses(late.selector);
+      const eAll = allClasses(early.selector);
+      // Overlap: the subjects share a class, or a subject class sits in the other selector's own subject compound.
+      // A class only in the other's ancestors means a different element (`.sf-pill` versus `.sf-pill .sf-count`).
+      if (!classesOf(es).some((c) => classesOf(ls).includes(c))) continue;
+      // A later selector that contains every simple selector of the earlier one is a deliberate variant
+      // (`.sf-main` then `.sf-shell-detail .sf-main`, `.sf-input` then `textarea.sf-input`), not a loss.
+      const lTokens = tokensOf(late.selector);
+      if (tokensOf(early.selector).every((t) => lTokens.includes(t))) continue;
+      if (notClassesOf(early.selector).some((c) => lAll.includes(c)) || notClassesOf(late.selector).some((c) => eAll.includes(c))) continue;
+      if (states(es).join() !== states(ls).join()) continue;
+      for (const prop of Object.keys(early.decls)) {
+        if (Object.keys(late.decls).some((p) => related(p, prop) && late.decls[p] !== early.decls[prop])) found.push(`${early.selector} {${prop}} is overridden by later ${late.selector}`);
+      }
+    }
+  });
+  return found;
+}

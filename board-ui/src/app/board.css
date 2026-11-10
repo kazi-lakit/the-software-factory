@@ -1790,7 +1790,7 @@ textarea.sf-input {
   }
 
   .sf-task-actions .sf-button,
-  .sf-form .sf-actions .sf-button {
+  .sf-form .sf-actions:not(.sf-action-bar) .sf-button {
     min-height: var(--sf-input-height);
   }
 }

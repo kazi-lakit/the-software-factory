@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { outranked, phoneBlockInfo, phoneRules } from "../test/cssMedia";
+import { outranked, phoneBlockInfo, phoneOutranked, phoneRules, specificity } from "../test/cssMedia";
 import { tokens } from "../test/cssTokens";
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "board.css"), "utf8");
@@ -173,7 +173,7 @@ describe("phone action bar, inputs and buttons", () => {
 
   it("task action buttons are 44px", () => {
     expect(phone(".sf-task-actions .sf-button")["min-height"]).toBe("var(--sf-input-height)");
-    expect(phone(".sf-form .sf-actions .sf-button")["min-height"]).toBe("var(--sf-input-height)");
+    expect(phone(".sf-form .sf-actions:not(.sf-action-bar) .sf-button")["min-height"]).toBe("var(--sf-input-height)");
   });
 
   it("no phone rule sets box-shadow", () => {
@@ -185,3 +185,49 @@ describe("phone action bar, inputs and buttons", () => {
     expect(outranked(css, ELEMENT_OF, [".sf-theme-switch"])).toEqual([]);
   });
 });
+
+describe("phone rules against each other", () => {
+  it("no later, more specific phone rule overrides an earlier one on the same element", () => {
+    expect(phoneOutranked(css)).toEqual([]);
+  });
+
+  it("the 48px action bar button wins on the New task form", () => {
+    const structure = ["form.sf-form", "div.sf-actions.sf-action-bar", "button.sf-button"];
+    const winners = phoneRules(css)
+      .filter((r) => r.decls["min-height"] !== undefined && matchesStructure(r.selector, structure))
+      .map((r) => ({ r, spec: specificity(r.selector) }));
+    expect(winners.length).toBeGreaterThan(0);
+    const top = winners.reduce((a, b) => (cmpSpec(b.spec, a.spec) >= 0 ? b : a));
+    expect(top.r.decls["min-height"]).toBe("var(--sf-actionbar-button)");
+  });
+});
+
+function cmpSpec(a: number[], b: number[]): number {
+  return (a[0] ?? 0) - (b[0] ?? 0) || (a[1] ?? 0) - (b[1] ?? 0) || (a[2] ?? 0) - (b[2] ?? 0);
+}
+
+/** Whether a selector can match the element chain form.sf-form > div.sf-actions.sf-action-bar > button.sf-button. */
+function matchesStructure(selector: string, chain: string[]): boolean {
+  const parts = selector.split(/\s*>\s*|\s+/);
+  const classesOf = (c: string) => [...c.matchAll(/\.([\w-]+)/g)].map((m) => m[1]);
+  const nodes = chain.map((c) => ({ tag: /^[a-z]+/.exec(c)?.[0], classes: classesOf(c) }));
+  let at = nodes.length - 1;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i] as string;
+    const notClasses = [...part.matchAll(/:not\(\.([\w-]+)\)/g)].map((m) => m[1]);
+    const bare = part.replace(/:not\([^)]*\)/g, "");
+    const tag = /^[a-z]+/.exec(bare)?.[0];
+    const cls = classesOf(bare);
+    let found = -1;
+    for (let k = i === parts.length - 1 ? at : at - (i === parts.length - 1 ? 0 : 1); k >= 0; k--) {
+      const n = nodes[k]!;
+      if ((!tag || tag === n.tag) && cls.every((c) => n.classes.includes(c)) && !notClasses.some((c) => n.classes.includes(c))) {
+        found = k;
+        break;
+      }
+    }
+    if (found < 0) return false;
+    at = found;
+  }
+  return true;
+}

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { baseRules, outranked, phoneBlockInfo, phoneRules, specificity } from "./cssMedia";
+import { baseRules, outranked, phoneOutranked, phoneBlockInfo, phoneRules, specificity } from "./cssMedia";
 
 describe("cssMedia", () => {
   it("phoneRules returns only rules inside the max-width 639px block", () => {
@@ -42,5 +42,20 @@ describe("cssMedia", () => {
     expect(outranked(`.sf-x:hover{margin:0} @media(max-width:639px){.sf-x{margin:8px}}`, map)).toEqual([]);
     // a later base rule of equal specificity also wins
     expect(outranked(`@media(max-width:639px){.sf-x{margin:8px}} .sf-x{margin:0}`, map)).toHaveLength(1);
+  });
+
+  it("phoneOutranked flags a later, more specific phone rule over an earlier one that can match the same element", () => {
+    const bar = `.sf-action-bar .sf-button{min-height:48px}`;
+    const form = `.sf-form .sf-actions .sf-button{min-height:44px}`;
+    const wrap = (r: string) => `@media(max-width:639px){${r}}`;
+    // H10: same subject class, later rule more specific
+    expect(phoneOutranked(wrap(bar + form))).toHaveLength(1);
+    // the earlier rule is the more specific one: no flag
+    expect(phoneOutranked(wrap(form + bar))).toEqual([]);
+    // prefixed with :not, the pair cannot overlap
+    expect(phoneOutranked(wrap(bar + `.sf-form .sf-actions:not(.sf-action-bar) .sf-button{min-height:44px}`))).toEqual([]);
+    // different property, or unrelated subjects: no flag
+    expect(phoneOutranked(wrap(bar + `.sf-form .sf-actions .sf-button{color:red}`))).toEqual([]);
+    expect(phoneOutranked(wrap(`.sf-a{min-height:1px} .sf-form .sf-b{min-height:2px}`))).toEqual([]);
   });
 });
