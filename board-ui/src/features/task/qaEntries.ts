@@ -40,7 +40,8 @@ export function buildQaLog(events: readonly FactoryEvent[], openQuestion: string
       if (last && last.answer === null) last.answer = event;
     }
   }
-  if (openQuestion !== null && asked.length > 0) asked.pop();
+  const latest = asked[asked.length - 1];
+  if (openQuestion !== null && latest && (latest.event.to ?? "").trim() === openQuestion.trim()) asked.pop();
   return asked
     .map(({ answer, event }, index): QaEntry => {
       const parsed = parseQuestion(event.to ?? "");
@@ -51,7 +52,7 @@ export function buildQaLog(events: readonly FactoryEvent[], openQuestion: string
         key: `${index}:${event.at}`,
         askedBy: askerName(event.actor),
         mark: given === null ? "none" : markOf(parsed.options, given),
-        question: parsed.prompt
+        question: parsed.prompt || "Choose an answer"
       };
     })
     .reverse();

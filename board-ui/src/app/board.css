@@ -1497,7 +1497,8 @@ textarea.sf-input {
   font-weight: 600;
 }
 
-.sf-question-title {
+/* Matches h3.sf-page-title above: the .sf-view h3 rule is more specific than the bare class. */
+.sf-view h3.sf-question-title {
   font-size: 20px;
   line-height: 28px;
   margin: 0;

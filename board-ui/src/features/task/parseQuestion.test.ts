@@ -51,6 +51,11 @@ describe("parseQuestion", () => {
     expect(recommendedLetter(parseQuestion("Q?\nA. a: x (recommended)\nB. b: y (recommended)").options)).toBeUndefined();
   });
 
+  it("tolerates_a_blank_line_before_the_reply_line", () => {
+    const parsed = parseQuestion("Which?\nA. main: fits (recommended)\nB. develop: more\n\nReply with an option letter.");
+    expect(parsed.options.map((o) => o.letter)).toEqual(["A", "B"]);
+  });
+
   it("optionText_returns_the_line_without_the_recommended_suffix", () => {
     const [a, b] = parseQuestion(EXAMPLE + "\n").options;
     expect(optionText(a!)).toBe("A. main: fits the others");

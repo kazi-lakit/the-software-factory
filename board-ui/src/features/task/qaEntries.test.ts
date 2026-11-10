@@ -97,9 +97,14 @@ describe("buildQaLog review fixes", () => {
     expect(entries.map((e) => e.question)).toEqual(["Old?"]);
   });
 
-  it("drops_only_the_last_unanswered_when_the_open_text_matches_nothing", () => {
+  it("keeps_the_latest_question_when_it_is_not_the_open_one", () => {
     const entries = buildQaLog([ev("question", "First?"), ev("answer", "1"), ev("question", "Second?")], "Reworded?");
-    expect(entries.map((e) => e.question)).toEqual(["First?"]);
+    expect(entries.map((e) => e.question)).toEqual(["Second?", "First?"]);
+  });
+
+  it("falls_back_to_choose_an_answer_for_an_options_only_question", () => {
+    const [entry] = buildQaLog([ev("question", "A. main: fits\nB. develop: more")], null);
+    expect(entry?.question).toBe("Choose an answer");
   });
 
   it("keeps_an_older_unanswered_question_and_drops_only_the_latest_question_even_when_answered", () => {

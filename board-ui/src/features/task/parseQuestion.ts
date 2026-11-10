@@ -15,7 +15,10 @@ export function parseQuestion(text: string): ParsedQuestion {
   const plain: ParsedQuestion = { prompt: text, options: [] };
   const lines = text.split("\n").map((line) => line.trim());
   while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
-  if (lines.length > 0 && REPLY_LINE.test(lines[lines.length - 1]!)) lines.pop();
+  if (lines.length > 0 && REPLY_LINE.test(lines[lines.length - 1]!)) {
+    lines.pop();
+    while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+  }
   const first = lines.findIndex((line) => LOOKS_LIKE_OPTION.test(line));
   if (first < 0) return plain;
   const options: QuestionOption[] = [];
