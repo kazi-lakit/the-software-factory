@@ -541,14 +541,30 @@ textarea.sf-input {
 }
 
 .sf-column {
-  background: var(--sf-surface-sunk);
+  background: transparent;
+  border: 1px solid var(--sf-chrome-border);
   border-radius: var(--sf-radius);
   flex: 0 0 216px;
   padding: 8px;
 }
 
+.sf-column-needs-you {
+  background: var(--sf-needs-tint);
+  border-color: var(--sf-accent);
+}
+
 .sf-column-collapsed {
-  flex-basis: 132px;
+  flex-basis: 140px;
+}
+
+.sf-columns-hint {
+  color: var(--sf-muted);
+  font-size: var(--sf-size-small);
+  margin: 0 0 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sf-column-head {

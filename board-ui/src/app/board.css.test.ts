@@ -595,4 +595,42 @@ describe("board_css_lanes", () => {
     expect(raw.slice(one, one + 300)).toMatch(/\.sf-lanes\s*\{[^}]*1fr/);
     expect(raw).toMatch(/@media \(max-width: 1023px\)\s*\{\s*\.sf-columns/);
   });
+  it("all_stages_column_frame", () => {
+    const t = tokens(css(), ".sf-column");
+    expect(t["border"]).toBe("1px solid var(--sf-chrome-border)");
+    expect(t["border-radius"]).toBe("var(--sf-radius)");
+    expect(t["background"]).toBe("transparent");
+    expect(t["flex"]).toBe("0 0 216px");
+    expect(t["padding"]).toBe("8px");
+    const strip = tokens(css(), ".sf-columns");
+    expect(strip["gap"]).toBe("10px");
+    expect(strip["overflow-x"]).toBe("auto");
+  });
+  it("all_stages_needs_you_columns", () => {
+    const t = tokens(css(), ".sf-column-needs-you");
+    expect(t["border-color"]).toBe("var(--sf-accent)");
+    expect(t["background"]).toContain("var(--sf-needs-tint)");
+    expect(JSON.stringify(tokens(css(), ".sf-column"))).not.toContain("--sf-accent");
+  });
+  it("all_stages_collapsed_width", () => {
+    expect(tokens(css(), ".sf-column-collapsed")["flex-basis"]).toBe("140px");
+  });
+  it("all_stages_hint_is_one_clipped_line", () => {
+    const t = tokens(css(), ".sf-columns-hint");
+    expect(t["color"]).toBe("var(--sf-muted)");
+    expect(t["font-size"]).toBe("var(--sf-size-small)");
+    expect(t["white-space"]).toBe("nowrap");
+    expect(t["overflow"]).toBe("hidden");
+    expect(t["text-overflow"]).toBe("ellipsis");
+  });
+  it("all_stages_rules_have_no_shadow_or_raw_colour", () => {
+    const raw = css();
+    const start = raw.indexOf(".sf-columns {");
+    const slice = raw.slice(start, raw.indexOf("/* Lanes view */", start));
+    expect(slice.length).toBeGreaterThan(100);
+    const hint = raw.slice(raw.indexOf(".sf-columns-hint {"));
+    for (const part of [slice, hint.slice(0, hint.indexOf("}"))]) {
+      expect(part).not.toMatch(/box-shadow|#[0-9a-fA-F]{3,8}\b|rgba?\(/);
+    }
+  });
 });
