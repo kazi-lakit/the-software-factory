@@ -18,7 +18,7 @@ export type WriteProblem =
 
 export const CONFLICT_MESSAGE = "This task changed while you were looking. Reload to see the latest.";
 export const FORBIDDEN_MESSAGE = "Blocks refused this change for your account.";
-const SESSION_MESSAGE = "Your session ended. Your text is kept: sign in again to send it.";
+const UNAUTHORIZED_MESSAGE = "Blocks did not accept the request. Try again in a moment; if it keeps happening, sign out and in again.";
 
 export function describeWriteError(error: unknown): WriteProblem {
   if (error instanceof VersionConflictError) return { kind: "conflict", message: CONFLICT_MESSAGE };
@@ -36,9 +36,9 @@ export function describeWriteError(error: unknown): WriteProblem {
   if (error instanceof ForbiddenError || error instanceof BlocksForbiddenError) {
     return { kind: "message", message: FORBIDDEN_MESSAGE };
   }
-  // A 401 after a rejected renewal: the auth module has already ended the session and the guard sends the
-  // owner to sign in; the unsent text stays in memory (lib/unsent.ts).
-  if (error instanceof BlocksUnauthorizedError) return { kind: "message", message: SESSION_MESSAGE };
+  // A 401: the renewal may have been unavailable rather than rejected, so the wording stays neutral. If the
+  // session did end, the guard sends the owner to sign in and the unsent text stays (lib/unsent.ts).
+  if (error instanceof BlocksUnauthorizedError) return { kind: "message", message: UNAUTHORIZED_MESSAGE };
   const detail = error instanceof Error && error.message ? `: ${error.message}` : ".";
   return { kind: "message", message: `The change was not saved${detail}` };
 }

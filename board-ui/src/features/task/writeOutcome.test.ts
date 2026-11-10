@@ -11,7 +11,9 @@ describe("describeWriteError", () => {
     expect(describeWriteError(new OwnerActionError("not-blocked", "T-1 is not blocked"))).toEqual({ kind: "message", message: "T-1 is not blocked" });
     expect(describeWriteError(new ForbiddenError("no"))).toEqual({ kind: "message", message: FORBIDDEN_MESSAGE });
     expect(describeWriteError(new BlocksForbiddenError("getFactoryTasks"))).toEqual({ kind: "message", message: FORBIDDEN_MESSAGE });
-    expect(describeWriteError(new BlocksUnauthorizedError()).message).toMatch(/session ended/);
+    expect(describeWriteError(new BlocksUnauthorizedError()).message).toBe(
+      "Blocks did not accept the request. Try again in a moment; if it keeps happening, sign out and in again."
+    );
   });
 
   it("does_not_trust_an_error_that_only_borrows_a_name", () => {
