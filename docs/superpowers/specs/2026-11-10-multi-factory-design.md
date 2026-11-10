@@ -3,6 +3,7 @@
 - **Date:** 2026-11-10
 - **Status:** written for review. Sections were agreed one by one in chat.
 - **Extends:** `docs/superpowers/specs/2026-11-09-software-factory-design.md`, called "the base spec" below. Where this spec says nothing, the base spec holds.
+- **Changed 2026-11-10 (R16):** a factory's GitHub access is a gh CLI login (ghUser), not a Keychain PAT; the org must approve fine-grained PATs, and the gh login already has access.
 
 ## 1. Goal
 
@@ -16,14 +17,14 @@ The application is shared: one core and `factory` CLI, one plugin, one Board pag
 - Board, meaning its tasks, docs and history;
 - repos;
 - settings (gates, limits, pause);
-- GitHub PAT;
+- GitHub login (gh);
 - protected branches;
 - git commit identity;
 - background-docs folder for the spec writer.
 
 **Done means:**
 - today's work is migrated into factory `blocks`;
-- a second factory, defined on the Board with its own PAT, takes one small task to a PR;
+- a second factory, defined on the Board with its own GitHub login (gh), takes one small task to a PR;
 - one `/factory:run` loop serves both factories.
 
 **Not in scope:**
@@ -35,7 +36,7 @@ The application is shared: one core and `factory` CLI, one plugin, one Board pag
 
 1. `main` is always a protected branch in every factory, whatever its configuration says. The factory never pushes to a protected branch and never opens a PR into `main`.
 2. Factory and repo definitions, including the check commands the factory runs, are created and changed only by the signed-in owner. Blocks enforces this. Every change is written to History with its old and new values.
-3. A factory's PAT lives only in the macOS Keychain under that factory's `patAccount`. The Board stores the entry name, never the token.
+3. A factory opens PRs with the token of a gh CLI login on the owner's Mac, named by the factory's `ghUser`. gh keeps the token; the Board stores the login, never a token.
 4. The base spec's ground rules still hold: agents hold no credentials, the factory doesn't touch the owner's checkouts or write to the vault, and the owner starts and stops the factory.
 
 ## 3. Data model (Blocks Data, one project)
@@ -44,9 +45,9 @@ The application is shared: one core and `factory` CLI, one plugin, one Board pag
 
 | Table | One row per | Fields |
 |---|---|---|
-| `FactoryDef` | factory | `factoryId` (lowercase `[a-z][a-z0-9-]*`), `name`, `protectedBranches` (list; `main` is always added), `gitName`, `gitEmail` (both empty means the clone's normal identity), `docsPath` (absolute folder, or empty), `patAccount` (Keychain account name, e.g. `github-pat:delta`), `active` (bool), `version` |
+| `FactoryDef` | factory | `factoryId` (lowercase `[a-z][a-z0-9-]*`), `name`, `protectedBranches` (list; `main` is always added), `gitName`, `gitEmail` (both empty means the clone's normal identity), `docsPath` (absolute folder, or empty), `ghUser` (GitHub login of the gh CLI account; empty means `kazi-lakit`), `active` (bool), `version` |
 | `FactoryRepo` | repo in a factory | `factoryId`, `repoId` (lowercase `[a-z][a-z0-9-]*`, unique within its factory), `remote`, `baseBranch` (usually a protected branch such as `dev`, which the factory opens PRs into; never `main`), `checks` (JSON in the same shape as today's repo yaml `checks`), `version` |
-| `FactoryHealth` | factory | `factoryId`, `patPresent` (bool), `checkedAt`. Written by the core from `factory status`, so the page can show whether a PAT entry exists. Never holds the token. |
+| `FactoryHealth` | factory | `factoryId`, `ghLoggedIn` (bool), `checkedAt`. Written by the core from `factory status`, so the page can show whether the factory's gh login is logged in. Never holds a token. |
 
 ### Changes to existing tables
 
@@ -86,7 +87,7 @@ The fixed `REPO_IDS` list and `loadAllRepoConfigs` go away. Repo ids are checked
     - list, add and edit factories and each factory's repos;
     - turning `active` off stops new claims in that factory;
     - a change to a check command shows the old and new commands and asks for confirmation before saving;
-    - each factory shows whether its PAT entry was present, as last reported by the core (see §5), with that report's time.
+    - each factory shows its GitHub login and whether it was logged in, as last reported by the core (see §5), with that report's time.
 - **History:** a factory filter. Definition changes appear as `you` events with old and new values.
 - **Task page:** shows the factory name next to the repo.
 
@@ -110,23 +111,23 @@ Everything that takes a repo config takes `(factory, repo)`.
 - **Gates and limits:** resolved as in §3.
 - **Branch guard:** uses the factory's protected branches. `ship` refuses them, and the pre-push hook in each clone carries the factory's list.
 - **Git identity:** set per worktree through `git config --worktree` (or the clone's local config) when `gitName` or `gitEmail` is set. The owner's global git config is never touched.
-- **PAT:** `ship` reads the factory's `patAccount`. If it's missing, the task blocks with `PAT <account> not in Keychain`. Other factories are unaffected.
+- **GitHub login:** `ship` reads the token of the factory's `ghUser` with `gh auth token --hostname github.com --user <ghUser>`. If that login is not logged in, the task blocks with `gh account <ghUser> is not logged in (run: gh auth login)`. Other factories are unaffected.
 - **Clones:** clones live at `.clones/<factoryId>/<repoId>`. Worktrees stay at `.clones/worktrees/<taskId>`.
 
 ### CLI
 
 - `next`, `status` and (plan 5) `run` accept `--factory <id>`, repeatable.
 - `factory new` requires `--factory` unless exactly one factory is active.
-- `status` shows, per factory: counts, pause state, `active`, and whether its PAT entry is present. It also writes each factory's `FactoryHealth` row (PAT present yes/no, time; never the token), so the page can show it.
+- `status` shows, per factory: counts, pause state, `active`, and whether its gh login is logged in (`gh <ghUser> logged in|not logged in|unknown`). It runs `gh auth status --hostname github.com --json hosts` once and never reads a token. It also writes each factory's `FactoryHealth` row (logged in yes/no, time; never a token), so the page can show it.
 - `factory migrate` is a one-time, re-runnable move to multiple factories:
   1. it creates `blocks` from `repos/*.yaml`, with protected branches `dev`, `stg`, `main` and docs path `~/scratchpad/selise/vaultS/projects`;
   2. it tags the existing tasks and events with `blocks`;
   3. it moves the `global` and per-repo settings to `blocks` scopes;
-  4. it copies the Keychain entry `github-pat` to `github-pat:blocks`;
+  4. it checks, read-only, that the gh login of `blocks` (`kazi-lakit`) is logged in, and reports `pending` with `run gh auth login` when it is not;
   5. it reads the Board copy back and compares it with the source;
   6. only after that, it tells the owner to remove `repos/`. The core stops reading `repos/` once `blocks` exists on the Board.
 
-  Each step checks before it acts, so a re-run is safe and a half-finished run can be resumed.
+  Each step checks before it acts, so a re-run is safe and a half-finished run can be resumed. On the Blocks store the owner does steps 1 to 3 with the Board's Import, so `migrate --yes` has nothing for the core to do; `migrate --check` reports every step, the gh login included.
 
 ### Plugin
 
@@ -142,7 +143,7 @@ Everything that takes a repo config takes `(factory, repo)`.
 
 | Situation | What happens |
 |---|---|
-| A factory's PAT is missing | Only that factory's `ship` blocks the task, with a clear reason |
+| A factory's gh login is not logged in | Only that factory's `ship` blocks the task, with `gh account <ghUser> is not logged in (run: gh auth login)` |
 | A factory is inactive or paused | No new claims in it; steps already running finish |
 | A repo is removed or renamed while it has tasks | Its open tasks block with `repo <id> no longer exists in <factory>` |
 | A check command changes mid-task | The new commands apply from the next `check`; History shows the change |
@@ -155,7 +156,7 @@ Everything that takes a repo config takes `(factory, repo)`.
 - **Core:**
   - the config loader and its validation;
   - cross-factory `next`, with the filter and per-factory `maxParallel`;
-  - per-factory gates, protected branches, git identity and PAT lookup;
+  - per-factory gates, protected branches, git identity and gh login lookup;
   - `migrate`, re-run safely and resumed after a halfway failure;
   - two factories with the same `repoId`.
 - **Board page:**
@@ -171,7 +172,7 @@ Everything that takes a repo config takes `(factory, repo)`.
 - **Smoke run:** two factories on the file store, run end to end.
 - **Owner's live check:**
   1. run `migrate`;
-  2. add a second factory on the Board, with its PAT;
+  2. add a second factory on the Board, with its GitHub login (gh);
   3. take one small task in it to a PR.
 
 ## 8. Build order

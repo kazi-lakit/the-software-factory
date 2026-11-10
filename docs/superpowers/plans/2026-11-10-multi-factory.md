@@ -2,12 +2,12 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** One factory application runs several factories (`blocks`, `delta`, `mods`, `tsf`, …). Each factory has its own Board view, repos, settings, PAT, protected branches, git identity and docs folder. Factories and repos are defined on the Board.
+**Goal:** One factory application runs several factories (`blocks`, `delta`, `mods`, `tsf`, …). Each factory has its own Board view, repos, settings, GitHub login (gh), protected branches, git identity and docs folder. Factories and repos are defined on the Board.
 
 **Architecture:**
 - A `FactoryConfig` model replaces the fixed `REPO_IDS` list and the `repos/*.yaml` loader.
 - The Blocks store has three new tables: `FactoryDef` and `FactoryRepo` (owner-only writes) and `FactoryHealth` (written by the core). Tasks and events carry `factoryId`, and settings become per factory.
-- The engine claims across factories with an optional filter. It applies each factory's protected branches, git identity, PAT and clone folder.
+- The engine claims across factories with an optional filter. It applies each factory's protected branches, git identity, gh login and clone folder.
 - The Board page gets a factory picker, a Waiting-for-you strip, and a Factories settings tab.
 - A one-time `factory migrate` moves today's work into factory `blocks`.
 
@@ -23,7 +23,7 @@
 
 - `factoryId` and `repoId` match `^[a-z][a-z0-9-]*$` and are at most 40 characters. A `repoId` is unique within its factory, and the same `repoId` may exist in two factories.
 - `main` is always protected. Validation adds it if it's missing, and no edit can remove it. The factory never pushes to a protected branch and never uses `main` as a task base.
-- A factory's PAT lives in the macOS Keychain, service `the-software-factory`, account = the factory's `patAccount` (default `github-pat:<factoryId>`). The Board stores the account name, never a token.
+- A factory opens PRs with the token of a gh CLI login, the factory's `ghUser` (a GitHub login; empty means `kazi-lakit`), read with `gh auth token --hostname github.com --user <ghUser>`. The Board stores the login, never a token (R16).
 - Only the signed-in owner inserts or edits `FactoryDef` and `FactoryRepo`. The core reads them. The core inserts and edits `FactoryHealth`, and the owner reads it.
 - Every definition change writes a `FactoryEvent` with actor `you`, field `def.<field>` or `repo.<repoId>.<field>`, and old → new values (`checks` as canonical JSON).
 - Task ids are one sequence across all factories, as today.
@@ -33,7 +33,7 @@
   - name `Blocks`;
   - protected branches `dev`, `stg`, `main`;
   - `docsPath` = `<home>/scratchpad/selise/vaultS/projects`;
-  - `patAccount` `github-pat:blocks`;
+  - `ghUser` `kazi-lakit`;
   - repos from `repos/*.yaml`.
 - File store (tests, smoke): definitions are read from `<root>/factories/<factoryId>/factory.yaml` and `<root>/factories/<factoryId>/repos/<repoId>.yaml`.
 - Commit messages end with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
@@ -42,7 +42,7 @@
 
 1. **The same `repoId` in two factories** (e.g. `api` in `delta` and `mods`). Clones, settings scopes, the repo filter and new-task validation never mix them up. Tests: Task 4 (clone path, settings), Task 7 (New task repo list).
 2. **The owner edits a factory while tasks are in flight.** If the edit drops `main` from the protected branches, `main` comes back and History records the attempt as saved without removing `main`. A changed check command applies from the next `check`. A repo the task needs is missing, so the task blocks. Tests: Task 1 (validation), Task 4 (missing repo blocks).
-3. **One factory's PAT is missing.** Only that factory's `ship` blocks, with `PAT <account> not in Keychain`; another factory's ship in the same run works. Test: Task 5.
+3. **One factory's gh login is not logged in.** Only that factory's `ship` blocks, with `gh account <ghUser> is not logged in (run: gh auth login)`; another factory's ship in the same run works. Test: Task 5.
 4. **`factory migrate` is re-run, or fails halfway.** A re-run changes nothing, and a resumed run completes. `repos/` is never read once `blocks` exists on the Board. Test: Task 6.
 5. **A filter names a paused or inactive factory, or one at its `maxParallel`.** `next --factory x` prints `paused` / `inactive` / `nothing to do` accurately, and other factories' slots don't count against x. Test: Task 4.
 
@@ -60,9 +60,9 @@
 
 **Interfaces:**
 - Produces, in `factories.ts`:
-  - `interface FactoryDef { factoryId: string; name: string; protectedBranches: string[]; gitName: string; gitEmail: string; docsPath: string; patAccount: string; active: boolean; version: number }`
+  - `interface FactoryDef { factoryId: string; name: string; protectedBranches: string[]; gitName: string; gitEmail: string; docsPath: string; ghUser: string; active: boolean; version: number }`
   - `interface FactoryRepo { factoryId: string; repoId: string; remote: string; baseBranch: string; checks: Checks; version: number }` (`Checks` = `z.infer<typeof ChecksSchema>`)
-  - `interface FactoryHealth { factoryId: string; patPresent: boolean; checkedAt: string }`
+  - `interface FactoryHealth { factoryId: string; ghLoggedIn: boolean; checkedAt: string }`
   - `class FactoryConfig`, built from `(defs: FactoryDef[], repos: FactoryRepo[])`, with:
     - `factories(): FactoryDef[]`
     - `factory(id): FactoryDef | undefined`
@@ -84,7 +84,7 @@
     - rejects ids `Delta`, `1x`, an id of 41 characters, and `a_b`;
     - accepts `delta`;
     - forces `main` into `protectedBranches`;
-    - defaults `patAccount` to `github-pat:<id>`;
+    - defaults an empty `ghUser` to `kazi-lakit` and refuses one that is not a GitHub login (`ghUser must be a GitHub login`);
     - rejects a `gitEmail` without `@` when it's non-empty;
   - `validateFactoryRepo`:
     - rejects `baseBranch: 'main'` (`main is never a base`);
@@ -185,7 +185,7 @@
 - Produces:
   - `EngineDeps.repos` is replaced by `factories: () => Promise<FactoryConfig>`, loaded from the store on each `next`, `sync` and `status`;
   - `Engine.next(taskId?: string, filter?: string[])`;
-  - `Engine.status(filter?: string[])` returns `EngineStatus` plus `factories: { factoryId: string; name: string; active: boolean; paused: boolean; counts: Partial<Record<Status, number>>; patPresent: boolean | null }[]`;
+  - `Engine.status(filter?: string[])` returns `EngineStatus` plus `factories: { factoryId: string; name: string; active: boolean; paused: boolean; counts: Partial<Record<Status, number>>; ghUser: string; ghLoggedIn: boolean | null }[]`;
   - `settingsFor(stored, task)` resolves factory → repo → task;
   - `resolveSettings(factory: Settings, repo?: RepoSettings)` (rename of `global`);
   - `Ticket.context` gains `factory: { factoryId: string; name: string; docsPath: string }` and `checks: Checks` (that repo's commands), so the plugin no longer reads yaml;
@@ -211,21 +211,21 @@
 - [ ] **Step 4: Run** `cd core && npm test && npm run typecheck`. Expected: PASS.
 - [ ] **Step 5: Commit** with `feat(core): engine claims and resolves per factory`.
 
-### Task 5: Ship — protected branches, git identity, PAT and hook per factory
+### Task 5: Ship — protected branches, git identity, gh login and hook per factory
 
 **Files:**
-- Modify: `core/src/engine.ts` (ship, openPr), `core/src/github.ts`, `core/src/wire.ts` (LazyGitHub per account), `core/src/secrets.ts`, `core/src/git.ts`, `core/hooks/pre-push`, `core/test/*`
+- Modify: `core/src/engine.ts` (ship, openPr), `core/src/github.ts`, `core/src/wire.ts` (LazyGitHub per gh login), `core/src/secrets.ts`, `core/src/git.ts`, `core/hooks/pre-push`, `core/test/*`
 
 **Interfaces:**
 - Produces:
-  - `readSecret(account: string, exec?)`. The `blocks-credential` account is unchanged.
-  - `GitHubFor = (patAccount: string) => GitHub`, lazy and cached per account.
+  - `readGhToken(user: string, exec?)` (`gh auth token --hostname github.com --user <user>`). `readSecret` stays for the `blocks-credential` account only.
+  - `GitHubFor = (ghUser: string) => GitHub`, lazy and cached per login; a failed read is not cached.
   - `ship` uses the task's factory's `protectedBranches` for `assertPushAllowed` and `shouldMerge(base, prGateOn, protectedBranches)`.
-  - On a missing PAT, `ship` blocks the task with `PAT <account> not in Keychain`.
+  - When the factory's gh login is not logged in (`GhLoginMissingError`), `ship` blocks the task with `gh account <ghUser> is not logged in (run: gh auth login)`.
   - Git identity: when the factory sets `gitName` or `gitEmail`, `worktree()` runs `git -C <clone> config extensions.worktreeConfig true` once, then `git -C <wt> config --worktree user.name|user.email <value>`. The owner's global config is never touched.
   - Pre-push hook: `ensureClone` writes `<clone>/.git/factory-protected-branches` (one branch per line). The hook reads it from `$(git rev-parse --git-common-dir)` and always adds `main`. If the file is missing, it falls back to `dev stg main`.
 - Tests:
-  - **PAT:** factory `a`'s PAT is missing and `b`'s is present. Shipping an `a` task blocks with the exact reason, and shipping a `b` task opens a PR with `b`'s client (fake GitHub records the account).
+  - **gh login:** factory `a`'s gh login is not logged in and `b`'s is. Shipping an `a` task blocks with the exact reason, and shipping a `b` task opens a PR with `b`'s client (fake GitHub records the login).
   - **Protected branches:** with `['rel','main']`, a push to `rel` is refused, while `dev` isn't protected there, so `shouldMerge('dev', false, …)` is true.
   - **Git identity:** the worktree's identity is set to `a`'s values (read back with `git config --worktree user.email`), and the global config is unchanged (compare with `git config --global` before and after in a temp `HOME`).
   - **Hook:** with `factory-protected-branches` = `rel`, the hook refuses `refs/heads/rel` and `refs/heads/main` and allows `refs/heads/dev`. With the file missing, it refuses `dev`.
@@ -234,7 +234,7 @@
 - [ ] **Step 2:** Run `cd core && npx vitest run test/engine.test.ts test/git.test.ts test/branchGuard.test.ts test/github.test.ts` (the existing test file names). Expected: FAIL.
 - [ ] **Step 3:** Implement.
 - [ ] **Step 4:** Run `cd core && npm test && npm run typecheck`. Expected: PASS.
-- [ ] **Step 5:** Commit with `feat(core): ship per factory — protected branches, identity, PAT, hook`.
+- [ ] **Step 5:** Commit with `feat(core): ship per factory — protected branches, identity, gh login, hook`.
 
 ### Task 6: CLI — filters, factories listing, status health, migrate
 
@@ -245,15 +245,15 @@
 **Interfaces:**
 - Produces, CLI:
   - `next [task] [--factory <id>…] [--json]`, printing `paused` / `inactive` / `nothing to do` per Task 4;
-  - `status [--factory <id>…] [--json]`, with per-factory lines `factory <id>: active|inactive, paused <bool>, PAT present|missing`. `status` also calls `setFactoryHealth` for each factory, checking PAT presence by reading the Keychain entry and dropping the value. A write failure is logged and doesn't fail `status`.
+  - `status [--factory <id>…] [--json]`, with per-factory lines `factory <id>: active|inactive, paused <bool>, gh <ghUser> logged in|not logged in|unknown`. `status` runs `gh auth status --hostname github.com --json hosts` once (never `gh auth token`) and calls `setFactoryHealth` for each factory with `ghLoggedIn`: true when github.com lists its `ghUser` (any case) in state `success`; a gh failure or unreadable answer is false for every factory. A write failure is logged and doesn't fail `status`.
   - `factories [--json]`, listing defs and repos (no secrets). Used by `/factory:new`.
   - `new … --factory <id>`, required unless exactly one factory is active.
-  - `migrate [--dry-run] [--yes]`.
+  - `migrate [--dry-run] [--yes] [--check] [--export <file>]`. On the Blocks store `--yes` has no core step: it prints `nothing for the core to do on the Blocks store; import on the Board, then run factory migrate --check` and exits 0.
 - Produces, `migrate.ts`: `migrate(store, root, home, exec, opts): Promise<MigrateReport>`, with `MigrateReport = { steps: { name: string; done: 'already' | 'now' | 'skipped'; detail: string }[] }`. Steps in order:
   1. Create `blocks` and its repos from `<root>/repos/*.yaml`, with the defaults from Global Constraints. Skipped if `blocks` exists.
   2. Tag every task and event with an empty `factoryId` as `blocks`.
   3. Move the stored `global` and per-repo settings to the `blocks` scopes (FileStore and BlocksStore read the old shape).
-  4. Copy the Keychain `github-pat` value to `github-pat:blocks` with `security add-generic-password -U`. The value goes on stdin through `security -i` and is never printed. Skipped if the target exists.
+  4. `gh-login`, read-only: the same gh check as `status` for `blocks`'s `ghUser`. `already` with `gh account kazi-lakit is logged in`, else `pending` with `gh account kazi-lakit is not logged in: run gh auth login`.
   5. Read everything back and compare it with the source.
   6. Print `repos/ is no longer read; remove it with: git rm -r repos` and don't delete anything itself.
 
@@ -264,9 +264,9 @@
     - a second run is all `already`;
     - a failure injected at step 3, then a re-run, completes;
   - `next --factory delta` prints `paused` for a paused `delta`;
-  - `factories --json` has no `pat` value field;
+  - `factories --json` has no token field;
   - `new` without `--factory`, with two active factories, exits 1 with `--factory is required (active: blocks, delta)`;
-  - `status` writes health rows (fake exec for `security`).
+  - `status` writes health rows (fake exec for `gh`: the exact `gh auth status` args, no `gh auth token`, and a gh failure gives `false`).
 
 - [ ] **Step 1:** Write the tests.
 - [ ] **Step 2:** Run `cd core && npx vitest run test/migrate.test.ts test/cli.test.ts`. Expected: FAIL.
@@ -322,7 +322,7 @@
 - Behaviour:
   - **Settings, Factory settings tab:** today's view, scoped to the selected factory and its repos. It uses `updateSettingsScope('<f>')` and `('<f>/<r>')`. With All selected, it asks you to pick a factory.
   - **Settings, Factories tab:**
-    - a list of factories showing name, id, active, protected branches, and PAT entry `present` / `missing` / `unknown` with `checkedAt` (from `FactoryHealth`; `unknown` when there's no row);
+    - a list of factories showing name, id, active, protected branches, and the GitHub login (`ghUser`) with `logged in` / `not logged in` / `unknown` and `checkedAt` (from `FactoryHealth`; `unknown` when there's no row);
     - add and edit a factory: validated with `validateFactoryDef`, `main` shown as always on and not removable, the id read-only after creation;
     - add and edit repos per factory, with `repoId` read-only after creation;
     - a `checks` change shows the old and new JSON side by side and needs an explicit **Confirm change** before saving;
@@ -334,7 +334,7 @@
   - the `main` chip can't be removed;
   - editing `api` checks without confirming saves nothing, and confirming saves and shows a History event;
   - an invalid id shows the validation message and saves nothing;
-  - PAT status renders `missing` from a health row;
+  - the gh status renders `not logged in` from a health row;
   - Factory settings for `delta/api` update only that scope;
   - the History filter for `delta` hides `blocks` events.
 
@@ -416,9 +416,8 @@ The owner runs these steps, and the executor watches `factory status` and the Bo
 3. The migrate (R10 flow):
    1. `node core/dist/cli.js migrate --export <file>` writes the `blocks` factory and its repos as an import file (no secrets);
    2. on the Board, Settings → Factories → Import, with that file;
-   3. `node core/dist/cli.js migrate --yes` copies the PAT in the Keychain;
-   4. `node core/dist/cli.js migrate --check` shows no step `pending` (`create-factory: already`);
-   5. the owner removes `repos/` (`git rm -r repos`) in a normal session.
-4. On the Board, the owner adds factory `tsf` (or `mods`) with a repo and its PAT account, and saves its PAT with `security add-generic-password -U -s the-software-factory -a github-pat:<id> -w`. `factory status` shows `PAT present`. Prerequisite: that repo needs a non-`main` base branch on GitHub (for example `dev`), because `main` is never a base; the factory's own repo has only `main` today.
+   3. `node core/dist/cli.js migrate --check` shows no step `pending` (`create-factory: already`, `gh-login: already`); there is no `--yes` step on the Blocks store;
+   4. the owner removes `repos/` (`git rm -r repos`) in a normal session.
+4. On the Board, the owner adds factory `tsf` (or `mods`) with a repo, and the factory names a gh login (`kazi-lakit`, or another account added with `gh auth login`). `factory status` shows `gh <ghUser> logged in`. Prerequisite: that repo needs a non-`main` base branch on GitHub (for example `dev`), because `main` is never a base; the factory's own repo has only `main` today.
 5. `/factory:new tsf: <small change>`, then **Mark ready**, then `/factory:run tsf`, step by step until `pr_open` in that factory's repo.
 6. Record the results in the vault overview (plan 6 section). On any failure, fix it and repeat the step.
