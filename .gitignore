@@ -6,3 +6,5 @@ dist/
 runs/
 .DS_Store
 plugin/node_modules
+
+.worktrees/
