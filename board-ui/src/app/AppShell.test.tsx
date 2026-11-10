@@ -11,6 +11,12 @@ import { resetSelectedFactoryForTests, useSelectedFactory } from "../features/fa
 import type { Task } from "@factory/core";
 import { AppShell } from "./AppShell";
 import { AuthProvider } from "./providers/AuthProvider";
+import { useTopBarLead } from "./topBarLead";
+
+function LeadProbe({ onClick }: { onClick: () => void }) {
+  useTopBarLead({ label: "Back", onClick });
+  return <h2>Page body</h2>;
+}
 
 vi.mock("../lib/blocks/client", () => ({ blocksClient: { iam: { me: vi.fn() } } }));
 
@@ -375,5 +381,32 @@ describe("AppShell account pill", () => {
     await screen.findByRole("button", { name: "Sign out (Kazi)" });
     expect(screen.getAllByRole("button", { name: /Sign out/ })).toHaveLength(1);
     expect(document.querySelector(".sf-user")).toBeNull();
+  });
+
+  it("renders the lead button first in the top bar and marks the shell sf-shell-detail", () => {
+    renderShell("/tasks/T-1", <LeadProbe onClick={() => undefined} />);
+    const lead = screen.getByRole("button", { name: "Back" });
+    expect(lead).toHaveClass("sf-topbar-lead");
+    expect(document.querySelector(".sf-topbar")?.firstElementChild).toBe(lead);
+    expect(document.querySelector(".sf-app")).toHaveClass("sf-shell-detail");
+  });
+
+  it("clicking the lead button calls its onClick", () => {
+    const onClick = vi.fn();
+    renderShell("/tasks/T-1", <LeadProbe onClick={onClick} />);
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("has no lead button and no sf-shell-detail by default", () => {
+    renderShell("/");
+    expect(document.querySelector(".sf-topbar-lead")).toBeNull();
+    expect(document.querySelector(".sf-app")).not.toHaveClass("sf-shell-detail");
+  });
+
+  it("keeps one nav.sf-views with three links", () => {
+    renderShell("/", <LeadProbe onClick={() => undefined} />);
+    expect(document.querySelectorAll("nav.sf-views")).toHaveLength(1);
+    expect(document.querySelectorAll("nav.sf-views a")).toHaveLength(3);
   });
 });

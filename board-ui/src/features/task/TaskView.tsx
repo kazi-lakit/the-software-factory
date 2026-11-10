@@ -2,6 +2,7 @@ import { useCallback, useId, useRef } from "react";
 import type { ReactNode } from "react";
 import { GATE_DOC, GATE_STATUS, NotFoundError, type FactoryEvent, type Gate, type Run, type Task } from "@factory/core";
 import { ageOf, formatCost, NEEDS_YOU, STATUS_LABEL } from "../board/status";
+import { useTopBarLead } from "../../app/topBarLead";
 import { followInApp } from "../board/TaskCard";
 import { useFactories } from "../factories/useFactories";
 import { AnswerPanel } from "./AnswerPanel";
@@ -59,6 +60,8 @@ function BackToBoard({ label, onNavigate }: { label: string; onNavigate: (path: 
 export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) => void; taskId: string }) {
   const query = useTask(taskId);
   const { refetch } = query;
+  // Phones: Back sits at the left of the top bar in every state (the in-page link is hidden there).
+  useTopBarLead({ label: "Back", onClick: () => onNavigate("/") });
   // Reload after a conflict: resolves with the latest task so open forms can rebase on its version.
   const reload = useCallback(async () => (await refetch()).data?.task, [refetch]);
 

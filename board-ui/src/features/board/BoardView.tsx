@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createTask, isMainRef, markReady, type FactoryRepo, type Status, type Task } from "@factory/core";
+import { useTopBarLead } from "../../app/topBarLead";
 import { boardStore } from "../../lib/board";
 import { clearUnsent, hasUnsent, keepUnsent, useUnsent } from "../../lib/unsent";
 import { useFactories, useSelectedFactory, type FactoryEntry } from "../factories/useFactories";
@@ -94,6 +95,8 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const [repo, setRepo] = useState("");
   const [view, setView] = useBoardView();
   const [showTest, setShowTest] = useState(false);
+  // Phones show one lane at a time. In memory only: a reload selects Needs you again.
+  const [selectedLane, setSelectedLane] = useState<LaneId>("needs-you");
   const [expanded, setExpanded] = useState<ReadonlySet<Status>>(new Set());
   // Expansion is not remembered: leaving All stages collapses Done and Cancelled again.
   useEffect(() => {
@@ -238,11 +241,30 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
       {board.data ? <WaitingStrip tasks={waiting} showFactory={all} onNavigate={onNavigate} /> : null}
 
       {board.data && view === "lanes" ? (
+        <>
+        <div role="group" aria-label="Lane" className="sf-pills">
+          {LANES.map((lane) => (
+            <button
+              key={lane.id}
+              type="button"
+              className="sf-pill"
+              aria-pressed={selectedLane === lane.id}
+              onClick={() => setSelectedLane(lane.id)}
+            >
+              {lane.name} <span className="sf-count sf-mono">{byLane.get(lane.id)?.length ?? 0}</span>
+            </button>
+          ))}
+        </div>
         <div className="sf-lanes">
           {LANES.map((lane) => {
             const tasks = byLane.get(lane.id) ?? [];
             return (
-              <section key={lane.id} className={`sf-lane${lane.id === "needs-you" ? " sf-lane-needs-you" : ""}`} aria-label={lane.name}>
+              <section
+                key={lane.id}
+                className={`sf-lane${lane.id === "needs-you" ? " sf-lane-needs-you" : ""}`}
+                aria-label={lane.name}
+                data-selected={selectedLane === lane.id ? "true" : "false"}
+              >
                 <div className="sf-lane-head">
                   <h3 className="sf-label sf-lane-name">{lane.name}</h3>
                   <span className="sf-count sf-mono">{tasks.length}</span>
@@ -254,11 +276,14 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
                       <li key={task.taskId}><TaskCard task={task} showFactory={all} onNavigate={onNavigate} /></li>
                     ))}
                   </ul>
+                ) : selectedLane === lane.id ? (
+                  <p className="sf-empty sf-lane-empty">Nothing in {lane.name}.</p>
                 ) : null}
               </section>
             );
           })}
         </div>
+        </>
       ) : null}
 
       {board.data && view === "stages" ? (
@@ -341,6 +366,8 @@ function NewTaskPanel({ entries, factoriesFailed, factoriesLoading, link, onClos
 type FormProps = Pick<PanelProps, "entries" | "id" | "onCreated"> & { note: string; onClose: () => void; onNoteClear: () => void; start: string };
 
 function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start }: FormProps) {
+  // Phones: Cancel sits at the left of the top bar while the form is open; it closes like Close.
+  useTopBarLead({ label: "Cancel", onClick: onClose });
   const [title, setTitle, clearTitle] = useUnsent(newTaskId("title"));
   const [description, setDescription, clearDescription] = useUnsent(newTaskId("description"));
   const [factoryValue, setFactory, clearFactory] = useUnsent(newTaskId("factory"), start);
@@ -447,9 +474,9 @@ function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start
       {note ? <p role="status">{note}</p> : null}
       {baseProblem ? <p className="sf-problem" role="alert">{baseProblem}</p> : null}
       <WriteProblemNotice problem={problem} />
-      <div className="sf-actions">
+      <div className="sf-actions sf-action-bar">
         <button type="submit" className="sf-button sf-button-primary" disabled={busy}>Create task</button>
-        <button type="button" className="sf-button" onClick={onClose}>Close</button>
+        <button type="button" className="sf-button sf-action-close" onClick={onClose}>Close</button>
       </div>
     </form>
   );
