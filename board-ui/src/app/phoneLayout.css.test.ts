@@ -32,6 +32,14 @@ describe("phone top bar and tab bar", () => {
     expect(tokens(css, ".sf-topbar")["min-height"]).toBe("var(--sf-bar-height)");
   });
 
+  it("phone top bar keeps the base opaque background", () => {
+    const t = phone(".sf-topbar");
+    expect(t).not.toHaveProperty("background");
+    expect(t).not.toHaveProperty("background-color");
+    expect(t).not.toHaveProperty("opacity");
+    expect(t).not.toHaveProperty("box-shadow");
+  });
+
   it("phone shows the lead button and the base hides it", () => {
     expect(phone(".sf-topbar-lead").display).toBe("inline-flex");
     expect(tokens(css, ".sf-topbar-lead").display).toBe("none");
