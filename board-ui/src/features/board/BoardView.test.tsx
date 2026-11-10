@@ -701,3 +701,64 @@ describe("BoardView lanes", () => {
 
 /** A card's text without its volatile parts: the title is what orders the list. */
 const D = (text: string) => /D\d/.exec(text)?.[0] ?? text;
+
+const NEEDS_YOU_NAMES = ["Spec review", "Plan review", "PR open", "Blocked"];
+
+describe("BoardView all stages restyle", () => {
+  beforeEach(showStages);
+
+  it("shows_one_hint_line_above_the_strip", async () => {
+    await seedTask({ title: "First" });
+    const { container } = renderBoard();
+    const hint = await screen.findByText(/Every status as its own column\./);
+    expect(hint.textContent).toContain("Every status as its own column. Outlined columns wait for you.");
+    expect(hint.textContent).toContain("Scroll sideways for Review, PR open, Done, Blocked and Cancelled");
+    expect(hint.tagName).toBe("P");
+    expect(hint.nextElementSibling).toHaveClass("sf-columns");
+    expect(container.querySelectorAll(".sf-columns")).toHaveLength(1);
+    expect(container.querySelectorAll(".sf-columns > section")).toHaveLength(13);
+  });
+
+  it("marks_exactly_the_four_owner_columns_as_needs_you", async () => {
+    await seedTask({ title: "First" });
+    renderBoard();
+    await screen.findByText("First");
+    for (const name of ORDER) {
+      if (NEEDS_YOU_NAMES.includes(name)) expect(column(name)).toHaveClass("sf-column-needs-you");
+      else expect(column(name)).not.toHaveClass("sf-column-needs-you");
+    }
+  });
+
+  it("shows_no_hint_or_strip_in_lanes", async () => {
+    window.localStorage.removeItem(BOARD_VIEW_KEY);
+    await seedTask({ title: "First" });
+    const { container } = renderBoard();
+    await screen.findByText("First");
+    expect(screen.queryByText(/Every status as its own column/)).toBeNull();
+    expect(container.querySelector(".sf-columns")).toBeNull();
+  });
+
+  it("shows_no_hint_or_strip_while_loading", () => {
+    const { container } = renderBoard();
+    expect(screen.getByText("Loading tasks…")).toHaveAttribute("role", "status");
+    expect(screen.queryByText(/Every status as its own column/)).toBeNull();
+    expect(container.querySelector(".sf-columns")).toBeNull();
+  });
+
+  it("shows_no_hint_or_strip_when_the_board_fails_to_load", async () => {
+    vi.spyOn(fakeBoard().owner, "listTasks").mockRejectedValue(new Error("down"));
+    const { container } = renderBoard();
+    await screen.findByRole("alert");
+    expect(screen.queryByText(/Every status as its own column/)).toBeNull();
+    expect(container.querySelector(".sf-columns")).toBeNull();
+  });
+
+  it("an_empty_column_keeps_its_frame_and_zero_count", async () => {
+    renderBoard();
+    const plan = await screen.findByRole("region", { name: "Plan review" });
+    expect(within(plan).getByText("0")).toHaveClass("sf-count");
+    expect(screen.getAllByRole("region")).toHaveLength(13);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show test tasks" }));
+    expect(screen.getAllByRole("region")).toHaveLength(13);
+  });
+});
