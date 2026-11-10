@@ -1379,6 +1379,43 @@ textarea.sf-input {
   }
 }
 
+/* All stages on desktop: the shell is the window height and the column strip is the one scroll
+   container, so its horizontal scrollbar sits on the bottom edge of the window (T-20). */
+@media (min-width: 1024px) {
+  .sf-app:has(.sf-view-stages) {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .sf-app:has(.sf-view-stages) .sf-main {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    padding-bottom: 0;
+  }
+
+  .sf-view.sf-view-stages {
+    display: flex;
+    flex: 1 0 auto;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+  }
+
+  .sf-view-stages > * {
+    flex-shrink: 0;
+  }
+
+  .sf-view-stages > .sf-columns {
+    flex: 1 1 0;
+    min-height: 240px;
+    overflow: auto;
+  }
+}
+
 /* Lanes wrap to two columns below 1100px and to one below 640px. */
 @media (max-width: 1099px) {
   .sf-lanes {

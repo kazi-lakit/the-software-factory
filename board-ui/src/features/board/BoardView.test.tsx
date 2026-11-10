@@ -730,6 +730,26 @@ describe("BoardView all stages restyle", () => {
     }
   });
 
+  it("marks_the_view_root_with_sf_view_stages_in_all_stages", async () => {
+    await seedTask({ title: "First" });
+    const { container } = renderBoard();
+    await screen.findByText("First");
+    expect(container.querySelector(".sf-view")).toHaveClass("sf-view-stages");
+    expect(container.querySelectorAll(".sf-view-stages")).toHaveLength(1);
+  });
+
+  it("drops_sf_view_stages_in_lanes", async () => {
+    await seedTask({ title: "First" });
+    const { container } = renderBoard();
+    await screen.findByText("First");
+    fireEvent.click(screen.getByRole("button", { name: "Lanes" }));
+    expect(container.querySelector(".sf-view")).toHaveClass("sf-view");
+    expect(container.querySelector(".sf-view")).not.toHaveClass("sf-view-stages");
+    expect(container.querySelector(".sf-view-stages")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "All stages" }));
+    expect(container.querySelector(".sf-view")).toHaveClass("sf-view-stages");
+  });
+
   it("shows_no_hint_or_strip_in_lanes", async () => {
     window.localStorage.removeItem(BOARD_VIEW_KEY);
     await seedTask({ title: "First" });

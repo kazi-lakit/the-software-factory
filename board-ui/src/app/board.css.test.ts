@@ -47,6 +47,19 @@ function cssClashes(css: string): string[] {
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (name: string) => readFileSync(join(here, name), "utf8");
 
+/** Body of the first top-level at-rule whose prelude is exactly `prelude`, by brace counting. */
+function atBlock(css: string, prelude: string): string {
+  const start = css.indexOf(`${prelude} {`);
+  if (start < 0) return "";
+  const open = css.indexOf("{", start);
+  let depth = 0;
+  for (let i = open; i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    else if (css[i] === "}" && --depth === 0) return css.slice(open + 1, i);
+  }
+  return "";
+}
+
 describe("cssClashes", () => {
   it("flags_the_tailwind_names_and_a_bare_aside", () => {
     expect(cssClashes(".grid { display: grid; }")).toHaveLength(1);
@@ -784,5 +797,103 @@ describe("board_css_question_and_radio_cards", () => {
     const why = tokens(css, ".sf-radio-why");
     expect(why["white-space"]).toBe("nowrap");
     expect(why["text-overflow"]).toBe("ellipsis");
+  });
+});
+
+// T-20: in All stages on desktop the shell is the window height and the column strip is the one
+// scroll container, so its horizontal scrollbar sits on the bottom edge of the window.
+describe("board_css_all_stages_window_fit", () => {
+  const DESK = "@media (min-width: 1024px)";
+  const block = () => atBlock(read("board.css"), DESK);
+
+  it("desktop_block_exists_once_and_sits_before_the_phone_block", () => {
+    const css = read("board.css");
+    expect(css.split(DESK).length - 1).toBe(1);
+    const at = css.indexOf(DESK);
+    expect(at).toBeGreaterThan(css.indexOf("@media (max-width: 1023px)"));
+    expect(at).toBeLessThan(css.lastIndexOf("@media (max-width: 639px)"));
+  });
+
+  it("shell_is_exactly_the_window_height_in_all_stages", () => {
+    const app = tokens(block(), ".sf-app:has(.sf-view-stages)");
+    expect(app.height).toBe("100dvh");
+    expect(app.overflow).toBe("hidden");
+    expect(block()).toMatch(/\.sf-app:has\(\.sf-view-stages\)\s*\{[^}]*height:\s*100vh;[^}]*height:\s*100dvh;/);
+  });
+
+  it("main_fits_and_has_no_bottom_padding_in_all_stages", () => {
+    expect(tokens(block(), ".sf-app:has(.sf-view-stages) .sf-main")).toMatchObject({
+      display: "flex",
+      "flex-direction": "column",
+      "min-height": "0",
+      "overflow-x": "hidden",
+      "overflow-y": "auto",
+      "padding-bottom": "0",
+    });
+  });
+
+  it("view_is_a_column_that_fills_main", () => {
+    expect(tokens(block(), ".sf-view.sf-view-stages")).toMatchObject({
+      display: "flex",
+      "flex-direction": "column",
+      flex: "1 0 auto",
+      "min-height": "0",
+      "min-width": "0",
+    });
+  });
+
+  it("chrome_keeps_its_natural_height", () => {
+    expect(tokens(block(), ".sf-view-stages > *")["flex-shrink"]).toBe("0");
+  });
+
+  it("strip_is_the_one_scroll_container_with_a_240px_floor", () => {
+    expect(tokens(block(), ".sf-view-stages > .sf-columns")).toMatchObject({
+      flex: "1 1 0",
+      "min-height": "240px",
+      overflow: "auto",
+    });
+    expect(tokens(read("board.css"), ".sf-columns")).toMatchObject({
+      "overflow-x": "auto",
+      gap: "10px",
+      "padding-bottom": "8px",
+    });
+  });
+
+  it("every_desktop_rule_is_scoped_to_all_stages", () => {
+    const lists = selectorLists(block());
+    expect(lists.length).toBeGreaterThan(0);
+    for (const list of lists) {
+      for (const selector of list.split(",").map((s) => s.trim())) expect(selector).toContain("sf-view-stages");
+    }
+  });
+
+  it("desktop_block_has_no_raw_colour_shadow_or_scaffold_clash", () => {
+    const css = block();
+    expect(css).not.toBe("");
+    expect(css).not.toMatch(/box-shadow|#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
+    expect(cssClashes(css)).toEqual([]);
+    const classes = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/\.([\w-]+)/g)].map((m) => m[1] ?? "");
+    expect(classes.length).toBeGreaterThan(0);
+    expect(classes.every((name) => name.startsWith("sf-"))).toBe(true);
+  });
+
+  it("stacking_below_1024px_is_unchanged", () => {
+    const css = read("board.css");
+    const narrow = atBlock(css, "@media (max-width: 1023px)");
+    expect(tokens(narrow, ".sf-columns")).toEqual({ "flex-direction": "column", "overflow-x": "visible" });
+    expect(tokens(narrow, ".sf-column,\n  .sf-column-collapsed")).toMatchObject({ "flex-basis": "auto", width: "100%" });
+    expect(css).toMatch(/@media \(max-width: 1023px\)\s*\{\s*\.sf-columns/);
+  });
+
+  it("column_sizes_and_hint_are_unchanged", () => {
+    const css = read("board.css");
+    expect(tokens(css, ".sf-column").flex).toBe("0 0 216px");
+    expect(tokens(css, ".sf-column-collapsed")["flex-basis"]).toBe("140px");
+    expect(tokens(css, ".sf-columns-hint")["white-space"]).toBe("nowrap");
+    for (const list of selectorLists(block())) {
+      for (const selector of list.split(",").map((s) => s.trim())) {
+        expect(selector).not.toMatch(/\.sf-column$|\.sf-column-collapsed$|\.sf-columns-hint$/);
+      }
+    }
   });
 });
