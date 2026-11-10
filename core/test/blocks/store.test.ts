@@ -698,3 +698,19 @@ describe('BlocksStore', () => {
     });
   });
 });
+
+describe('legacySettingsStatus', () => {
+  it('separates unmoved from unretired legacy rows and is readable by the core', async () => {
+    const data = new FakeBlocksData('any');
+    data.seed('FactorySettings', { scope: 'global', json: JSON.stringify({ paused: true }), version: 1 });
+    data.seed('FactorySettings', { scope: 'data', json: JSON.stringify({ maxParallel: 1 }), version: 1 });
+    const core = new BlocksStore(data, 'core');
+    expect(await core.legacySettingsStatus()).toEqual({ unmoved: ['global', 'data'], unretired: [] });
+    const owner = new BlocksStore(data, 'owner');
+    await owner.updateSettingsScope('blocks', { ...DEFAULT_SETTINGS, paused: true }, { ...DEFAULT_SETTINGS, paused: true });
+    await owner.updateSettingsScope('blocks/data', { maxParallel: 1 }, { maxParallel: 1 });
+    expect(await core.legacySettingsStatus()).toEqual({ unmoved: [], unretired: ['global', 'data'] });
+    await owner.retireLegacySettings();
+    expect(await core.legacySettingsStatus()).toEqual({ unmoved: [], unretired: [] });
+  });
+});

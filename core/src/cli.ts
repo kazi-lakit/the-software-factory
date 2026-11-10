@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { Command, CommanderError } from 'commander';
@@ -9,7 +9,7 @@ import { GATE_DOC } from './gates.js';
 import * as owner from './owner.js';
 import { isReservedPatAccount, readSecret, realExecFile, type ExecFile } from './secrets.js';
 import { isValidId } from './factories.js';
-import { migrate } from './migrate.js';
+import { buildImport, checkMigration, migrate } from './migrate.js';
 import { ForbiddenError, OwnerOnlyError } from './boardStore.js';
 import type { BoardStore } from './store.js';
 import type { AgentStep, Gate, Mode, RepoId } from './types.js';
@@ -234,13 +234,27 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .command('migrate')
     .description('one-time move of today\'s work into factory blocks (re-runnable; run by the owner)')
     .option('--dry-run', 'print the steps without taking them')
-    .option('--yes', 'take the steps')
-    .action(async (o: { dryRun?: boolean; yes?: boolean }, cmd: Command) => {
-      if (o.dryRun !== true && o.yes !== true) throw new CliExit('migrate changes the Board: pass --dry-run to preview or --yes to run', 1);
+    .option('--yes', 'take the steps (on the Blocks store: only the Keychain copy; the rest is the owner\'s import on the Board)')
+    .option('--check', 'read-only: print each step as done or pending; exit 2 while any is pending')
+    .option('--export <file>', 'write the blocks factory and its repos as an import file for the Board (reads only repos/*.yaml)')
+    .action(async (o: { dryRun?: boolean; yes?: boolean; check?: boolean; export?: string }, cmd: Command) => {
+      const home = deps.home ?? homedir();
+      if (o.export !== undefined) {
+        writeFileSync(o.export, `${JSON.stringify(buildImport(findRoot(), home), null, 2)}\n`);
+        return io.out(`wrote ${o.export}`);
+      }
+      if (o.check !== true && o.dryRun !== true && o.yes !== true) throw new CliExit('migrate changes the Board: pass --check or --dry-run to preview, --yes to run, or --export <file>', 1);
       const { store } = await open(cmd);
       const line = (s: { name: string; done: string; detail: string }) => io.out(`${s.name}: ${s.done} - ${s.detail}`);
+      if (o.check === true) {
+        const report = await checkMigration(store, findRoot(), home, exec);
+        report.steps.forEach(line);
+        if (report.steps.some((s) => s.done === 'pending')) throw new CliExit('migration pending', 2);
+        return;
+      }
+      const ownerSteps = (cmd.optsWithGlobals() as { store: string }).store !== 'blocks';
       try {
-        const report = await migrate(store, findRoot(), deps.home ?? homedir(), exec, { dryRun: o.dryRun === true, onStep: line });
+        const report = await migrate(store, findRoot(), home, exec, { dryRun: o.dryRun === true, ownerSteps, onStep: line });
         for (const n of report.notes) io.out(`note: ${n}`);
       } catch (e) {
         // The Blocks store with the core's credential refuses owner-only writes (factory definitions, settings, task factoryId).

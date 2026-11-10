@@ -7,6 +7,8 @@ export { assertMove, canMove, IllegalMoveError, STEP_STATUS, TERMINAL } from './
 export { isProtected } from './branches.js';
 export { ensureMain, validateFactoryDef, validateFactoryRepo, FactoryConfig } from './factories.js';
 export type { FactoryDef, FactoryRepo, FactoryHealth } from './factories.js';
+export { IMPORT_FORMAT, validateImportFile } from './importFile.js';
+export type { ImportFile } from './importFile.js';
 export { GATE_DOC, resolveSettings, resolveGates, validApproval, shouldMerge } from './gates.js';
 export type {
   RepoId, FactoryId, Status, Step, AgentStep, Gate, DocKind, Mode, Task, Doc, Approval, Settings, RepoSettings, Run, FactoryEvent, AgentResult,

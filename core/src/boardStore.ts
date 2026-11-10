@@ -145,6 +145,11 @@ export interface BoardStore {
    * `factory migrate` calls it after moving the settings. Memory and file stores hold no such rows.
    */
   retireLegacySettings(): Promise<{ retired: string[]; remaining: string[] }>;
+  /**
+   * Read-only (either identity). Legacy settings rows (from before factories) a BlocksStore still counts: `unmoved` have no
+   * value under the new scopes yet, `unretired` have moved but are not nulled. Memory and file stores convert on load: both empty.
+   */
+  legacySettingsStatus(): Promise<{ unmoved: string[]; unretired: string[] }>;
   startRun(r: { taskId: string; step: Step; mode: Mode; agent: string }): Promise<Run>;
   openRun(taskId: string, step: Step): Promise<Run | undefined>;
   finishRun(runId: string, p: { result: string; turns: number | null; costUsd: number | null }): Promise<void>;

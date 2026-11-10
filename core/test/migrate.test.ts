@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, test } from 'vitest';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
-import { migrate, type MigrateReport } from '../src/migrate.js';
+import { buildImport, checkMigration, migrate, type MigrateReport } from '../src/migrate.js';
+import { validateImportFile } from '../src/importFile.js';
 import type { ExecFile } from '../src/secrets.js';
 import { FileStore, MemoryStore, type BoardStore } from '../src/store.js';
 
@@ -180,4 +181,39 @@ test('a read-back mismatch stops before step 6', async () => {
   const seen: string[] = [];
   await expect(migrate(store, root, home, fakeKeychain({}).exec, { onStep: (s) => seen.push(s.name) })).rejects.toThrow(/read-back failed: repo data is missing/);
   expect(seen).not.toContain('repos-folder');
+});
+
+describe('buildImport and validateImportFile', () => {
+  test('buildImport reads repos/*.yaml with the migrate defaults and holds no secret', () => {
+    const file = buildImport(root, home);
+    expect(file.format).toBe('factory-import/1');
+    expect(file.factory).toMatchObject({ factoryId: 'blocks', name: 'Blocks', protectedBranches: ['dev', 'stg', 'main'], patAccount: 'github-pat:blocks' });
+    expect(file.repos.map((r) => r.repoId)).toEqual(['data', 'iam', 'localization', 'logic', 'monitor', 'os', 'release']);
+    expect(validateImportFile(JSON.parse(JSON.stringify(file)))).toEqual({ ok: true, value: file });
+    expect(JSON.stringify(file)).not.toMatch(/ghp_|token/i);
+  });
+
+  test('validateImportFile rejects a bad format, fixes a missing main, and rejects a bad repo', () => {
+    const good = buildImport(root, home);
+    expect(validateImportFile({ ...good, format: 'x/2' })).toEqual({ ok: false, error: 'format must be factory-import/1' });
+    expect(validateImportFile(null)).toMatchObject({ ok: false });
+    const noMain = validateImportFile({ ...good, factory: { ...good.factory, protectedBranches: ['dev'] } });
+    expect(noMain.ok && noMain.value.factory.protectedBranches).toEqual(['dev', 'main']);
+    const bad = validateImportFile({ ...good, repos: [{ ...good.repos[0], baseBranch: 'main' }] });
+    expect(bad).toEqual({ ok: false, error: 'repos[0]: main is never a base' });
+    expect(validateImportFile({ ...good, repos: [good.repos[0], good.repos[0]] })).toMatchObject({ ok: false });
+    expect(validateImportFile({ ...good, factory: { ...good.factory, factoryId: 'Bad Id' } })).toMatchObject({ ok: false });
+  });
+});
+
+test('checkMigration is read-only and reports pending then done', async () => {
+  const store = new LegacyMemory();
+  store.seedLegacy();
+  const kc = fakeKeychain({ 'github-pat': SECRET });
+  const before = await checkMigration(store, root, home, kc.exec);
+  expect(names(before)).toEqual(['create-factory:pending', 'tag-tasks:pending', 'move-settings:pending', 'copy-pat:pending']);
+  expect(kc.calls.some((c) => c.args[0] === '-i')).toBe(false);
+  expect(await store.listFactoryDefs()).toEqual([]);
+  await migrate(store, root, home, kc.exec);
+  expect(names(await checkMigration(store, root, home, kc.exec))).toEqual(['create-factory:already', 'tag-tasks:already', 'move-settings:already', 'copy-pat:already']);
 });

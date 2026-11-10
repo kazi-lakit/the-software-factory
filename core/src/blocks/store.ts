@@ -545,6 +545,22 @@ export class BlocksStore implements BoardStore {
     return { retired, remaining };
   }
 
+  async legacySettingsStatus(): Promise<{ unmoved: string[]; unretired: string[] }> {
+    const all = await this.data.list('FactorySettings', {}, ['scope', 'json']);
+    const unmoved: string[] = [];
+    const unretired: string[] = [];
+    if (!legacyIsOn(all)) return { unmoved, unretired };
+    const newRows = new Set(all.filter((r) => !isLegacyRepoRow(r, true) && r.scope !== LEGACY_FACTORY_SCOPE).map((r) => text(r.scope)));
+    for (const r of all) {
+      const scope = text(r.scope);
+      if (scope === LEGACY_FACTORY_SCOPE) {
+        const moved = all.some((x) => text(x.scope) === LEGACY_FACTORY && isLive(x.json));
+        (moved ? unretired : unmoved).push(scope);
+      } else if (isLegacyRepoRow(r, true)) (newRows.has(repoKey(LEGACY_FACTORY, scope)) ? unretired : unmoved).push(scope);
+    }
+    return { unmoved, unretired };
+  }
+
   async getSettings(): Promise<StoredSettings> {
     const { values } = await this.settingsView();
     const out: StoredSettings = { factories: {} };

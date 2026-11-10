@@ -5,6 +5,7 @@ import { basename, join } from 'node:path';
 import { canonicalJson, type BoardStore, type StoredSettings } from './boardStore.js';
 import { DEFAULT_SETTINGS } from './defaults.js';
 import { validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from './factories.js';
+import { IMPORT_FORMAT, validateImportFile, type ImportFile } from './importFile.js';
 import { loadRepoConfig } from './repoConfig.js';
 import { KEYCHAIN_SERVICE, readSecret, SecretMissingError, type ExecFile } from './secrets.js';
 
@@ -14,8 +15,8 @@ const TARGET_ACCOUNT = `github-pat:${LEGACY_FACTORY_ID}`;
 
 export interface MigrateStep {
   name: string;
-  /** `already`: nothing to do (or done before). `now`: done by this run (with `dryRun`, would be). `skipped`: nothing to act on. */
-  done: 'already' | 'now' | 'skipped';
+  /** `already`: nothing to do (or done before). `now`: done by this run (with `dryRun`, would be). `skipped`: nothing to act on. `pending`: an owner step still to do (check and Blocks runs). */
+  done: 'already' | 'now' | 'skipped' | 'pending';
   detail: string;
 }
 export interface MigrateReport {
@@ -25,6 +26,8 @@ export interface MigrateReport {
 }
 export interface MigrateOptions {
   dryRun?: boolean;
+  /** false: only the steps the factory core may do (the Keychain copy); the owner steps are reported as pending. */
+  ownerSteps?: boolean;
   /** Called as each step finishes, so a failure later still shows what was done. */
   onStep?: (s: MigrateStep) => void;
 }
@@ -67,6 +70,71 @@ function loadLegacyRepos(root: string, def: FactoryDef): FactoryRepo[] {
   return out;
 }
 
+/** Step 4. Returns true when the value was copied now. */
+async function copyPat(exec: ExecFile, dry: boolean, push: (name: string, done: MigrateStep['done'], detail: string) => void): Promise<boolean> {
+  if (await hasEntry(exec, TARGET_ACCOUNT)) {
+    push('copy-pat', 'already', `${TARGET_ACCOUNT} exists in Keychain`);
+    return false;
+  }
+  if (dry) {
+    push('copy-pat', (await hasEntry(exec, SOURCE_ACCOUNT)) ? 'now' : 'skipped', `would copy ${SOURCE_ACCOUNT} to ${TARGET_ACCOUNT}`);
+    return false;
+  }
+  let pat: string | undefined;
+  try {
+    pat = await readSecret(SOURCE_ACCOUNT, exec);
+  } catch (e) {
+    if (!(e instanceof SecretMissingError)) throw e;
+  }
+  if (pat === undefined) {
+    push('copy-pat', 'skipped', `${SOURCE_ACCOUNT} not in Keychain; add ${TARGET_ACCOUNT} by hand`);
+    return false;
+  }
+  if (/[\r\n]/.test(pat)) throw new Error(`${SOURCE_ACCOUNT} holds a line break; copy it to ${TARGET_ACCOUNT} by hand`);
+  const { code } = await exec('security', ['-i'], `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${TARGET_ACCOUNT} -w ${quote(pat)}\n`);
+  if (code !== 0) throw new Error(`could not write ${TARGET_ACCOUNT} to Keychain`);
+  push('copy-pat', 'now', `copied ${SOURCE_ACCOUNT} to ${TARGET_ACCOUNT}`);
+  return true;
+}
+
+/** Read-only: where each step stands (`already` or `pending`, `skipped` when there is nothing to act on). Nothing is written or read from the Keychain but entry names. */
+export async function checkMigration(store: BoardStore, root: string, home: string, exec: ExecFile): Promise<MigrateReport> {
+  const steps: MigrateStep[] = [];
+  const notes: string[] = [];
+  const flags = readLegacyFlags(root);
+  const add = (name: string, done: MigrateStep['done'], detail: string) => steps.push({ name, done, detail });
+  const ID = LEGACY_FACTORY_ID;
+  legacyDef(home); // the defaults must be valid
+
+  if ((await store.listFactoryDefs()).some((d) => d.factoryId === ID)) add('create-factory', 'already', `factory ${ID} exists`);
+  else add('create-factory', 'pending', `${ID} factory not on the Board → import it on the Board (Settings → Factories → Import)`);
+
+  const untagged = (await store.listTasks()).filter((t) => !t.factoryId).length;
+  if (untagged > 0 || flags.untagged) add('tag-tasks', 'pending', `${untagged} tasks without a factory`);
+  else add('tag-tasks', 'already', 'every task has a factory');
+
+  const stored = (await store.getSettings()) as unknown as { global?: unknown; factories?: Record<string, unknown> };
+  const legacy = await store.legacySettingsStatus();
+  if ('global' in stored || flags.settings || legacy.unmoved.length > 0) add('move-settings', 'pending', `legacy settings not yet moved${legacy.unmoved.length ? ` (${legacy.unmoved.join(', ')})` : ''}`);
+  else if (legacy.unretired.length > 0) add('move-settings', 'pending', `legacy settings rows not retired (${legacy.unretired.join(', ')})`);
+  else if (stored.factories?.[ID]) add('move-settings', 'already', `settings are under ${ID}`);
+  else add('move-settings', 'skipped', 'no settings stored');
+
+  if (await hasEntry(exec, TARGET_ACCOUNT)) add('copy-pat', 'already', `${TARGET_ACCOUNT} exists in Keychain`);
+  else if (await hasEntry(exec, SOURCE_ACCOUNT)) add('copy-pat', 'pending', `${SOURCE_ACCOUNT} not yet copied to ${TARGET_ACCOUNT}: run factory migrate --yes`);
+  else add('copy-pat', 'skipped', `${SOURCE_ACCOUNT} not in Keychain`);
+
+  return { steps, notes };
+}
+
+/** The import file for the Board: the `blocks` definition with the migrate defaults and the repos of `repos/*.yaml`. No secrets. */
+export function buildImport(root: string, home: string): ImportFile {
+  const factory = legacyDef(home);
+  const r = validateImportFile({ format: IMPORT_FORMAT, factory, repos: loadLegacyRepos(root, factory) });
+  if (!r.ok) throw new Error(`import file: ${r.error}`);
+  return r.value;
+}
+
 const quote = (v: string): string => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
 async function hasEntry(exec: ExecFile, account: string): Promise<boolean> {
@@ -89,6 +157,15 @@ export async function migrate(store: BoardStore, root: string, home: string, exe
     steps.push(s);
     opts.onStep?.(s);
   };
+  if (opts.ownerSteps === false) {
+    // The factory core's half: the Keychain copy. Definitions, settings and task tags are the owner's (the Board's Import action).
+    await copyPat(exec, dry, push);
+    const check = await checkMigration(store, root, home, exec);
+    const owner = check.steps.filter((s) => s.name !== 'copy-pat');
+    for (const s of owner) push(s.name, s.done, s.detail);
+    if (owner.every((s) => s.done !== 'pending') && existsSync(join(root, 'repos'))) push('repos-folder', 'now', 'repos/ is no longer read; remove it with: git rm -r repos');
+    return { steps, notes };
+  }
   const flags = readLegacyFlags(root);
   const would = dry ? 'would ' : '';
 
@@ -144,28 +221,7 @@ export async function migrate(store: BoardStore, root: string, home: string, exe
   }
 
   // 4. The Keychain PAT. The value only passes through memory and the child's stdin; it is never printed.
-  let copied = false;
-  if (await hasEntry(exec, TARGET_ACCOUNT)) {
-    push('copy-pat', 'already', `${TARGET_ACCOUNT} exists in Keychain`);
-  } else if (dry) {
-    push('copy-pat', (await hasEntry(exec, SOURCE_ACCOUNT)) ? 'now' : 'skipped', `would copy ${SOURCE_ACCOUNT} to ${TARGET_ACCOUNT}`);
-  } else {
-    let pat: string | undefined;
-    try {
-      pat = await readSecret(SOURCE_ACCOUNT, exec);
-    } catch (e) {
-      if (!(e instanceof SecretMissingError)) throw e;
-    }
-    if (pat === undefined) {
-      push('copy-pat', 'skipped', `${SOURCE_ACCOUNT} not in Keychain; add ${TARGET_ACCOUNT} by hand`);
-    } else {
-      if (/[\r\n]/.test(pat)) throw new Error(`${SOURCE_ACCOUNT} holds a line break; copy it to ${TARGET_ACCOUNT} by hand`);
-      const { code } = await exec('security', ['-i'], `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${TARGET_ACCOUNT} -w ${quote(pat)}\n`);
-      if (code !== 0) throw new Error(`could not write ${TARGET_ACCOUNT} to Keychain`);
-      copied = true;
-      push('copy-pat', 'now', `copied ${SOURCE_ACCOUNT} to ${TARGET_ACCOUNT}`);
-    }
-  }
+  const copied = await copyPat(exec, dry, push);
 
   // 5. Read back and compare with the source. Nothing is removed before this matches.
   const changed = steps.some((s) => s.done === 'now');

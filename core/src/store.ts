@@ -234,6 +234,10 @@ export class MemoryStore implements BoardStore {
     return { retired: [], remaining: [] };
   }
 
+  async legacySettingsStatus(): Promise<{ unmoved: string[]; unretired: string[] }> {
+    return { unmoved: [], unretired: [] };
+  }
+
   getSettings(): Promise<StoredSettings> {
     return this.read(() => clone(this.state.settings ?? { factories: {} }));
   }

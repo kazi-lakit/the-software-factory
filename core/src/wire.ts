@@ -116,6 +116,7 @@ export class LazyBlocksStore implements BoardStore {
   saveFactoryDef(before: Parameters<BoardStore['saveFactoryDef']>[0], after: Parameters<BoardStore['saveFactoryDef']>[1]) { return this.store.then((s) => s.saveFactoryDef(before, after)); }
   saveFactoryRepo(before: Parameters<BoardStore['saveFactoryRepo']>[0], after: Parameters<BoardStore['saveFactoryRepo']>[1]) { return this.store.then((s) => s.saveFactoryRepo(before, after)); }
   retireLegacySettings() { return this.store.then((s) => s.retireLegacySettings()); }
+  legacySettingsStatus() { return this.store.then((s) => s.legacySettingsStatus()); }
   listFactoryHealth() { return this.store.then((s) => s.listFactoryHealth()); }
   setFactoryHealth(h: Parameters<BoardStore['setFactoryHealth']>[0]) { return this.store.then((s) => s.setFactoryHealth(h)); }
   getSettings() { return this.store.then((s) => s.getSettings()); }

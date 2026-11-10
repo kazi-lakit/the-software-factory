@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
@@ -387,7 +387,7 @@ describe('migrate', () => {
   test('needs --dry-run or --yes', async () => {
     const { err, go } = setup({ defs: [], repos: [] });
     expect(await go('migrate')).toBe(1);
-    expect(err[0]).toMatch(/pass --dry-run to preview or --yes/);
+    expect(err[0]).toMatch(/pass --check or --dry-run to preview, --yes to run/);
   });
 
   test('--yes runs the steps on the store and prints one line per step', async () => {
@@ -401,15 +401,50 @@ describe('migrate', () => {
     expect(out[0]).toBe('create-factory: already - factory blocks exists');
   });
 
-  test('on the Blocks store with the core credential it exits 1 and names the owner-only problem', async () => {
-    rootWithRepos();
+  const blocksCli = (initial: string[]) => {
     const store = new BlocksStore(new FakeBlocksData('factory-core'), 'core');
+    const out: string[] = [];
     const err: string[] = [];
-    const engine = {} as Engine;
-    const code = await run(['--store', 'blocks', 'migrate', '--yes'], { out: () => {}, err: (s) => err.push(s) }, async () => ({ engine, store }), { exec: fakeSecurity([]) });
-    expect(code).toBe(1);
-    expect(err[0]).toMatch(/owner-only rows/);
+    const exec = fakeSecurity(initial);
+    const calls: string[][] = [];
+    const spy: ExecFile = async (f, a, i) => { calls.push(a); return exec(f, a, i); };
+    const go = (...argv: string[]) => run(['--store', 'blocks', ...argv], { out: (s) => out.push(s), err: (s) => err.push(s) }, async () => ({ engine: {} as Engine, store }), { exec: spy });
+    return { store, out, err, go, calls };
+  };
+
+  test('on the Blocks store --yes runs only the Keychain copy and lists the pending owner steps', async () => {
+    rootWithRepos();
+    const { store, out, err, go, calls } = blocksCli(['github-pat']);
+    expect(await go('migrate', '--yes')).toBe(0);
+    expect(err).toEqual([]);
+    expect(out.map((l) => l.split(':')[0])).toEqual(['copy-pat', 'create-factory', 'tag-tasks', 'move-settings']);
+    expect(out[0]).toMatch(/^copy-pat: now/);
+    expect(out[1]).toBe('create-factory: pending - blocks factory not on the Board → import it on the Board (Settings → Factories → Import)');
+    expect(calls.some((a) => a[0] === '-i')).toBe(true);
     expect(await store.listFactoryDefs()).toEqual([]);
+  });
+
+  test('--check is read-only: exit 2 while pending, 0 when done', async () => {
+    rootWithRepos();
+    const { out, go, calls } = blocksCli(['github-pat']);
+    expect(await go('migrate', '--check')).toBe(2);
+    expect(out[0]).toMatch(/^create-factory: pending/);
+    expect(calls.some((a) => a[0] === '-i')).toBe(false);
+    const done = setup({ defs: [defFixture('blocks')], repos: [] }, ['github-pat', 'github-pat:blocks']);
+    expect(await done.go('migrate', '--check')).toBe(0);
+    expect(done.out.every((l) => !l.includes(': pending'))).toBe(true);
+  });
+
+  test('--export writes the import file and needs no store', async () => {
+    const root = rootWithRepos();
+    const file = join(root, 'import.json');
+    const { go, wired } = setup();
+    expect(await go('migrate', '--export', file)).toBe(0);
+    const json = JSON.parse(readFileSync(file, 'utf8'));
+    expect(json.format).toBe('factory-import/1');
+    expect(json.factory.factoryId).toBe('blocks');
+    expect(json.repos).toHaveLength(7);
+    expect(wired).toHaveLength(0);
   });
 });
 
