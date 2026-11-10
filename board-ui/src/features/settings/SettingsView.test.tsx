@@ -404,3 +404,12 @@ describe("SettingsView restyle", () => {
     expect(within(repoRow("data")).getByRole("button", { name: /^Save/ })).not.toHaveClass("sf-button-primary");
   });
 });
+
+describe("SettingsView action bars", () => {
+  it("Settings_forms_keep_plain_sf_actions", async () => {
+    renderSettings();
+    await screen.findByRole("form", { name: "Factory defaults" });
+    expect(document.querySelectorAll(".sf-actions").length).toBeGreaterThan(0);
+    expect(document.querySelector(".sf-action-bar")).toBeNull();
+  });
+});

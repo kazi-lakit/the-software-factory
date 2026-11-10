@@ -2,12 +2,15 @@ import { useCallback, useId, useRef } from "react";
 import type { ReactNode } from "react";
 import { GATE_DOC, GATE_STATUS, NotFoundError, unfinishedDeps, type FactoryEvent, type Gate, type Run, type Task } from "@factory/core";
 import { ageOf, formatCost, NEEDS_YOU, STATUS_LABEL, taskPath } from "../board/status";
+import { useTopBarLead } from "../../app/topBarLead";
 import { followInApp } from "../board/TaskCard";
 import { useBoard } from "../board/useBoard";
 import { useFactories } from "../factories/useFactories";
 import { AnswerPanel } from "./AnswerPanel";
 import { DocVersions } from "./DocVersions";
 import { GatePanel } from "./GatePanel";
+import { QaLog } from "./QaLog";
+import { buildQaLog } from "./qaEntries";
 import { Stepper } from "./Stepper";
 import { TaskActions } from "./TaskActions";
 import { useTask } from "./useTask";
@@ -58,6 +61,8 @@ function BackToBoard({ label, onNavigate }: { label: string; onNavigate: (path: 
 export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) => void; taskId: string }) {
   const query = useTask(taskId);
   const { refetch } = query;
+  // Phones: Back sits at the left of the top bar in every state (the in-page link is hidden there).
+  useTopBarLead({ label: "Back", onClick: () => onNavigate("/") });
   // Reload after a conflict: resolves with the latest task so open forms can rebase on its version.
   const reload = useCallback(async () => (await refetch()).data?.task, [refetch]);
 
@@ -83,6 +88,7 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
 
   const { approvals, docs, events, runs, task } = query.data;
   const gate = gateOf(task);
+  const qaEntries = buildQaLog(events, task.status === "blocked" ? task.question : null);
 
   return (
     <div className="sf-view sf-task">
@@ -108,7 +114,8 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
       {gate ? (
         <GatePanel key={`${task.taskId}:${gate}`} task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} />
       ) : null}
-      {task.status === "blocked" ? <AnswerPanel key={task.taskId} task={task} onReload={reload} /> : null}
+      {task.status === "blocked" ? <AnswerPanel key={task.taskId} task={task} events={events} onReload={reload} /> : null}
+      {qaEntries.length > 0 ? <Section title="Questions and answers"><QaLog entries={qaEntries} /></Section> : null}
 
       <Section title="Runs"><RunsTable runs={runs} /></Section>
       <Section title="History"><History events={events} /></Section>

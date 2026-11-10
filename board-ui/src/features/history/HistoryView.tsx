@@ -5,19 +5,15 @@ import { taskPath } from "../board/status";
 import { followInApp } from "../board/TaskCard";
 import { useFactories } from "../factories/useFactories";
 import {
-  ACTOR_FILTERS, filterEvents, NO_FILTERS, SETTINGS_TASK, useHistory, type ActorFilter, type HistoryFilters, type ModeFilter
+  ACTOR_FILTERS, filterEvents, NO_FILTERS, SETTINGS_TASK, useHistory, type ActorFilter, type HistoryFilters, type KindFilter, type ModeFilter
 } from "./useHistory";
+import { formatTime } from "../../lib/formatTime";
 
 type Navigate = (path: string) => void;
 
 const PAGE = 200;
 // A from or to value longer than this is cut; the full change is in the cell's title.
 const MAX_VALUE = 48;
-
-const formatTime = (iso: string): string => {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
-};
 
 const valueText = (value: string | null): string => (value === null ? "—" : value.replace(/\s+/g, " ").trim());
 const cut = (text: string): string => (text.length > MAX_VALUE ? `${text.slice(0, MAX_VALUE - 1)}…` : text);
@@ -67,6 +63,13 @@ export function HistoryView({ onNavigate }: { onNavigate: Navigate }) {
             <option value="sdk">sdk</option>
             <option value="loop">loop</option>
             <option value="session">session</option>
+          </select>
+        </label>
+        <label className="sf-inline-field" htmlFor={`${ids}-kind`}>
+          <span>Kind</span>
+          <select id={`${ids}-kind`} className="sf-select" value={filters.kind} onChange={(e) => setFilter("kind", e.target.value as KindFilter)}>
+            <option value="all">All events</option>
+            <option value="qa">Questions and answers</option>
           </select>
         </label>
         <label className="sf-inline-field" htmlFor={`${ids}-task`}>

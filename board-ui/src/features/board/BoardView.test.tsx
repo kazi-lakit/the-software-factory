@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenError } from "@factory/core";
 import { clearAllUnsent, keepUnsent } from "../../lib/unsent";
 import { factory, merge } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
+import { TopBarLeadContext, type Lead } from "../../app/topBarLead";
 import { BoardView } from "./BoardView";
 import { BOARD_VIEW_KEY, resetBoardViewForTests } from "./useBoardView";
 
@@ -963,5 +964,161 @@ describe("BoardView dependencies", () => {
       const tasks = await fakeBoard().owner.listTasks();
       expect(tasks.find((x) => x.title === "Child")?.dependsOn).toEqual([dep.taskId]);
     });
+  });
+});
+
+describe("BoardView top bar Cancel", () => {
+  function renderWithLead() {
+    const leads: Array<Lead | null> = [];
+    const setter = (lead: Lead | null) => void leads.push(lead);
+    const view = renderWithClient(
+      <TopBarLeadContext.Provider value={setter}>
+        <BoardView onNavigate={vi.fn()} />
+      </TopBarLeadContext.Provider>
+    );
+    return { leads, ...view };
+  }
+  const last = (leads: Array<Lead | null>) => leads[leads.length - 1];
+
+  it("registers_Cancel_in_the_top_bar_while_the_New_task_form_is_open", async () => {
+    const { leads } = renderWithLead();
+    expect(last(leads)).toBeUndefined();
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    expect(last(leads)?.label).toBe("Cancel");
+  });
+
+  it("the_Cancel_lead_closes_the_form_exactly_like_Close_and_keeps_the_unsent_draft", async () => {
+    const { leads } = renderWithLead();
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    fireEvent.change(within(screen.getByRole("form", { name: "New task" })).getByLabelText("Title"), { target: { value: "Half typed" } });
+    act(() => last(leads)?.onClick());
+    expect(screen.queryByRole("form", { name: "New task" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    expect(within(screen.getByRole("form", { name: "New task" })).getByLabelText("Title")).toHaveValue("Half typed");
+  });
+
+  it("the_lead_is_cleared_when_the_form_closes_including_by_the_New_task_button", async () => {
+    const { leads } = renderWithLead();
+    const open = await screen.findByRole("button", { name: "New task" });
+    fireEvent.click(open);
+    expect(last(leads)?.label).toBe("Cancel");
+    fireEvent.click(open);
+    expect(screen.queryByRole("form", { name: "New task" })).not.toBeInTheDocument();
+    expect(last(leads)).toBeNull();
+  });
+});
+
+describe("BoardView lane pills", () => {
+  const NAMES = ["Needs you", "Queued", "Working", "Done", "Stopped"];
+  const group = () => screen.getByRole("group", { name: "Lane" });
+  const pill = (name: string) => within(group()).getByRole("button", { name: new RegExp(`^${name}`) });
+  const section = (name: string) => screen.getByRole("region", { name });
+  const seedTwo = async () => {
+    await seedTask({ title: "Spec rev" }, "spec_review", { stage: "spec" });
+    await seedTask({ title: "PR task" }, "pr_open");
+    await seedTask({ title: "Building" }, "build");
+  };
+
+  it("shows_lane_pills_in_order_with_counts_and_Needs_you_pressed_by_default", async () => {
+    await seedTwo();
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    const buttons = within(group()).getAllByRole("button");
+    expect(buttons.map((b) => b.textContent)).toEqual(["Needs you 2", "Queued 0", "Working 1", "Done 0", "Stopped 0"]);
+    expect(buttons.every((b) => b.classList.contains("sf-pill"))).toBe(true);
+    expect(group()).toHaveClass("sf-pills");
+    for (const name of NAMES) expect(pill(name)).toHaveAttribute("aria-pressed", name === "Needs you" ? "true" : "false");
+  });
+
+  it("clicking_Working_selects_it_deselects_Needs_you_and_flips_data_selected", async () => {
+    await seedTwo();
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    fireEvent.click(pill("Working"));
+    expect(pill("Working")).toHaveAttribute("aria-pressed", "true");
+    expect(pill("Needs you")).toHaveAttribute("aria-pressed", "false");
+    expect(section("Working")).toHaveAttribute("data-selected", "true");
+    expect(section("Needs you")).toHaveAttribute("data-selected", "false");
+  });
+
+  it("each_lane_section_has_data_selected_true_only_for_the_selected_lane", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Needs you" });
+    expect(NAMES.map((n) => section(n).getAttribute("data-selected"))).toEqual(["true", "false", "false", "false", "false"]);
+  });
+
+  it("switching_pills_does_not_call_listTasks_again", async () => {
+    await seedTwo();
+    const spy = vi.spyOn(fakeBoard().owner, "listTasks");
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    const before = spy.mock.calls.length;
+    for (const name of ["Working", "Done", "Needs you"]) fireEvent.click(pill(name));
+    expect(spy.mock.calls.length).toBe(before);
+  });
+
+  it("All_stages_renders_no_pill_group", async () => {
+    showStages();
+    await seedTwo();
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    expect(screen.queryByRole("group", { name: "Lane" })).not.toBeInTheDocument();
+  });
+
+  it("the_selected_lane_resets_to_Needs_you_on_remount_and_is_not_stored", async () => {
+    await seedTwo();
+    const first = renderBoard();
+    await screen.findAllByText("Spec rev");
+    const keys = Object.keys(window.localStorage).sort();
+    fireEvent.click(pill("Done"));
+    expect(Object.keys(window.localStorage).sort()).toEqual(keys);
+    first.unmount();
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    expect(pill("Needs you")).toHaveAttribute("aria-pressed", "true");
+  });
+});
+
+describe("BoardView empty lane text", () => {
+  it("an_empty_selected_lane_shows_Nothing_in_Stopped", async () => {
+    await seedTask({ title: "Spec rev" }, "spec_review", { stage: "spec" });
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    fireEvent.click(screen.getByRole("button", { name: /^Stopped/ }));
+    const text = within(screen.getByRole("region", { name: "Stopped" })).getByText("Nothing in Stopped.");
+    expect(text).toHaveClass("sf-empty", "sf-lane-empty");
+  });
+
+  it("only_the_selected_lane_renders_the_empty_text", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Needs you" });
+    expect(screen.getAllByText(/^Nothing in /).map((e) => e.textContent)).toEqual(["Nothing in Needs you."]);
+    fireEvent.click(screen.getByRole("button", { name: /^Working/ }));
+    expect(screen.getAllByText(/^Nothing in /).map((e) => e.textContent)).toEqual(["Nothing in Working."]);
+  });
+
+  it("a_lane_with_tasks_renders_no_empty_text", async () => {
+    await seedTask({ title: "Spec rev" }, "spec_review", { stage: "spec" });
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    expect(screen.queryByText(/^Nothing in /)).not.toBeInTheDocument();
+  });
+});
+
+describe("New task form action bar", () => {
+  it("Create_task_sits_in_sf_action_bar_and_Close_is_in_the_same_bar", async () => {
+    renderBoard();
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    const form = screen.getByRole("form", { name: "New task" });
+    const bar = within(form).getByRole("button", { name: "Create task" }).parentElement;
+    expect(bar).toHaveClass("sf-actions", "sf-action-bar");
+    expect(bar).toContainElement(within(form).getByRole("button", { name: "Close" }));
+  });
+
+  it("Close_has_the_sf_action_close_class", async () => {
+    renderBoard();
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    const form = screen.getByRole("form", { name: "New task" });
+    expect(within(form).getByRole("button", { name: "Close" })).toHaveClass("sf-action-close");
   });
 });

@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { FactoryEvent, Mode } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { isTestTask } from "../board/status";
+import { isQaEvent } from "../../lib/qaEvent";
 
 /** Every history query starts with this key; a settings save invalidates them all. */
 export const HISTORY_KEY = ["history"] as const;
@@ -98,14 +99,17 @@ export function localDate(iso: string): string | undefined {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export type HistoryFilters = { actor: ActorFilter; factory: string; mode: ModeFilter; task: string; from: string; to: string };
+export type KindFilter = "all" | "qa";
 
-export const NO_FILTERS: HistoryFilters = { actor: "all", factory: "", from: "", mode: "all", task: "", to: "" };
+export type HistoryFilters = { actor: ActorFilter; factory: string; kind: KindFilter; mode: ModeFilter; task: string; from: string; to: string };
+
+export const NO_FILTERS: HistoryFilters = { actor: "all", factory: "", from: "", kind: "all", mode: "all", task: "", to: "" };
 
 /** The events that pass every filter; the date range is inclusive, in local dates. */
 export function filterEvents(events: readonly FactoryEvent[], filters: HistoryFilters): FactoryEvent[] {
   return events.filter((event) => {
     if (!actorMatches(event.actor, filters.actor)) return false;
+    if (filters.kind === "qa" && !isQaEvent(event)) return false;
     if (filters.mode !== "all" && actorMode(event.actor) !== filters.mode) return false;
     if (filters.factory !== "" && event.factoryId !== filters.factory) return false;
     if (filters.task !== "" && event.taskId !== filters.task) return false;

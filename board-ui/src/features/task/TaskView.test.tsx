@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAllUnsent } from "../../lib/unsent";
 import { factory } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
+import { TopBarLeadContext, type Lead } from "../../app/topBarLead";
 import { TaskView } from "./TaskView";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
@@ -247,5 +248,100 @@ describe("TaskView dependencies", () => {
     await waitFor(() => expect(link.closest("li")).toHaveTextContent("Build"));
     fireEvent.click(link);
     expect(onNavigate).toHaveBeenCalledWith(`/tasks/${dep.taskId}`);
+  });
+});
+
+describe("TaskView questions and answers", () => {
+  const LETTERED = "Which branch?\nA. main: fits (recommended)\nB. develop: more work";
+  const at = (n: number) => `2026-11-0${n}T10:00:00.000Z`;
+  const qa = (taskId: string, field: "question" | "answer", to: string, n: number, reason = field === "answer" ? "answered" : "asked") => ({
+    action: "set" as const, actor: field === "question" ? "spec-writer · sdk · run R-1" : "you", at: at(n), factoryId: "blocks", field, from: null, reason, taskId, to
+  });
+
+  it("shows_the_qa_log_under_the_answer_panel_when_blocked", async () => {
+    const task = await seedTask({ title: "Stuck" }, "blocked", { question: "Open now?", stage: "plan" });
+    await fakeBoard().core.addEvents([qa(task.taskId, "question", LETTERED, 1), qa(task.taskId, "answer", "A. main: fits", 2), qa(task.taskId, "question", "Open now?", 3)]);
+    renderTask(task.taskId);
+    const log = await screen.findByRole("region", { name: "Questions and answers" });
+    expect(within(log).getByText("Which branch?")).toBeInTheDocument();
+    expect(within(log).getByText("A. main: fits")).toBeInTheDocument();
+    expect(within(log).getByText("Recommended")).toBeInTheDocument();
+    expect(within(log).queryByText("Open now?")).toBeNull();
+    const panel = screen.getByRole("region", { name: "Open now?" });
+    expect(panel.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("non_blocked_task_with_past_answers_shows_the_log_without_a_panel", async () => {
+    const task = await seedTask({ title: "Moving" }, "plan", { stage: "plan" });
+    await fakeBoard().core.addEvents([qa(task.taskId, "question", "Continue?", 1), qa(task.taskId, "answer", "yes", 2)]);
+    renderTask(task.taskId);
+    expect(await screen.findByRole("region", { name: "Questions and answers" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Your answer")).toBeNull();
+  });
+
+  it("no_qa_section_when_there_are_no_entries", async () => {
+    const task = await seedTask({ title: "Quiet" });
+    renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 2, name: "Quiet" });
+    expect(screen.queryByRole("region", { name: "Questions and answers" })).toBeNull();
+  });
+
+  it("gate_changes_requested_answer_is_not_in_the_log", async () => {
+    const task = await seedTask({ title: "Gate" }, "plan", { stage: "plan" });
+    await fakeBoard().core.addEvents([qa(task.taskId, "answer", "please change X", 1, "spec changes requested")]);
+    renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 2, name: "Gate" });
+    expect(screen.queryByRole("region", { name: "Questions and answers" })).toBeNull();
+    expect(screen.queryByText("please change X")).toBeNull();
+  });
+
+  describe("top bar Back", () => {
+    function renderWithLead(taskId: string) {
+      const onNavigate = vi.fn();
+      const leads: Array<Lead | null> = [];
+      const setter = (lead: Lead | null) => void leads.push(lead);
+      const view = renderWithClient(
+        <TopBarLeadContext.Provider value={setter}>
+          <TaskView taskId={taskId} onNavigate={onNavigate} />
+        </TopBarLeadContext.Provider>
+      );
+      return { leads, onNavigate, ...view };
+    }
+
+    it("registers_Back_when_loaded_and_navigates_to_the_board", async () => {
+      const task = await seedTask({ title: "Back me" });
+      const { leads, onNavigate } = renderWithLead(task.taskId);
+      await screen.findByRole("heading", { level: 2, name: "Back me" });
+      const lead = leads[leads.length - 1];
+      expect(lead?.label).toBe("Back");
+      lead?.onClick();
+      expect(onNavigate).toHaveBeenCalledWith("/");
+    });
+
+    it("registers_Back_while_loading", () => {
+      const { leads } = renderWithLead("T-1");
+      expect(screen.getByRole("status")).toHaveTextContent("Loading T-1");
+      expect(leads[0]?.label).toBe("Back");
+    });
+
+    it("registers_Back_when_the_task_is_not_found", async () => {
+      const { leads } = renderWithLead("T-404");
+      await screen.findByText(/was not found/);
+      expect(leads[leads.length - 1]?.label).toBe("Back");
+    });
+
+    it("registers_Back_when_loading_failed", async () => {
+      vi.spyOn(fakeBoard().owner, "getTask").mockRejectedValue(new Error("boom"));
+      const { leads } = renderWithLead("T-1");
+      await screen.findByText(/Could not load/);
+      expect(leads[leads.length - 1]?.label).toBe("Back");
+    });
+
+    it("clears_the_lead_on_unmount", async () => {
+      const { leads, unmount } = renderWithLead("T-404");
+      await screen.findByText(/was not found/);
+      unmount();
+      expect(leads[leads.length - 1]).toBeNull();
+    });
   });
 });

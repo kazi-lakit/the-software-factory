@@ -313,3 +313,36 @@ describe("GatePanel styling", () => {
     for (const filled of ["sf-button-accent", "sf-button-primary", "sf-button-danger"]) expect(changes).not.toHaveClass(filled);
   });
 });
+
+describe("GatePanel action bar", () => {
+  it("the_gate_buttons_sit_in_a_sf_actions_sf_action_bar", async () => {
+    const seeded = await atSpecGate();
+    task = seeded.task;
+    renderPanel(seeded.docs);
+    const bar = screen.getByRole("button", { name: "Approve" }).parentElement;
+    expect(bar).toHaveClass("sf-actions", "sf-action-bar");
+    expect(bar).toContainElement(screen.getByRole("button", { name: "Request changes" }));
+  });
+
+  it("merge_on_github_gate_has_only_Request_changes_in_the_bar", async () => {
+    const created = await fakeBoard().owner.createTask({ factoryId: "blocks", baseBranch: "dev", description: "", repo: "data", title: "Ship me" });
+    const t = await fakeBoard().core.updateTask(created.taskId, created.version, { prUrl: "https://github.com/SELISEdigitalplatforms/blocks-data/pull/7", stage: "ship", status: "pr_open" });
+    await fakeBoard().core.addDoc(t.taskId, "review", "# Review\nAll good.", "reviewer");
+    task = t;
+    renderWithClient(<GatePanel task={t} gate="pr" docs={await fakeBoard().owner.listDocs(t.taskId, "review")} approvals={[]} onReload={vi.fn()} />);
+    await screen.findByText(/never merges into/);
+    const bar = screen.getByRole("button", { name: "Request changes" }).parentElement;
+    expect(bar).toHaveClass("sf-action-bar");
+    expect(within(bar as HTMLElement).getAllByRole("button")).toHaveLength(1);
+  });
+
+  it("buttons_are_disabled_while_a_write_is_in_progress", async () => {
+    const seeded = await atSpecGate();
+    task = seeded.task;
+    renderPanel(seeded.docs);
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Request changes" })).toBeDisabled();
+    await screen.findByText(/Approval recorded for spec/);
+  });
+});
