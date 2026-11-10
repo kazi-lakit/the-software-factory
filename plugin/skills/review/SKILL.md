@@ -27,4 +27,4 @@ You do not start in the worktree; your session may start in the factory folder o
 - Do not request changes outside the spec's scope, and do not block on style nits.
 
 ## When to return `blocked`
-If the spec or diff is missing or truncated so you cannot judge, reply `blocked` with one question. No doc.
+If the spec or diff is missing or truncated so you cannot judge, reply `blocked` with one question. No doc. Write the question in the reply-format question shape: 2 to 4 lettered options with one marked (recommended).

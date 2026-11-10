@@ -26,4 +26,4 @@ You do not start in the worktree; your session may start in the factory folder o
 - No placeholders such as "add tests" or "handle errors"; name them.
 
 ## When to return `blocked`
-If the spec is contradictory or leaves out something the plan cannot proceed without, reply `blocked` with one question. No doc.
+If the spec is contradictory or leaves out something the plan cannot proceed without, reply `blocked` with one question. No doc. Write the question in the reply-format question shape: 2 to 4 lettered options with one marked (recommended).
