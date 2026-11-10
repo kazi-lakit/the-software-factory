@@ -18,7 +18,8 @@ export interface CheckReport {
 
 const OUTPUT_LIMIT = 4000;
 
-// Commands come from trusted repos/<repo>.yaml, so a shell is intended.
+// Commands come from the repo's FactoryRepo row on the Board, which only the owner may write (the Blocks rules), so a
+// shell is intended. Each step's cwd is validated to stay inside the worktree (ChecksSchema).
 export const shellExec: Exec = (cmd, cwd) =>
   new Promise((resolve) => {
     let output = '';

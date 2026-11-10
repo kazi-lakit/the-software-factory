@@ -74,6 +74,7 @@ export function validateFactoryDef(input: unknown): Validated<FactoryDef> {
   }
   if (patAccount.trim().toLowerCase() === 'blocks-credential') return fail('patAccount blocks-credential is reserved');
   if (gitEmail !== '' && !gitEmail.includes('@')) return fail('gitEmail must contain @');
+  if (docsPath !== '' && !docsPath.startsWith('/')) return fail('docsPath must be an absolute folder or empty');
   const rawBranches = input.protectedBranches ?? ['dev', 'stg', 'main'];
   if (!Array.isArray(rawBranches) || !rawBranches.every((b) => typeof b === 'string')) return fail('protectedBranches must be a list of branch names');
   const active = input.active ?? true;
@@ -95,6 +96,8 @@ export function validateFactoryRepo(input: unknown, def: FactoryDef): Validated<
   if (!isValidId(repoId)) return fail(`repoId must match ${ID_PATTERN.source} and be at most ${ID_MAX} characters`);
   const remote = text(input, 'remote', '');
   if (remote === null || remote === '') return fail('remote must not be blank');
+  // git would read it as an option (`git clone -- <remote>` guards the clone too).
+  if (remote.startsWith('-')) return fail('remote must not start with -');
   const baseBranch = text(input, 'baseBranch', 'dev');
   if (baseBranch === null || baseBranch === '') return fail('baseBranch must not be blank');
   if (isMainRef(baseBranch)) return fail('main is never a base');

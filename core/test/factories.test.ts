@@ -52,6 +52,13 @@ describe('validateFactoryDef', () => {
     expect(r).toMatchObject({ ok: false });
     expect(JSON.stringify(r)).toContain('patAccount blocks-credential is reserved');
   });
+  test.each(['docs', './docs', '~/docs'])('a non-empty docsPath must be absolute (%j) (M5)', (docsPath) => {
+    expect(validateFactoryDef(defInput({ docsPath }))).toEqual({ ok: false, error: 'docsPath must be an absolute folder or empty' });
+  });
+  test('docsPath may be empty or absolute (M5)', () => {
+    expect(validateFactoryDef(defInput({ docsPath: '' })).ok).toBe(true);
+    expect(validateFactoryDef(defInput({ docsPath: '/Users/me/docs' })).ok).toBe(true);
+  });
   test('a non-empty gitEmail needs an @', () => {
     expect(validateFactoryDef(defInput({ gitEmail: 'nope' })).ok).toBe(false);
     expect(validateFactoryDef(defInput({ gitEmail: '' })).ok).toBe(true);
@@ -64,6 +71,16 @@ describe('validateFactoryRepo', () => {
   test.each(['main', 'refs/heads/main', 'origin/main', ' Main '])('main is never a base (%j)', (baseBranch) => {
     const r = validateFactoryRepo({ repoId: 'api', remote: 'r', baseBranch, checks }, def);
     expect(r).toEqual({ ok: false, error: 'main is never a base' });
+  });
+  test.each(['-uupload-pack=x', ' --upload-pack=x'])('refuses a remote that starts with - (%j) (M4)', (remote) => {
+    expect(validateFactoryRepo({ repoId: 'api', remote, checks }, def)).toEqual({ ok: false, error: 'remote must not start with -' });
+  });
+  test.each([['/tmp', 'an absolute'], ['../x', 'a ..'], ['a/../../b', 'a ..'], ['a\\..\\b', 'a ..']])('refuses checks cwd %j (%s path) (M6)', (cwd) => {
+    const r = validateFactoryRepo({ repoId: 'api', remote: 'r', checks: { ...checks, client: { ...checks.client, cwd } } }, def);
+    expect(r).toEqual({ ok: false, error: 'checks.client.cwd must be a folder inside the repo (relative, no ..)' });
+  });
+  test.each(['.', 'client', 'apps/web', 'a..b'])('accepts checks cwd %j (M6)', (cwd) => {
+    expect(validateFactoryRepo({ repoId: 'api', remote: 'r', checks: { ...checks, server: { ...checks.server, cwd } } }, def).ok).toBe(true);
   });
   test('rejects a bad repoId', () => {
     expect(validateFactoryRepo({ repoId: 'Api', remote: 'r', checks }, def).ok).toBe(false);
