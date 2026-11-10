@@ -1382,12 +1382,6 @@ textarea.sf-input {
   }
 }
 
-@media (max-width: 639px) {
-  .sf-lanes {
-    grid-template-columns: 1fr;
-  }
-}
-
 /* Lane pills show on phones only (see the phone block at the end). */
 .sf-pills {
   display: none;
@@ -1626,4 +1620,83 @@ textarea.sf-input {
 
 .sf-qa-question {
   font-weight: 600;
+}
+
+/* Phones, below 640px. One block, last in the file, so equal specificity wins by source order. A selector
+   here is at least as specific as every earlier rule that sets the same property on the same element
+   (phoneLayout.css.test.ts checks); where a base rule is more specific its prefix is copied, never !important.
+   Desktop values above are unchanged. */
+@media (max-width: 639px) {
+  /* Lanes: one column (moved here from the old 639px block). */
+  .sf-lanes {
+    grid-template-columns: 1fr;
+  }
+
+  /* Compact top bar: lead on the left, theme switch on the right. */
+  .sf-topbar {
+    min-height: 48px;
+    padding: 0 12px;
+  }
+
+  .sf-topbar-lead {
+    align-items: center;
+    display: inline-flex;
+    min-height: 44px;
+  }
+
+  .sf-shell-detail .sf-project {
+    display: none;
+  }
+
+  .sf-account-name {
+    display: none;
+  }
+
+  .sf-topbar .sf-badge {
+    display: none;
+  }
+
+  .sf-breadcrumb {
+    display: none;
+  }
+
+  /* The bottom tab bar: the same nav.sf-views, fixed to the bottom. */
+  .sf-views {
+    align-self: auto;
+    background: var(--sf-surface);
+    border-top: 1px solid var(--sf-chrome-border);
+    bottom: 0;
+    box-sizing: content-box;
+    gap: 0;
+    height: var(--sf-tabbar-height);
+    left: 0;
+    padding-bottom: env(safe-area-inset-bottom);
+    position: fixed;
+    right: 0;
+  }
+
+  .sf-view-link {
+    border-bottom: 0;
+    border-top: 2px solid transparent;
+    flex: 1;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .sf-view-link[aria-current="page"] {
+    border-top: 2px solid var(--sf-text);
+  }
+
+  .sf-shell-detail .sf-views {
+    display: none;
+  }
+
+  /* Room under the content for the tab bar, or for the action bar on detail screens. */
+  .sf-main {
+    padding-bottom: calc(var(--sf-tabbar-height) + 16px + env(safe-area-inset-bottom));
+  }
+
+  .sf-shell-detail .sf-main {
+    padding-bottom: calc(var(--sf-actionbar-button) + 16px + 16px + env(safe-area-inset-bottom));
+  }
 }
