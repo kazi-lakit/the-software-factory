@@ -5,7 +5,7 @@ export type { TokenSource } from './blocks/token.js';
 export { PROTECTED_TASK_FIELDS } from './blocks/schema.js';
 export { assertMove, canMove, IllegalMoveError, STEP_STATUS, TERMINAL } from './status.js';
 export { isMainRef, isProtected } from './branches.js';
-export { ensureMain, validateFactoryDef, validateFactoryRepo, FactoryConfig } from './factories.js';
+export { DEFAULT_GH_USER, ensureMain, validateFactoryDef, validateFactoryRepo, FactoryConfig } from './factories.js';
 export type { FactoryDef, FactoryRepo, FactoryHealth } from './factories.js';
 export { IMPORT_FORMAT, validateImportFile } from './importFile.js';
 export type { ImportFile } from './importFile.js';

@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import type { FormEvent } from "react";
-import { ensureMain, saveFactory, validateFactoryDef, VersionConflictError, type FactoryDef } from "@factory/core";
+import { DEFAULT_GH_USER, ensureMain, saveFactory, validateFactoryDef, VersionConflictError, type FactoryDef } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { describeWriteError, now, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 
@@ -20,15 +20,16 @@ type Draft = {
   factoryId: string;
   gitEmail: string;
   gitName: string;
+  /** The gh CLI login; left empty, the core's validation saves DEFAULT_GH_USER. */
+  ghUser: string;
   name: string;
-  patAccount: string;
   protectedBranches: string[];
 };
 
 const draftOf = (def: FactoryDef | null): Draft =>
   def
-    ? { active: def.active, docsPath: def.docsPath, factoryId: def.factoryId, gitEmail: def.gitEmail, gitName: def.gitName, name: def.name, patAccount: def.patAccount, protectedBranches: def.protectedBranches }
-    : { active: true, docsPath: "", factoryId: "", gitEmail: "", gitName: "", name: "", patAccount: "", protectedBranches: ensureMain(["dev", "stg"]) };
+    ? { active: def.active, docsPath: def.docsPath, factoryId: def.factoryId, gitEmail: def.gitEmail, ghUser: def.ghUser, gitName: def.gitName, name: def.name, protectedBranches: def.protectedBranches }
+    : { active: true, docsPath: "", factoryId: "", gitEmail: "", ghUser: "", gitName: "", name: "", protectedBranches: ensureMain(["dev", "stg"]) };
 
 type Props = {
   /** The stored definition being edited; null adds a factory. */
@@ -88,7 +89,7 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
     setDraft(draftOf(latest));
   }
 
-  const text = (key: "docsPath" | "gitEmail" | "gitName" | "name" | "patAccount", label: string, hint?: string) => (
+  const text = (key: "docsPath" | "ghUser" | "gitEmail" | "gitName" | "name", label: string, hint?: string) => (
     <div className="sf-field">
       <label className="sf-field-label" htmlFor={`${ids}-${key}`}>{label}</label>
       <input id={`${ids}-${key}`} className="sf-input" value={draft[key]} onChange={(event) => set(key, event.target.value)} aria-describedby={hint ? `${ids}-${key}-hint` : undefined} />
@@ -149,7 +150,7 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
       {text("gitName", "Git name")}
       {text("gitEmail", "Git email")}
       {text("docsPath", "Docs path")}
-      {text("patAccount", "PAT account", "The Keychain account name, never the token. Empty uses github-pat:<factory id>.")}
+      {text("ghUser", "GitHub login", `The gh CLI account the factory opens PRs with (gh auth login on this Mac). Empty uses ${DEFAULT_GH_USER}.`)}
       {invalidText ? <p className="sf-problem" role="alert">{invalidText}</p> : null}
       <WriteProblemNotice problem={problem} onReload={() => void reload()} />
       <div className="sf-actions">

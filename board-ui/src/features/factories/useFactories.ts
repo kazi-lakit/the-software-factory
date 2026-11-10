@@ -36,7 +36,7 @@ export function useFactories() {
   return { byId, defs, error: query.error, loading: query.isPending, refetch: query.refetch, repos, skipped, storedRepos };
 }
 
-/** The core's last PAT check per factory; a factory with no row has not been checked. */
+/** The core's last gh login check per factory; a factory with no row has not been checked. */
 export function useFactoryHealth() {
   return useQuery({
     queryFn: () => boardStore.listFactoryHealth(),

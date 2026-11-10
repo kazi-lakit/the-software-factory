@@ -19,12 +19,12 @@ const formatTime = (iso: string): string => {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
 };
 
-/** The PAT entry as the core last found it in the Keychain; a factory the core has not checked is `unknown`. */
-function PatStatus({ health }: { health: FactoryHealth | undefined }) {
-  if (!health) return <span className="sf-pat sf-pat-unknown">unknown</span>;
+/** The gh login as `factory status` last found it (gh auth status); a factory the core has not checked is `unknown`. */
+function GhStatus({ health }: { health: FactoryHealth | undefined }) {
+  if (!health) return <span className="sf-gh sf-gh-unknown">unknown</span>;
   return (
-    <span className={`sf-pat ${health.patPresent ? "sf-pat-present" : "sf-pat-missing"}`}>
-      {health.patPresent ? "present" : "missing"} <span className="sf-muted">(checked <time dateTime={health.checkedAt}>{formatTime(health.checkedAt)}</time>)</span>
+    <span className={`sf-gh ${health.ghLoggedIn ? "sf-gh-logged-in" : "sf-gh-logged-out"}`}>
+      {health.ghLoggedIn ? "logged in" : "not logged in"} <span className="sf-muted">(checked <time dateTime={health.checkedAt}>{formatTime(health.checkedAt)}</time>)</span>
     </span>
   );
 }
@@ -110,7 +110,7 @@ export function FactoriesTab() {
         <button type="button" className="sf-button" onClick={() => setEditing({ kind: "import" })}>Import factory</button>
       </div>
       <p className="sf-muted" role="status">{notice}</p>
-      {health.isError ? <p className="sf-hint">Could not read the PAT checks; they show as unknown.</p> : null}
+      {health.isError ? <p className="sf-hint">Could not read the gh login checks; they show as unknown.</p> : null}
       {form && !(editing?.kind === "edit-factory" || editing?.kind === "edit-repo" || editing?.kind === "add-repo") ? form : null}
 
       {entries.length === 0 ? <p className="sf-empty">No factory is set up yet. Add one, or import the file from <span className="sf-mono">factory migrate --export</span>.</p> : null}
@@ -156,8 +156,8 @@ function FactorySection({ editing, entry, form, health, onEdit }: {
       <dl className="sf-facts">
         <dt>Protected branches</dt>
         <dd className="sf-mono">{def.protectedBranches.join(", ")}</dd>
-        <dt>PAT</dt>
-        <dd>{def.patAccount} <PatStatus health={health} /></dd>
+        <dt>GitHub login</dt>
+        <dd><span className="sf-mono">{def.ghUser}</span> <GhStatus health={health} /></dd>
       </dl>
       {here?.kind === "edit-factory" ? form : null}
       <h4>Repos</h4>

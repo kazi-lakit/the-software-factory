@@ -36,7 +36,7 @@ vi.mock("../../lib/board", () => ({
     listEvents: vi.fn(async () => []),
     listFactoryDefs: vi.fn(async () => [{
       active: true, docsPath: "/docs", factoryId: "blocks", gitEmail: "f@example.com", gitName: "Factory", name: "Blocks",
-      patAccount: "github-pat:blocks", protectedBranches: ["dev", "stg", "main"], version: 1
+      ghUser: "kazi-lakit", protectedBranches: ["dev", "stg", "main"], version: 1
     }]),
     listFactoryRepos: vi.fn(async () => [{
       baseBranch: "dev", checks: { client: { build: "b", cwd: "c", install: "i", lint: "l", test: "t", typecheck: "tc" }, e2e: "off", server: { build: "b", cwd: "s", test: "t" } },

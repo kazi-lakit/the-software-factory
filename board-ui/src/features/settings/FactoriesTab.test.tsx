@@ -38,14 +38,16 @@ describe("Factories tab", () => {
     expect(screen.getByRole("region", { name: "Factory blocks" })).toBeInTheDocument();
   });
 
-  it("renders_the_pat_entry_as_missing_from_a_health_row_and_unknown_without_one", async () => {
-    await fakeBoard().core.setFactoryHealth({ checkedAt: "2026-11-10T08:00:00.000Z", factoryId: "delta", patPresent: false });
-    await fakeBoard().core.setFactoryHealth({ checkedAt: "2026-11-10T08:00:00.000Z", factoryId: "blocks", patPresent: true });
+  it("renders_the_gh_login_with_its_state_from_a_health_row_and_unknown_without_one", async () => {
+    await fakeBoard().core.setFactoryHealth({ checkedAt: "2026-11-10T08:00:00.000Z", factoryId: "delta", ghLoggedIn: false });
+    await fakeBoard().core.setFactoryHealth({ checkedAt: "2026-11-10T08:00:00.000Z", factoryId: "blocks", ghLoggedIn: true });
     await openFactoriesTab();
     const delta = await screen.findByRole("region", { name: "Factory delta" });
-    await waitFor(() => expect(within(delta).getByText("missing")).toBeInTheDocument());
+    await waitFor(() => expect(within(delta).getByText("not logged in")).toBeInTheDocument());
+    expect(within(delta).getByText("GitHub login")).toBeInTheDocument();
+    expect(within(delta).getByText("gh-delta")).toBeInTheDocument();
     expect(within(delta).getByText(/checked/)).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Factory blocks" })).getByText("present")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Factory blocks" })).getByText("logged in")).toBeInTheDocument();
     cleanup();
     resetFakeBoard(factory("alpha", ["api"]));
     await openFactoriesTab();
@@ -65,9 +67,38 @@ describe("Factories tab", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
     await screen.findByText("Created factory echo.");
     const saved = (await owner().listFactoryDefs()).find((d) => d.factoryId === "echo");
-    expect(saved).toMatchObject({ active: true, name: "Echo", patAccount: "github-pat:echo", protectedBranches: ["rel", "main"] });
+    // The GitHub login was left empty: the core default is what is saved.
+    expect(saved).toMatchObject({ active: true, ghUser: "kazi-lakit", name: "Echo", protectedBranches: ["rel", "main"] });
     expect((await owner().listEvents("-")).map((e) => e.field)).toContain("def.protectedBranches");
     expect(await screen.findByRole("region", { name: "Factory echo" })).toBeInTheDocument();
+  });
+
+  it("labels_the_github_login_with_its_hint_and_saves_the_login_given", async () => {
+    await openFactoriesTab();
+    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
+    const form = await screen.findByRole("form", { name: "Add factory" });
+    expect(within(form).getByLabelText("GitHub login")).toHaveAccessibleDescription(
+      "The gh CLI account the factory opens PRs with (gh auth login on this Mac). Empty uses kazi-lakit."
+    );
+    changeField("Factory id", "echo");
+    changeField("Name", "Echo");
+    changeField("GitHub login", " octocat ");
+    fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
+    await screen.findByText("Created factory echo.");
+    expect((await owner().listFactoryDefs()).find((d) => d.factoryId === "echo")).toMatchObject({ ghUser: "octocat" });
+  });
+
+  it("refuses_a_github_login_that_is_not_one_and_saves_nothing", async () => {
+    const save = vi.spyOn(owner(), "saveFactoryDef");
+    await openFactoriesTab();
+    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
+    const form = await screen.findByRole("form", { name: "Add factory" });
+    changeField("Factory id", "echo");
+    changeField("Name", "Echo");
+    changeField("GitHub login", "github-pat:echo");
+    fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent("ghUser must be a GitHub login");
+    expect(save).not.toHaveBeenCalled();
   });
 
   it("offers_no_way_to_remove_main", async () => {
