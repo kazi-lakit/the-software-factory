@@ -48,7 +48,7 @@ describe('validateFactoryDef', () => {
     expect(r.value.active).toBe(true);
   });
   test('the blocks-credential account is reserved', () => {
-    const r = validateFactoryDef(defInput({ patAccount: 'blocks-credential' }));
+    const r = validateFactoryDef(defInput({ patAccount: ' Blocks-Credential ' }));
     expect(r).toMatchObject({ ok: false });
     expect(JSON.stringify(r)).toContain('patAccount blocks-credential is reserved');
   });

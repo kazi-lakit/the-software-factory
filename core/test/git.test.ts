@@ -155,6 +155,19 @@ describe('LocalGitRepos', () => {
       expect(read(wt, 'user.name')).toBe('');
     });
 
+    test('reuse of a worktree whose clone is in the old layout writes into that clone, not .clones/<f>/<r>', async () => {
+      const old = join(root, '.clones', 'oldrepo');
+      git(root, 'clone', bare, old);
+      const wt = join(root, '.clones', 'worktrees', 'T-30');
+      git(old, 'worktree', 'add', '-b', 'factory/T-30-x', wt, 'origin/dev');
+      const api = repoFixture('newf', 'api', { remote: bare });
+      expect(existsSync(join(root, '.clones', 'newf'))).toBe(false);
+      expect(await repos.worktree('newf', api, 'T-30', 'factory/T-30-x', ['rel', 'main'], { gitName: 'O', gitEmail: 'old@example.com' })).toBe(wt);
+      expect(readFileSync(join(old, '.git', 'factory-protected-branches'), 'utf8')).toBe('rel\nmain\n');
+      expect(execFileSync('git', ['config', '--worktree', 'user.email'], { cwd: wt, stdio: 'pipe' }).toString().trim()).toBe('old@example.com');
+      expect(existsSync(join(root, '.clones', 'newf'))).toBe(false);
+    });
+
     test('without an identity nothing is written and worktreeConfig stays off', async () => {
       const wt = await repos.worktree('plain', repoFixture('plain', 'api', { remote: bare }), 'T-12', 'factory/T-12-x', ['dev', 'main'], { gitName: '', gitEmail: '' });
       expect(existsSync(join(wt, '.git'))).toBe(true);

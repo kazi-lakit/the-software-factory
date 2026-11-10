@@ -28,6 +28,9 @@ export class PatMissingError extends SecretMissingError {
 
 export const RESERVED_PAT_ACCOUNT = 'blocks-credential';
 
+/** True for the reserved account, ignoring case and surrounding spaces. */
+export const isReservedPatAccount = (account: string): boolean => account.trim().toLowerCase() === RESERVED_PAT_ACCOUNT;
+
 const SERVICE = 'the-software-factory';
 
 /** Reads a secret from the macOS Keychain; `name` is the account (`blocks-credential`, or a factory's `patAccount`). Error messages never include command output. */

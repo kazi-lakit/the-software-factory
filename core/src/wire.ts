@@ -10,7 +10,7 @@ import { Engine } from './engine.js';
 import { LocalGitRepos } from './git.js';
 import { OctokitGitHub, type GitHub, type GitHubFor } from './github.js';
 import { FactoryConfig } from './factories.js';
-import { PatMissingError, readSecret, RESERVED_PAT_ACCOUNT, SecretMissingError } from './secrets.js';
+import { PatMissingError, readSecret, isReservedPatAccount, RESERVED_PAT_ACCOUNT, SecretMissingError } from './secrets.js';
 import { FileStore, type BoardStore } from './store.js';
 import type { Mode } from './types.js';
 
@@ -76,7 +76,7 @@ export function lazyGitHubFor(
 ): GitHubFor {
   const clients = new Map<string, GitHub>();
   return (account) => {
-    if (account === RESERVED_PAT_ACCOUNT) throw new Error(`patAccount ${RESERVED_PAT_ACCOUNT} is reserved`);
+    if (isReservedPatAccount(account)) throw new Error(`patAccount ${RESERVED_PAT_ACCOUNT} is reserved`);
     let c = clients.get(account);
     if (!c) clients.set(account, (c = new LazyGitHub(account, read, make)));
     return c;
