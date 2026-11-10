@@ -9,7 +9,7 @@ import { AGENT_FOR as CORE_AGENT_FOR } from '../../core/src/defaults.ts';
 
 const hooks = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'hooks');
 const root = '/f/root';
-const session = { taskId: 'T-1', step: 'build', mode: 'session', store: 'blocks' };
+const session = { taskId: 'T-1', step: 'build', mode: 'session', store: 'blocks' }; // a stale store field is ignored
 
 describe('claimantFor', () => {
   it('uses host and first 8 chars', () => {
@@ -52,12 +52,23 @@ describe('shouldRenew', () => {
 
 describe('renewCommand', () => {
   it('builds the CLI invocation', () => {
-    const c = renewCommand({ root, session, sessionId: '0123456789ab', host: 'mac', node: 'node' });
+    const c = renewCommand({ root, session, sessionId: '0123456789ab', host: 'mac', node: 'node', env: {} });
     expect(c.file).toBe('node');
     expect(c.args).toEqual(['/f/root/core/dist/cli.js', '--mode', 'session', '--store', 'blocks', 'renew', 'T-1']);
     expect(c.env.FACTORY_CLAIMANT).toBe('claude:mac:01234567');
     expect(c.env.FACTORY_ROOT).toBe('/f/root');
     expect(c.log).toBe('/f/root/runs/T-1/renew.log');
+  });
+  const args = (env) => renewCommand({ root, session, sessionId: '0123456789ab', host: 'mac', node: 'node', env });
+  it('takes the store from the hook env, not the session file', () => {
+    expect(args({ FACTORY_STORE: 'file' }).args).toContain('file');
+    expect(args({ FACTORY_STORE: 'file' }).args).not.toContain('blocks');
+  });
+  it('defaults to blocks when FACTORY_STORE is unset', () => {
+    expect(args({}).args[args({}).args.indexOf('--store') + 1]).toBe('blocks');
+  });
+  it('skips an invalid store', () => {
+    expect(args({ FACTORY_STORE: 'sqlite' })).toBeNull();
   });
 });
 

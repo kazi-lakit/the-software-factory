@@ -9,7 +9,7 @@ try {
   if (isFactoryAgent(input)) {
     const root = resolveFactoryRoot(process.env, os.homedir())?.root;
     const session = root ? readSession(root, input.session_id) : null;
-    if (session?.taskId && session.mode && session.store) {
+    if (session?.taskId && session.mode) {
       const marker = renewFile(root, input.session_id);
       let last = null;
       try { last = fs.statSync(marker).mtimeMs; } catch {}
@@ -19,11 +19,15 @@ try {
         fs.closeSync(fs.openSync(marker, 'a'));
         fs.utimesSync(marker, new Date(now), new Date(now));
         const cmd = renewCommand({ root, session, sessionId: input.session_id, host: os.hostname() });
-        fs.mkdirSync(path.dirname(cmd.log), { recursive: true });
-        const out = fs.openSync(cmd.log, 'a');
-        const child = spawn(cmd.file, cmd.args, { env: cmd.env, detached: true, stdio: ['ignore', out, out] });
-        child.on('error', () => {});
-        child.unref();
+        if (!cmd) {
+          process.stderr.write('factory renew: FACTORY_STORE must be file or blocks; renewal skipped\n');
+        } else {
+          fs.mkdirSync(path.dirname(cmd.log), { recursive: true });
+          const out = fs.openSync(cmd.log, 'a');
+          const child = spawn(cmd.file, cmd.args, { env: cmd.env, detached: true, stdio: ['ignore', out, out] });
+          child.on('error', () => {});
+          child.unref();
+        }
       }
     }
   }
