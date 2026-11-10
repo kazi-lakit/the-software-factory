@@ -52,7 +52,11 @@ export interface Ticket {
   };
 }
 
-export type NextOutcome = { kind: 'ticket'; ticket: Ticket } | { kind: 'none'; reason: 'nothing to do' | 'paused' | 'inactive' };
+/** `no-factories`: the Board has no factory definition at all (before the first Import); nothing was changed. */
+export type NextOutcome = { kind: 'ticket'; ticket: Ticket } | { kind: 'none'; reason: 'nothing to do' | 'paused' | 'inactive' | 'no-factories' };
+
+/** What the CLI prints for `no-factories`. */
+export const NO_FACTORIES = 'no factories on the Board; run factory migrate --check';
 
 export interface FactoryStatus {
   factoryId: string;
@@ -127,29 +131,43 @@ export class Engine {
   /** Reads the definitions and logs each skipped one (an invalid definition is not a factory) once. */
   private async loadFactories(): Promise<FactoryConfig> {
     const cfg = await retry(() => this.deps.factories());
-    for (const { id, reason } of cfg.skipped()) {
-      const note = `${id.includes('/') ? 'repo' : 'factory'} ${id} skipped: ${reason}`;
-      if (this.loggedSkips.has(note)) continue;
-      this.loggedSkips.add(note);
-      this.deps.log?.(note);
-    }
+    for (const { id, reason } of cfg.skipped()) this.logOnce(`${id.includes('/') ? 'repo' : 'factory'} ${id} skipped: ${reason}`);
     return cfg;
+  }
+
+  private logOnce(note: string): void {
+    if (this.loggedSkips.has(note)) return;
+    this.loggedSkips.add(note);
+    this.deps.log?.(note);
   }
 
   private readonly loggedSkips = new Set<string>();
 
-  /** `filter` limits the pass to those factories; left out, every factory. */
+  /** `filter` limits the pass to those factories; left out, every factory. With no definitions at all it changes nothing. */
   async sync(filter?: string[]): Promise<void> {
-    await this.syncWith(await this.loadFactories(), filter);
+    const cfg = await this.loadFactories();
+    if (!cfg.hasDefinitions()) {
+      this.deps.log?.(NO_FACTORIES);
+      return;
+    }
+    await this.syncWith(cfg, filter);
   }
 
   private async syncWith(cfg: FactoryConfig, filter?: string[]): Promise<void> {
     const { store } = this.deps;
     const stored = await retry(() => store.getSettings());
+    // Read once per pass, and only when a task's factory is missing: while the legacy settings are not moved and
+    // retired, a missing factory may be one the Board's Import has not written yet (R13).
+    let migrating: Promise<boolean> | undefined;
+    const migrationOpen = () => (migrating ??= retry(() => store.legacySettingsStatus()).then((l) => l.unmoved.length + l.unretired.length > 0));
     for (const task of await retry(() => store.listTasks())) {
       if (filter && !filter.includes(task.factoryId)) continue;
       try {
         if (this.skipped(cfg, task)) continue; // its definition is invalid: leave the task as it is until it is fixed
+        if (!cfg.factory(task.factoryId) && (await migrationOpen())) {
+          this.logOnce(`factory ${task.factoryId} skipped: not on the Board yet (migration not finished)`);
+          continue;
+        }
         const gone = this.goneReason(cfg, task);
         if (gone) {
           if (!TERMINAL.has(task.status) && task.status !== 'blocked' && task.status !== 'inbox') {
@@ -195,6 +213,7 @@ export class Engine {
   async next(taskId?: string, filter?: string[]): Promise<NextOutcome> {
     const { store, now, claimant } = this.deps;
     const cfg = await this.loadFactories();
+    if (!cfg.hasDefinitions()) return { kind: 'none', reason: 'no-factories' };
     const stored = await retry(() => store.getSettings());
     const scope = cfg.factories().filter((f) => !filter || filter.includes(f.factoryId));
     const paused = (f: FactoryDef) => factorySettings(stored, f.factoryId).paused;

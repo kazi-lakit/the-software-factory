@@ -101,6 +101,10 @@ describe('run skill', () => {
     expect(body).toContain('factory: inactive');
   });
 
+  it('reports no factories on the Board and stops (R13)', () => {
+    expect(body).toMatch(/If the output is `no factories on the Board; run factory migrate --check`, reply `factory: no factories on the Board; run factory migrate --check` and stop\./);
+  });
+
   it('reports a paused factory (M2)', () => {
     expect(body).toContain('`paused`');
     expect(body).toContain('factory: paused');

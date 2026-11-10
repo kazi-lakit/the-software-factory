@@ -114,8 +114,10 @@ export class FactoryConfig {
   private readonly defs = new Map<string, FactoryDef>();
   private readonly byFactory = new Map<string, FactoryRepo[]>();
   private readonly skips: { id: string; reason: string }[] = [];
+  private readonly rows: number;
 
   constructor(defs: FactoryDef[], repos: FactoryRepo[]) {
+    this.rows = defs.length;
     for (const d of defs) {
       const r = validateFactoryDef(d);
       if (!r.ok) this.skips.push({ id: String((d as { factoryId?: unknown } | null)?.factoryId ?? '?'), reason: r.error });
@@ -146,6 +148,10 @@ export class FactoryConfig {
 
   factories(): FactoryDef[] {
     return [...this.defs.values()];
+  }
+  /** True when any definition row was given, valid or skipped (false before the Board's Import of the first factory). */
+  hasDefinitions(): boolean {
+    return this.rows > 0;
   }
   factory(id: string): FactoryDef | undefined {
     return this.defs.get(id);

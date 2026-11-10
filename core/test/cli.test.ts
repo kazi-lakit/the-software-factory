@@ -102,6 +102,14 @@ describe('factory cli', () => {
     expect((await store.getTask('T-1')).claimBy).toBeNull();
   });
 
+  test('next with no factory definitions prints the migrate hint and leaves the task ready', async () => {
+    const { store, out, go } = setup({ defs: [], repos: [] });
+    await put(store, { status: 'ready' });
+    expect(await go('next', '--json')).toBe(0);
+    expect(out).toEqual(['no factories on the Board; run factory migrate --check']);
+    expect((await store.getTask('T-1')).status).toBe('ready');
+  });
+
   test('next --factory limits the pass to the named factories', async () => {
     const { store, out, go } = setup();
     await put(store, { status: 'ready' });

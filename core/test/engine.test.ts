@@ -301,6 +301,54 @@ describe('next across factories', () => {
   });
 });
 
+describe('before and during migration (R13)', () => {
+  /** A Blocks store whose legacy settings rows (scope `global` and `data`) are still live: migration is not finished. */
+  const legacyStore = (opts: { retired?: boolean } = {}) => (now: () => Date) => {
+    const data = new FakeBlocksData('any', { now });
+    data.seed('FactorySettings', { scope: 'global', json: opts.retired ? 'null' : JSON.stringify({ paused: false }), version: 1 });
+    data.seed('FactorySettings', { scope: 'data', json: opts.retired ? 'null' : JSON.stringify({ maxParallel: 1 }), version: 1 });
+    return new BlocksStore(data, 'owner', { now });
+  };
+
+  test('no factory definitions at all: next says no-factories and changes nothing, even with repo rows', async () => {
+    const { store, engine } = setup({ defs: [], repos: [repoFixture('blocks', 'data')] });
+    await putIn(store, 'blocks', { status: 'ready' }, 'data');
+    await putIn(store, 'blocks', { status: 'build', stage: 'build', branch: 'factory/T-2-a', costUsd: 999 }, 'data');
+    const before = await store.listTasks();
+    expect(await engine.next()).toEqual({ kind: 'none', reason: 'no-factories' });
+    expect(await engine.next('T-1')).toEqual({ kind: 'none', reason: 'no-factories' });
+    expect(await engine.next(undefined, ['blocks'])).toEqual({ kind: 'none', reason: 'no-factories' });
+    await engine.sync();
+    expect(await store.listTasks()).toEqual(before);
+    expect((await store.getTask('T-1')).status).toBe('ready');
+  });
+
+  test('an invalid definition row is still a row: next is not no-factories', async () => {
+    const { engine } = setup({ defs: [{ ...defFixture('b'), gitEmail: 'no-at-sign' }], repos: [] });
+    expect(await engine.next()).toEqual({ kind: 'none', reason: 'nothing to do' });
+  });
+
+  test('half import (repo rows, no definition, legacy rows live): the task of the missing factory is untouched', async () => {
+    const { store, engine } = setup({ store: legacyStore(), defs: [defFixture('a')], repos: [repoFixture('a', 'api'), repoFixture('blocks', 'data')] });
+    expect((await store.legacySettingsStatus()).unmoved.length).toBeGreaterThan(0);
+    await putIn(store, 'blocks', { status: 'ready' }, 'data');
+    await putIn(store, 'blocks', { status: 'build', stage: 'build', branch: 'factory/T-2-a' }, 'data');
+    await putIn(store, 'a', { status: 'ready' }, 'api');
+    const before = [await store.getTask('T-1'), await store.getTask('T-2')];
+    await engine.sync();
+    expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-3' });
+    expect([await store.getTask('T-1'), await store.getTask('T-2')]).toEqual(before);
+  });
+
+  test('after migration a deleted factory still blocks its tasks', async () => {
+    const { store, engine } = setup({ store: legacyStore({ retired: true }), defs: [defFixture('a')], repos: [repoFixture('a', 'api')] });
+    expect(await store.legacySettingsStatus()).toEqual({ unmoved: [], unretired: [] });
+    await putIn(store, 'blocks', { status: 'build', stage: 'build', branch: 'factory/T-1-a' }, 'data');
+    await engine.sync();
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'blocked', blockedReason: 'factory blocks no longer exists' });
+  });
+});
+
 describe('next', () => {
   test('paused: returns null and claims nothing', async () => {
     const { store, engine } = setup();

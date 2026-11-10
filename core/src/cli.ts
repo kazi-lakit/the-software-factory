@@ -4,7 +4,7 @@ import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { Command, CommanderError } from 'commander';
 import { parseAgentReply } from './agentReply.js';
-import type { Engine } from './engine.js';
+import { NO_FACTORIES, type Engine } from './engine.js';
 import { GATE_DOC } from './gates.js';
 import * as owner from './owner.js';
 import { isReservedPatAccount, readSecret, realExecFile, type ExecFile } from './secrets.js';
@@ -101,7 +101,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       const { engine } = await open(cmd);
       const outcome = await engine.next(task, factoryFilter(o.factory));
       // Paused and inactive factories also return no ticket: say so, so a loop's owner is not left guessing.
-      if (outcome.kind === 'none') return io.out(outcome.reason);
+      if (outcome.kind === 'none') return io.out(outcome.reason === 'no-factories' ? NO_FACTORIES : outcome.reason);
       const { ticket } = outcome;
       if (o.json) return printJson(ticket);
       io.out(`${ticket.taskId} ${ticket.step} (worktree ${ticket.worktree})`);
