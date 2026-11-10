@@ -50,6 +50,18 @@ describe("AnswerPanel", () => {
     expect(answerBox()).toHaveValue("");
   });
 
+  it("passes_the_version_it_rendered_and_refuses_a_question_that_moved_on", async () => {
+    const task = await blockedTask();
+    // The task changes after the panel rendered (e.g. the engine asked a new question).
+    await fakeBoard().core.updateTask(task.taskId, task.version, { question: "A newer question?" });
+    renderWithClient(<AnswerPanel task={task} onReload={vi.fn()} />);
+    fireEvent.change(answerBox(), { target: { value: "Use dev." } });
+    fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("This task changed while you were looking. Reload to see the latest.");
+    expect((await fakeBoard().owner.getTask(task.taskId)).answer).toBeNull();
+    expect(answerBox()).toHaveValue("Use dev.");
+  });
+
   it("keeps_the_answer_on_a_conflict", async () => {
     const task = await blockedTask();
     vi.spyOn(fakeBoard().owner, "updateTask").mockRejectedValueOnce(new VersionConflictError(task.taskId, task.version, task.version + 1));

@@ -25,7 +25,7 @@ export function AnswerPanel({ onReload, task }: { onReload: () => unknown; task:
     setBusy(true);
     setProblem(undefined);
     try {
-      await answerTask(boardStore, now, task.taskId, text);
+      await answerTask(boardStore, now, task.taskId, text, task.version);
       clear();
       setSent(true);
       void invalidate(task.taskId);
