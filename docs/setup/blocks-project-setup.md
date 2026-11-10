@@ -30,10 +30,12 @@ There are 10 tables: `FactoryTask`, `FactoryDoc`, `FactoryApproval`, `FactorySet
 
 **Warning:** a new table is open to any signed-in project user until step 4 deploys its rules. `FactoryRepo.checks` holds shell commands that the core runs on the owner's Mac. Run step 4 in the same sitting, straight after this step, before anything else touches the project.
 
+A project set up from scratch creates all 10 tables. For each table, create its schema, its fields and its unique index from the table below. A project set up before plan 6 only creates `FactoryDef`, `FactoryRepo` and `FactoryHealth` (its other 7 tables already exist, see "Existing tables" below).
+
 For each new table, create the schema, then its fields:
 
 ```bash
-S=FactoryDef     # then FactoryRepo, then FactoryHealth
+S=FactoryTask     # repeat for each of the 10 tables: FactoryTask, FactoryDoc, FactoryApproval, FactorySettings, FactoryRun, FactoryEvent, FactorySpike, FactoryDef, FactoryRepo, FactoryHealth
 blocks data schema info save --schema-name $S --collection-name ${S}s --schema-type 1 --dry-run   # then --yes; note the schema id it prints
 blocks data schema fields --schema-id <id> --file blocks/data/factory/$S.fields.json --dry-run    # then --yes
 ```
@@ -57,7 +59,7 @@ Each table has one unique index:
 blocks data schema indexes create --schema-id <id> --fields <field> --unique --name <index name> --dry-run   # then --yes
 ```
 
-For the three new tables:
+For the three plan-6 tables, the index commands are shown as examples. A fresh project runs the generic command above for every table in the index table; a project set up before plan 6 runs only these three:
 
 ```bash
 blocks data schema indexes create --schema-id <FactoryDef id>    --fields factoryId --unique --name factory_def_factoryid_unique --dry-run     # then --yes
