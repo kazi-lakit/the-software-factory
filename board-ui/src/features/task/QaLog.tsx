@@ -1,17 +1,13 @@
+import { formatTime } from "../../lib/formatTime";
 import type { QaEntry } from "./qaEntries";
-
-const formatTime = (iso: string): string => {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
-};
 
 /** Earlier questions with the answer given, its time and, when the question had a recommendation, whether it was followed. */
 export function QaLog({ entries }: { entries: readonly QaEntry[] }) {
   if (entries.length === 0) return null;
   return (
     <ol className="sf-qa-log">
-      {entries.map((entry, index) => (
-        <li key={index} className="sf-qa-entry">
+      {entries.map((entry) => (
+        <li key={entry.key} className="sf-qa-entry">
           <p className="sf-qa-question">{entry.question}</p>
           {entry.askedBy ? <p className="sf-muted sf-qa-asker">{entry.askedBy}</p> : null}
           {entry.answer === null ? (

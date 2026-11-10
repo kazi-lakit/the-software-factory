@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { VersionConflictError, type FactoryEvent, type Task } from "@factory/core";
 import { clearAllUnsent } from "../../lib/unsent";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
@@ -227,5 +228,28 @@ describe("AnswerPanel sending", () => {
     expect(screen.queryByText(/Answer sent/)).toBeNull();
     expect(screen.getAllByRole("radio")[2]).toBeChecked();
     expect(answerBox()).toHaveValue("use release");
+  });
+});
+
+describe("AnswerPanel review fixes", () => {
+  it("resets_the_selection_when_the_question_changes", async () => {
+    const task = await blockedTask(LETTERED(true));
+    const { client, rerender } = renderWithClient(<AnswerPanel task={task} events={[]} onReload={vi.fn()} />);
+    fireEvent.click(screen.getByRole("radio", { name: /develop/ }));
+    const next = { ...task, question: "Which tag?\nA. v1: old\nB. v2: new (recommended)" };
+    rerender(<QueryClientProvider client={client}><AnswerPanel task={next} events={[]} onReload={vi.fn()} /></QueryClientProvider>);
+    expect(screen.getByRole("radio", { name: /v2/ })).toBeChecked();
+  });
+
+  it("uses_a_generic_heading_when_the_question_is_only_options", async () => {
+    await renderPanel("A. main: fits (recommended)\nB. develop: more work");
+    const heading = screen.getByRole("heading", { level: 3 });
+    expect(heading.textContent).not.toMatch(/main/);
+    expect(heading.textContent).toBe("Choose an answer");
+  });
+
+  it("keeps_radios_enabled_while_sending", async () => {
+    await renderPanel(LETTERED(true));
+    expect(screen.getByRole("radio", { name: /develop/ })).not.toBeDisabled();
   });
 });

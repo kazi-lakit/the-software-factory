@@ -5,7 +5,7 @@ import type { QaEntry } from "./qaEntries";
 
 afterEach(cleanup);
 
-const entry = (over: Partial<QaEntry>): QaEntry => ({ answer: "A. main", answeredAt: "2026-11-02T10:00:00.000Z", askedBy: "Spec writer", mark: "none", question: "Q?", ...over });
+const entry = (over: Partial<QaEntry>): QaEntry => ({ key: String(Math.random()), answer: "A. main", answeredAt: "2026-11-02T10:00:00.000Z", askedBy: "Spec writer", mark: "none", question: "Q?", ...over });
 
 describe("QaLog", () => {
   it("lists_question_answer_time_and_mark_newest_first", () => {

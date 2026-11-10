@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { FactoryEvent, Mode } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { isTestTask } from "../board/status";
-import { isQaEvent } from "../task/qaEntries";
+import { isQaEvent } from "../../lib/qaEvent";
 
 /** Every history query starts with this key; a settings save invalidates them all. */
 export const HISTORY_KEY = ["history"] as const;

@@ -19,7 +19,12 @@ function askerOf(events: readonly FactoryEvent[]): string {
 }
 
 /** A blocked task's question and the owner's answer; the engine resumes the task once it sees the answer. */
-export function AnswerPanel({ events, onReload, task }: { events: readonly FactoryEvent[]; onReload: () => unknown; task: Task }) {
+export function AnswerPanel(props: { events: readonly FactoryEvent[]; onReload: () => unknown; task: Task }) {
+  // Keyed by question so a new question starts from its own recommendation, not the old selection.
+  return <AnswerPanelBody key={`${props.task.taskId}:${props.task.question ?? ""}`} {...props} />;
+}
+
+function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryEvent[]; onReload: () => unknown; task: Task }) {
   const headingId = useId();
   const answerId = useId();
   const groupName = useId();
@@ -62,7 +67,7 @@ export function AnswerPanel({ events, onReload, task }: { events: readonly Facto
     <section className="sf-panel sf-panel-needs-you" aria-labelledby={headingId}>
       {task.question ? (
         <>
-          <h3 id={headingId} className="sf-question-title">{parsed.prompt || task.question}</h3>
+          <h3 id={headingId} className="sf-question-title">{parsed.prompt || "Choose an answer"}</h3>
           {asker ? <p className="sf-muted sf-asker" data-testid="asker">{asker}</p> : null}
         </>
       ) : (
@@ -85,7 +90,7 @@ export function AnswerPanel({ events, onReload, task }: { events: readonly Facto
           <div className="sf-radio-cards" role="radiogroup" aria-labelledby={headingId}>
             {options.map((option) => (
               <label key={option.letter} className={`sf-radio-card${choice === option.letter ? " sf-radio-card-selected" : ""}`}>
-                <input type="radio" name={groupName} value={option.letter} checked={choice === option.letter} disabled={busy} onChange={() => setChoice(option.letter)} />
+                <input type="radio" name={groupName} value={option.letter} checked={choice === option.letter} aria-disabled={busy} onChange={() => { if (!busy) setChoice(option.letter); }} />
                 <span className="sf-radio-body">
                   <span className="sf-radio-label">
                     {option.label}
@@ -96,7 +101,7 @@ export function AnswerPanel({ events, onReload, task }: { events: readonly Facto
               </label>
             ))}
             <label className={`sf-radio-card${choice === OTHER ? " sf-radio-card-selected" : ""}`}>
-              <input type="radio" name={groupName} value={OTHER} checked={choice === OTHER} disabled={busy} onChange={() => setChoice(OTHER)} />
+              <input type="radio" name={groupName} value={OTHER} checked={choice === OTHER} aria-disabled={busy} onChange={() => { if (!busy) setChoice(OTHER); }} />
               <span className="sf-radio-body">
                 <span className="sf-radio-label">Other</span>
                 <span className="sf-radio-why">Write your own answer</span>

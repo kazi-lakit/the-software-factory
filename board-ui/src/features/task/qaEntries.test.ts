@@ -76,3 +76,19 @@ describe("buildQaLog", () => {
     expect(buildQaLog([ev("question", "Q?"), ev("answer", "y"), ev("question", null)], null)).toHaveLength(1);
   });
 });
+
+describe("buildQaLog review fixes", () => {
+  it("an_other_answer_that_starts_with_the_letter_is_not_recommended", () => {
+    expect(buildQaLog([ev("question", LETTERED), ev("answer", "A. something else")], null)[0]?.mark).toBe("not-recommended");
+  });
+
+  it("does_not_pair_an_answer_across_a_cleared_question", () => {
+    const [entry] = buildQaLog([ev("question", LETTERED), ev("question", null), ev("answer", "A. main: fits")], null);
+    expect(entry?.answer).toBeNull();
+  });
+
+  it("gives_each_entry_a_stable_key", () => {
+    const keys = buildQaLog([ev("question", LETTERED), ev("question", LETTERED)], null).map((e) => e.key);
+    expect(new Set(keys).size).toBe(2);
+  });
+});
