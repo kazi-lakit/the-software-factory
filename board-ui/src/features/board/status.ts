@@ -78,3 +78,15 @@ export function ctaLabel(status: Status, question: string | null): string | null
   if (status === "blocked") return question?.trim() ? "Answer the question" : "See why it stopped";
   return null;
 }
+
+/** A short relative age ("just now", "5m", "5h", "3d") for an ISO time, or null when there is none or it is invalid. */
+export function ageOf(iso: string | undefined, nowMs: number = Date.now()): string | null {
+  if (!iso) return null;
+  const then = Date.parse(iso);
+  if (Number.isNaN(then)) return null;
+  const minutes = Math.floor(Math.max(0, nowMs - then) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m`;
+  if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
+  return `${Math.floor(minutes / 1440)}d`;
+}

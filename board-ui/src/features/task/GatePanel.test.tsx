@@ -294,3 +294,22 @@ describe("GatePanel", () => {
     });
   });
 });
+
+describe("GatePanel styling", () => {
+  it("decision_panel_is_a_needs_you_surface_panel", async () => {
+    const seeded = await atSpecGate();
+    task = seeded.task;
+    renderPanel(seeded.docs);
+    const panel = screen.getByRole("region", { name: /Your decision/ });
+    expect(panel).toHaveClass("sf-panel", "sf-panel-needs-you");
+  });
+
+  it("request_changes_is_outlined_not_filled", async () => {
+    const seeded = await atSpecGate();
+    task = seeded.task;
+    renderPanel(seeded.docs);
+    const changes = screen.getByRole("button", { name: "Request changes" });
+    expect(changes).toHaveClass("sf-button");
+    for (const filled of ["sf-button-accent", "sf-button-primary", "sf-button-danger"]) expect(changes).not.toHaveClass(filled);
+  });
+});

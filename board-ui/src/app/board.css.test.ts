@@ -634,3 +634,58 @@ describe("board_css_lanes", () => {
     }
   });
 });
+
+describe("board_css_task_page", () => {
+  const css = read("board.css");
+  const t = (selector: string) => tokens(css, selector);
+
+  it("task_title_is_28px_bold_tight", () => {
+    expect(t(".sf-task-header h2")).toMatchObject({
+      color: "var(--sf-text)", "font-size": "28px", "font-weight": "700", "letter-spacing": "-0.02em"
+    });
+  });
+
+  it("task_meta_is_muted", () => {
+    expect(t(".sf-task-meta").color).toBe("var(--sf-muted)");
+  });
+
+  it("stepper_labels_use_label_type_and_waiting_uses_accent_text", () => {
+    expect(t(".sf-stepper-label")).toMatchObject({ ...labelType, color: "var(--sf-muted)" });
+    expect(t(".sf-stepper-item-waiting .sf-stepper-label")).toMatchObject({ color: "var(--sf-accent-text)", "font-weight": "700" });
+  });
+
+  it("stepper_bars_are_fill_width", () => {
+    expect(t(".sf-stepper .sf-step").width).toBe("100%");
+    expect(t(".sf-step")).toMatchObject({ width: "14px", height: "4px" });
+  });
+
+  it("decision_panel_has_accent_border_on_all_sides", () => {
+    const needs = t(".sf-panel-needs-you");
+    expect(needs["border-color"]).toBe("var(--sf-accent)");
+    expect(needs["border-left"]).toBeUndefined();
+    expect(t(".sf-panel").background).toBe("var(--sf-surface)");
+    expect(t(".sf-panel").border).toBe("1px solid var(--sf-border)");
+  });
+
+  it("details_terms_are_label_type_muted", () => {
+    expect(t(".sf-details dt")).toMatchObject({ ...labelType, color: "var(--sf-muted)" });
+    expect(t(".sf-details dd").margin).toBe("0");
+  });
+
+  it("task_body_is_two_to_one_grid_with_16px_gap", () => {
+    expect(t(".sf-task-body")).toMatchObject({ display: "grid", gap: "16px", "grid-template-columns": "minmax(0, 2fr) minmax(0, 1fr)" });
+    expect(t(".sf-task-body > *")["min-width"]).toBe("0");
+  });
+
+  it("task_body_stacks_below_1100px", () => {
+    const start = css.indexOf("@media (max-width: 1099px)");
+    const block = css.slice(start, css.indexOf("@media (max-width: 639px)", start));
+    expect(block).toMatch(/\.sf-task-body\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  });
+
+  it("task_rules_have_no_shadow_or_raw_colour_or_literal_transitions", () => {
+    const slice = css.slice(css.indexOf("/* Task */"), css.indexOf("/* Docs are markdown"));
+    expect(slice).toContain(".sf-task-body");
+    expect(slice).not.toMatch(/box-shadow|#[0-9a-f]{3,8}\b|rgba?\(|transition/i);
+  });
+});

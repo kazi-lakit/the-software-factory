@@ -179,3 +179,18 @@ describe("TaskActions edit with several factories", () => {
     expect(repo).toHaveValue("api");
   });
 });
+
+describe("TaskActions styling", () => {
+  it("cancel_task_is_outlined_and_not_danger", async () => {
+    renderActions(await seedTask());
+    const cancel = screen.getByRole("button", { name: "Cancel task" });
+    expect(cancel).toHaveClass("sf-button");
+    for (const filled of ["sf-button-accent", "sf-button-primary", "sf-button-danger"]) expect(cancel).not.toHaveClass(filled);
+  });
+
+  it("confirm_dialog_danger_button_unchanged", async () => {
+    renderActions(await seedTask());
+    fireEvent.click(screen.getByRole("button", { name: "Cancel task" }));
+    expect(screen.getByRole("button", { name: "Yes, cancel it" })).toHaveClass("sf-button-danger");
+  });
+});
