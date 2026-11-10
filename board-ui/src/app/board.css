@@ -43,6 +43,10 @@
   --sf-label-tracking: 0.16em;
   --sf-radius: 3px;
   --sf-bar-height: 52px;
+  --sf-tabbar-height: 56px;
+  --sf-actionbar-button: 48px;
+  --sf-input-height: 44px;
+  --sf-input-font: 16px;
 }
 
 :root[data-theme="dark"] {
