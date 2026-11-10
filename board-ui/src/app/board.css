@@ -1,71 +1,140 @@
-/* The Board's design tokens and shell. Calm and dense: one neutral palette for
-   the queue, one accent for what needs the owner (spec_review, plan_review,
-   pr_open, blocked, and the paused factory), muted tones for done and
-   cancelled. Light and dark follow prefers-color-scheme through the tokens.
+/* The Board's design tokens and shell (BAK F2). Dark is the default on :root;
+   the light set applies when <html> carries data-theme="light" (set by
+   src/lib/theme.ts and the inline script in index.html). Calm and dense: one
+   accent for what needs the owner, muted tones for done and cancelled.
    Names are sf-* so they never meet the scaffold's tokens or Tailwind's
    utilities; never use .grid, .outline or a bare aside here (board.css.test.ts). */
 
 :root {
-  --sf-bg: #f2f3f5;
-  --sf-surface: #ffffff;
-  --sf-surface-sunk: #e9ebee;
-  --sf-text: #1b1f27;
-  --sf-muted: #5c6370;
-  --sf-border: #d9dce2;
-  --sf-accent: #5236c9;
-  --sf-accent-soft: #ece8fc;
-  --sf-on-accent: #ffffff;
-  --sf-done: #616773;
-  --sf-done-soft: #e6e8eb;
-  --sf-focus: #1b1f27;
+  color-scheme: dark;
+  --sf-bg: #080c0d;
+  --sf-surface: #0b1112;
+  --sf-surface-sunk: #0a0f10;
+  --sf-text: #e7efee;
+  --sf-muted: #9db0af;
+  --sf-border: rgba(157, 176, 175, 0.45);
+  --sf-chrome-border: rgba(157, 176, 175, 0.25);
+  --sf-accent: #5cc8cd;
+  --sf-accent-soft: #0c2224;
+  --sf-accent-text: #5cc8cd;
+  --sf-on-accent: #080c0d;
+  --sf-primary: #9db0af;
+  --sf-primary-hover: #b4c4c3;
+  --sf-on-primary: #080c0d;
+  --sf-primary-soft: #16201f;
+  --sf-on-primary-soft: #e7efee;
+  --sf-progress: #9ea7ba;
+  --sf-needs-tint: rgba(92, 205, 160, 0.08);
+  --sf-done: #8a9b9a;
+  --sf-done-soft: #0a0f10;
+  --sf-focus: #5cc8cd;
   /* Diff lines; the +/− prefix carries the meaning, these repeat it. */
-  --sf-added: #1d6b3a;
-  --sf-added-soft: #e3f3e8;
-  --sf-removed: #a1262b;
-  --sf-removed-soft: #fbe6e6;
+  --sf-added: #7ee2a8;
+  --sf-added-soft: #0d2216;
+  --sf-removed: #f2a3a3;
+  --sf-removed-soft: #2a1414;
 
   --sf-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --sf-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --sf-size: 14px;
+  --sf-mono: SFMono-Regular, ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sf-size: 16px;
   --sf-size-small: 12px;
-  --sf-radius: 6px;
+  --sf-label-size: 12px;
+  --sf-label-line: 16px;
+  --sf-label-tracking: 0.16em;
+  --sf-radius: 3px;
   --sf-bar-height: 44px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --sf-bg: #121418;
-    --sf-surface: #1a1d23;
-    --sf-surface-sunk: #0e1013;
-    --sf-text: #e4e6eb;
-    --sf-muted: #9aa1ad;
-    --sf-border: #2c3038;
-    --sf-accent: #a797ff;
-    --sf-accent-soft: #29244a;
-    --sf-on-accent: #14111f;
-    --sf-done: #8a909b;
-    --sf-done-soft: #20232a;
-    --sf-focus: #e4e6eb;
-    --sf-added: #7fd49b;
-    --sf-added-soft: #16291d;
-    --sf-removed: #f19a9a;
-    --sf-removed-soft: #331a1c;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+  --sf-bg: #e7efee;
+  --sf-surface: #f4f8f7;
+  --sf-surface-sunk: #dde7e6;
+  --sf-text: #0b1112;
+  --sf-muted: #3e5150;
+  --sf-border: rgba(11, 17, 18, 0.3);
+  --sf-chrome-border: rgba(11, 17, 18, 0.2);
+  --sf-accent: #0e7c82;
+  --sf-accent-soft: #d2eef0;
+  --sf-accent-text: #0a6368;
+  --sf-on-accent: #ffffff;
+  --sf-primary: #0b1112;
+  --sf-primary-hover: #22302f;
+  --sf-on-primary: #e7efee;
+  --sf-primary-soft: #d0dcdb;
+  --sf-on-primary-soft: #0b1112;
+  --sf-progress: #6b7488;
+  --sf-needs-tint: rgba(14, 124, 100, 0.07);
+  --sf-done: #4d5c5b;
+  --sf-done-soft: #e0e8e7;
+  --sf-focus: #0b1112;
+  --sf-added: #166534;
+  --sf-added-soft: #dcfce7;
+  --sf-removed: #b91c1c;
+  --sf-removed-soft: #fee2e2;
+}
+
+/* A faint 16px dot grid over a radial glow; fixed so it covers the viewport. */
 body {
-  background: var(--sf-bg);
+  background-attachment: fixed;
+  background-color: var(--sf-bg);
+  background-image: radial-gradient(rgba(157, 176, 175, 0.045) 0.8px, transparent 0.8px),
+    radial-gradient(circle at 63% 42%, #0e1718, #0a0f10, #080c0d);
+  background-size: 16px 16px, 100% 100%;
   color: var(--sf-text);
   font-family: var(--sf-font);
   font-size: var(--sf-size);
-  line-height: 1.45;
+  line-height: 24px;
+}
+
+:root[data-theme="light"] body {
+  background-color: #e7efee;
+  background-image: radial-gradient(rgba(11, 17, 18, 0.035) 0.8px, transparent 0.8px);
+  background-size: 16px 16px;
 }
 
 /* One ring for every interactive element, in both themes. */
 :focus-visible {
-  border-radius: 3px;
+  border-radius: var(--sf-radius);
   outline: 2px solid var(--sf-focus);
   outline-offset: 2px;
+}
+
+/* Small caps-style label type. */
+.sf-label {
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
+/* Sun/moon theme switch: two outlined icon buttons; the active one is filled. */
+.sf-theme-switch {
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  display: inline-flex;
+}
+
+.sf-theme-switch button {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: var(--sf-radius);
+  color: var(--sf-muted);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  width: 28px;
+}
+
+.sf-theme-switch button[aria-pressed="true"] {
+  background: var(--sf-primary-soft);
+  color: var(--sf-on-primary-soft);
 }
 
 /* Ids, branches, versions and costs. */
@@ -145,7 +214,7 @@ body {
   background: var(--sf-accent-soft);
   border: 1px solid var(--sf-accent);
   border-radius: var(--sf-radius);
-  color: var(--sf-accent);
+  color: var(--sf-accent-text);
   font-size: var(--sf-size-small);
   font-weight: 600;
   padding: 2px 8px;
@@ -224,7 +293,7 @@ body {
   background: var(--sf-accent-soft);
   border: 1px solid var(--sf-accent);
   border-radius: var(--sf-radius);
-  color: var(--sf-accent);
+  color: var(--sf-accent-text);
   font-size: var(--sf-size-small);
   font-weight: 600;
   margin-left: 6px;
@@ -896,7 +965,7 @@ textarea.sf-input {
 }
 
 .sf-tab:focus-visible {
-  outline: 2px solid var(--sf-accent);
+  outline: 2px solid var(--sf-focus);
   outline-offset: -2px;
 }
 
