@@ -1,6 +1,7 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test } from 'vitest';
 import type { Exec } from '../src/checks.js';
 import { run, type WireOptions } from '../src/cli.js';
 import { Engine } from '../src/engine.js';
@@ -79,6 +80,52 @@ describe('factory cli', () => {
     const t = await store.getTask('T-1');
     expect(t.status).toBe('blocked');
     expect(t.blockedReason).toMatch(/^invalid agent result/);
+  });
+
+  const replyFile = (text: string) => {
+    const f = join(mkdtempSync(join(tmpdir(), 'factory-reply-')), 'reply.txt');
+    writeFileSync(f, text);
+    return f;
+  };
+  const SPEC_REPLY = '<factory-result>\n{"status":"done","summary":"s"}\n</factory-result>\n<factory-doc>\n# Spec\n</factory-doc>';
+
+  test('complete --reply records the doc like --result', async () => {
+    const { store, out, go } = setup();
+    await put(store, { status: 'ready' });
+    await go('next');
+    expect(await go('complete', 'T-1', 'spec', '--reply', replyFile(SPEC_REPLY))).toBe(0);
+    expect(out.at(-1)).toBe('T-1 spec_review');
+    expect(await store.currentDoc('T-1', 'spec')).toMatchObject({ body: '# Spec' });
+  });
+
+  test('complete needs exactly one of --result or --reply', async () => {
+    const { err, go } = setup();
+    expect(await go('complete', 'T-1', 'spec')).toBe(1);
+    expect(await go('complete', 'T-1', 'spec', '--result', 'a.json', '--reply', 'b.txt')).toBe(1);
+    expect(err).toEqual(['error: pass exactly one of --result or --reply', 'error: pass exactly one of --result or --reply']);
+  });
+
+  describe('FACTORY_STORE', () => {
+    const saved = process.env.FACTORY_STORE;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.FACTORY_STORE;
+      else process.env.FACTORY_STORE = saved;
+    });
+
+    test('is the default store, and an explicit --store wins', async () => {
+      const { go, wired } = setup();
+      process.env.FACTORY_STORE = 'blocks';
+      await go('status');
+      await go('--store', 'file', 'status');
+      expect(wired.map((w) => w.store)).toEqual(['blocks', 'file']);
+    });
+
+    test('an invalid value exits 1', async () => {
+      const { err, go } = setup();
+      process.env.FACTORY_STORE = 'nope';
+      expect(await go('status')).toBe(1);
+      expect(err).toEqual(['error: --store must be one of file, blocks']);
+    });
   });
 
   test('dev approve for a missing doc exits 1', async () => {

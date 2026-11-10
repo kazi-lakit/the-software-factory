@@ -2,6 +2,7 @@
 import { readFileSync, realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { Command, CommanderError } from 'commander';
+import { parseAgentReply } from './agentReply.js';
 import type { Engine } from './engine.js';
 import { GATE_DOC } from './gates.js';
 import * as owner from './owner.js';
@@ -42,7 +43,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .name('factory')
     .description('Drive the software factory engine')
     .option('--mode <mode>', 'sdk | loop | session', 'session')
-    .option('--store <store>', 'file | blocks', 'file')
+    .option('--store <store>', 'file | blocks', process.env.FACTORY_STORE ?? 'file')
     .exitOverride()
     .configureOutput({ writeOut: (s) => io.out(s.replace(/\n$/, '')), writeErr: (s) => io.err(s.replace(/\n$/, '')) });
 
@@ -70,11 +71,16 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   program
     .command('complete <task> <step>')
     .description('report an agent step result')
-    .requiredOption('--result <file>', 'path of the agent result JSON')
-    .action(async (task: string, step: string, o: { result: string }, cmd: Command) => {
+    .option('--result <file>', 'path of the agent result JSON')
+    .option('--reply <file>', 'path of the agent reply text (<factory-result> and <factory-doc> blocks)')
+    .action(async (task: string, step: string, o: { result?: string; reply?: string }, cmd: Command) => {
       const agentStep = choice<AgentStep>('step', step, STEPS);
+      if ((o.result === undefined) === (o.reply === undefined)) throw new CliExit('pass exactly one of --result or --reply', 1);
       const { engine } = await open(cmd);
-      const updated = await engine.complete(task, agentStep, readOrUndefined(o.result));
+      const updated =
+        o.reply !== undefined
+          ? await engine.completeWith(task, agentStep, parseAgentReply(readOrUndefined(o.reply), agentStep))
+          : await engine.complete(task, agentStep, readOrUndefined(o.result!));
       io.out(`${updated.taskId} ${updated.status}`);
     });
 

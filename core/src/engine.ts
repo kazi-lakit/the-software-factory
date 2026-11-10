@@ -16,7 +16,7 @@ import {
   CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError,
   updateHeld, VersionConflictError, type BoardStore, type StoredSettings,
 } from './store.js';
-import type { AgentStep, DocKind, FactoryEvent, Gate, Mode, RepoId, Settings, Status, Step, Task } from './types.js';
+import type { AgentResult, AgentStep, DocKind, FactoryEvent, Gate, Mode, RepoId, Settings, Status, Step, Task } from './types.js';
 
 export interface EngineDeps {
   store: BoardStore;
@@ -152,9 +152,13 @@ export class Engine {
   }
 
   async complete(taskId: string, step: AgentStep, raw: string | undefined): Promise<Task> {
+    return this.completeWith(taskId, step, parseAgentResult(raw, step));
+  }
+
+  async completeWith(taskId: string, step: AgentStep, parsed: AgentResult): Promise<Task> {
     const { store, mode } = this.deps;
     const task = await this.claimedAt(taskId, step);
-    let result = parseAgentResult(raw, step);
+    let result = parsed;
     const run = await retry(() => store.openRun(taskId, step));
     if (!run) throw new Error(`no open ${step} run for ${taskId}`);
     const actor = `${AGENT_FOR[step]} · ${mode} · run ${run.runId}`;
