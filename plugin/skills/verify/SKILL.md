@@ -27,4 +27,4 @@ You do not start in the worktree; your session may start in the factory folder o
 - Do not add new criteria.
 
 ## When to return `blocked`
-If the checks report or criteria are missing or unreadable, reply `blocked` with one question. No doc.
+If the checks report or criteria are missing or unreadable, reply `blocked` with one question. No doc. Write the question in the reply-format question shape: 2 to 4 lettered options with one marked (recommended).
