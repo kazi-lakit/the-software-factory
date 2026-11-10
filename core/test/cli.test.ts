@@ -7,29 +7,18 @@ import { seed, seedBlocksFactories } from './factoryFixtures.js';
 import type { Exec } from '../src/checks.js';
 import { run, type WireOptions } from '../src/cli.js';
 import { Engine } from '../src/engine.js';
+import { FactoryConfig } from '../src/factories.js';
 import type { GitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
-import type { RepoConfig } from '../src/repoConfig.js';
 import { BlocksStore } from '../src/blocks/store.js';
 import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
 import { MemoryStore } from '../src/store.js';
 import type { RepoId, Task } from '../src/types.js';
 
 const ROOT = join(tmpdir(), 'factory-cli-test');
-const cfg: RepoConfig = {
-  repo: 'data',
-  remote: 'git@github.com:SELISEdigitalplatforms/blocks-data.git',
-  baseBranch: 'dev',
-  checks: {
-    server: { cwd: 'server', build: 'b', test: 't' },
-    client: { cwd: 'client', install: 'i', typecheck: 'tc', lint: 'l', test: 't' },
-    e2e: 'off',
-  },
-};
-
 const git: GitRepos = {
-  ensureClone: async (c) => join(ROOT, '.clones', c.repo),
-  worktree: async (_c, taskId) => join(ROOT, '.clones', 'worktrees', taskId),
+  ensureClone: async (f, c) => join(ROOT, '.clones', f, c.repoId),
+  worktree: async (_f, _c, taskId) => join(ROOT, '.clones', 'worktrees', taskId),
   push: async () => {},
   isClean: async () => true,
 };
@@ -38,7 +27,7 @@ function setup() {
   const store = new MemoryStore({ factories: seed() });
   const exec: Exec = async () => ({ code: 0, output: '' });
   const engine = new Engine({
-    store, git, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,
+    store, git, github: new FakeGitHub(), factories: async () => new FactoryConfig(seed().defs, seed().repos),
     exec, now: () => new Date(), mode: 'session', claimant: 'me',
   });
   const wired: WireOptions[] = [];
@@ -97,6 +86,15 @@ describe('factory cli', () => {
     expect(await go('next', '--json')).toBe(0);
     expect(out).toEqual(['paused']);
     expect((await store.getTask('T-1')).claimBy).toBeNull();
+  });
+
+  test('next --factory limits the pass to the named factories', async () => {
+    const { store, out, go } = setup();
+    await put(store, { status: 'ready' });
+    expect(await go('next', '--factory', 'other')).toBe(0);
+    expect(out).toEqual(['nothing to do']);
+    expect(await go('next', '--factory', 'blocks', '--json')).toBe(0);
+    expect(JSON.parse(out.slice(1).join('\n'))).toMatchObject({ taskId: 'T-1', context: { factory: { factoryId: 'blocks' } } });
   });
 
   test('complete with a missing result file blocks the task', async () => {
@@ -171,7 +169,7 @@ describe('factory cli', () => {
     const { out, wired } = setup();
     const store = new BlocksStore(new FakeBlocksData('factory-core'), 'core');
     const engine = new Engine({
-      store, git, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,
+      store, git, github: new FakeGitHub(), factories: async () => new FactoryConfig(seed().defs, seed().repos),
       exec: async () => ({ code: 0, output: '' }), now: () => new Date(), mode: 'session', claimant: 'me',
     });
     const go = (...argv: string[]) =>
@@ -290,7 +288,7 @@ describe('factory cli', () => {
     const json = JSON.parse(out[0]!);
     expect(json.counts).toEqual({ ready: 1 });
     expect(json.tasks).toMatchObject([{ taskId: 'T-1', status: 'ready' }]);
-    expect(json.settings.gates).toEqual({ spec: true, plan: false, pr: true });
+    expect(json.factories).toMatchObject([{ factoryId: 'blocks', name: 'blocks', active: true, paused: false, counts: { ready: 1 }, patPresent: null }]);
     await go('status');
     expect(out.slice(1).join('\n')).toMatch(/ready: 1/);
   });
@@ -356,7 +354,7 @@ describe('new', () => {
     const store = new BlocksStore(data, 'core');
     const out: string[] = [];
     const engine = new Engine({
-      store, git, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,
+      store, git, github: new FakeGitHub(), factories: async () => new FactoryConfig(seed().defs, seed().repos),
       exec: async () => ({ code: 0, output: '' }), now: () => new Date(), mode: 'session', claimant: 'me',
     });
     const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: () => {} }, async () => ({ engine, store }));

@@ -64,3 +64,17 @@ describe('LazyBlocksStore', () => {
     expect(loadCredential).not.toHaveBeenCalled();
   });
 });
+
+describe('findRoot', () => {
+  test('a root has core/ and plugin/; repos/ is not needed', async () => {
+    const { mkdtempSync, mkdirSync, realpathSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const { findRoot } = await import('../src/wire.js');
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'findroot-')));
+    mkdirSync(join(root, 'core'));
+    mkdirSync(join(root, 'plugin'));
+    mkdirSync(join(root, 'core', 'src'), { recursive: true });
+    expect(findRoot(join(root, 'core', 'src'), {})).toBe(root);
+  });
+});

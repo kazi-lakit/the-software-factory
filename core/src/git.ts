@@ -3,13 +3,14 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { HOOK_PATH, assertPushAllowed } from './branchGuard.js';
-import type { RepoConfig } from './repoConfig.js';
+import type { FactoryRepo } from './factories.js';
 
 const execFileP = promisify(execFile);
 
 export interface GitRepos {
-  ensureClone(cfg: RepoConfig): Promise<string>;
-  worktree(cfg: RepoConfig, taskId: string, branch: string): Promise<string>;
+  /** The clone is at `.clones/<factoryId>/<repoId>`. */
+  ensureClone(factoryId: string, repo: FactoryRepo, protectedBranches: string[]): Promise<string>;
+  worktree(factoryId: string, repo: FactoryRepo, taskId: string, branch: string): Promise<string>;
   push(worktreePath: string, branch: string): Promise<void>;
   isClean(path: string): Promise<boolean>;
 }
@@ -36,12 +37,13 @@ async function branchExists(clone: string, branch: string): Promise<boolean> {
 export class LocalGitRepos implements GitRepos {
   constructor(private readonly root: string) {}
 
-  async ensureClone(cfg: RepoConfig): Promise<string> {
-    const clones = join(this.root, '.clones');
-    const clone = join(clones, cfg.repo);
+  // The pre-push hook still guards the default protected list; the factory's own list is wired in by the ship changes.
+  async ensureClone(factoryId: string, repo: FactoryRepo, _protectedBranches: string[]): Promise<string> {
+    const factoryClones = join(this.root, '.clones', factoryId);
+    const clone = join(factoryClones, repo.repoId);
     if (!existsSync(clone)) {
-      mkdirSync(clones, { recursive: true });
-      await git(undefined, ['clone', cfg.remote, clone]);
+      mkdirSync(factoryClones, { recursive: true });
+      await git(undefined, ['clone', repo.remote, clone]);
     }
     await git(clone, ['fetch', 'origin', '--prune']);
     const hooks = join(clone, '.git', 'hooks');
@@ -52,17 +54,17 @@ export class LocalGitRepos implements GitRepos {
     return clone;
   }
 
-  async worktree(cfg: RepoConfig, taskId: string, branch: string): Promise<string> {
+  async worktree(factoryId: string, repo: FactoryRepo, taskId: string, branch: string): Promise<string> {
     const path = join(this.root, '.clones', 'worktrees', taskId);
     if (existsSync(path)) return path;
-    const clone = await this.ensureClone(cfg);
+    const clone = await this.ensureClone(factoryId, repo, []);
     mkdirSync(join(this.root, '.clones', 'worktrees'), { recursive: true });
     // A worktree folder deleted by hand still holds its branch until pruned.
     await git(clone, ['worktree', 'prune']);
     if (await branchExists(clone, branch)) {
       await git(clone, ['worktree', 'add', path, branch]);
     } else {
-      await git(clone, ['worktree', 'add', '-b', branch, path, `origin/${cfg.baseBranch}`]);
+      await git(clone, ['worktree', 'add', '-b', branch, path, `origin/${repo.baseBranch}`]);
     }
     return path;
   }

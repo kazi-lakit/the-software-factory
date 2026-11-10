@@ -7,7 +7,9 @@ import { shellExec } from '../src/checks.js';
 import { Engine, type EngineDeps } from '../src/engine.js';
 import { LocalGitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
-import type { RepoConfig } from '../src/repoConfig.js';
+import { FactoryConfig } from '../src/factories.js';
+import { defFixture, repoFixture } from './factoryFixtures.js';
+import { nextTicket } from './nextTicket.js';
 import { MemoryStore } from '../src/store.js';
 import type { RepoId } from '../src/types.js';
 
@@ -47,23 +49,21 @@ afterEach(() => {
 });
 
 function setup(clientTest = 'true') {
-  const cfg: RepoConfig = {
-    repo: 'data',
+  const cfg = repoFixture('blocks', 'data', {
     remote: bare,
-    baseBranch: 'dev',
     checks: {
       server: { cwd: 'server', build: 'true', test: 'true' },
       client: { cwd: 'client', install: 'true', typecheck: 'true', lint: 'true', test: clientTest },
       e2e: 'off',
     },
-  };
+  });
   const store = new MemoryStore();
   const github = new PathRemoteGitHub();
   const deps: EngineDeps = {
     store,
     git: new LocalGitRepos(join(tmp, 'factory')),
     github,
-    repos: { data: cfg } as Record<RepoId, RepoConfig>,
+    factories: async () => new FactoryConfig([defFixture('blocks')], [cfg]),
     exec: shellExec,
     now: () => new Date(),
     mode: 'session',
@@ -94,38 +94,38 @@ describe('integration', () => {
     const before = devSha();
     await readyTask(store);
 
-    let ticket = await engine.next();
+    let ticket = await nextTicket(engine);
     expect(ticket?.step).toBe('spec');
     let task = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: '# Spec' }));
     expect(task.status).toBe('spec_review');
 
     const spec = await store.currentDoc('T-1', 'spec');
     await store.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: spec!.version, decision: 'approve', comment: '' });
-    ticket = await engine.next();
+    ticket = await nextTicket(engine);
     expect(ticket?.step).toBe('plan');
     task = await engine.complete('T-1', 'plan', result({ status: 'done', summary: 's', doc: '# Plan' }));
     expect(task.status).toBe('build');
 
-    ticket = await engine.next();
+    ticket = await nextTicket(engine);
     expect(ticket?.step).toBe('build');
     writeFileSync(join(ticket!.worktree, 'hello.txt'), 'hello');
     git(ticket!.worktree, 'add', '.');
     git(ticket!.worktree, 'commit', '-q', '-m', 'add hello');
     await engine.complete('T-1', 'build', result({ status: 'done', summary: 's' }));
 
-    ticket = await engine.next();
+    ticket = await nextTicket(engine);
     expect(ticket?.step).toBe('check');
     await engine.check('T-1');
 
-    ticket = await engine.next();
+    ticket = await nextTicket(engine);
     expect(ticket?.step).toBe('verify');
     await engine.complete('T-1', 'verify', result({ status: 'done', summary: 's', verdict: 'pass', doc: '# Verify' }));
 
-    ticket = await engine.next();
+    ticket = await nextTicket(engine);
     expect(ticket?.step).toBe('review');
     await engine.complete('T-1', 'review', result({ status: 'done', summary: 's', verdict: 'approve', doc: '# Review' }));
 
-    ticket = await engine.next();
+    ticket = await nextTicket(engine);
     expect(ticket?.step).toBe('ship');
     task = await engine.ship('T-1');
 
@@ -157,17 +157,17 @@ describe('integration', () => {
     const { store, engine } = setup('false');
     await readyTask(store);
 
-    await engine.next();
+    await nextTicket(engine);
     await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: '# Spec' }));
     const spec = await store.currentDoc('T-1', 'spec');
     await store.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: spec!.version, decision: 'approve', comment: '' });
-    await engine.next();
+    await nextTicket(engine);
     await engine.complete('T-1', 'plan', result({ status: 'done', summary: 's', doc: '# Plan' }));
 
     for (let n = 1; n <= 3; n++) {
-      const ticket = await engine.next();
+      const ticket = await nextTicket(engine);
       await buildOnce(engine, ticket!.step, ticket!.worktree, n);
-      expect((await engine.next())?.step).toBe('check');
+      expect((await nextTicket(engine))?.step).toBe('check');
       await engine.check('T-1');
     }
 

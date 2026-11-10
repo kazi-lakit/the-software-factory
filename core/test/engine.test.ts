@@ -7,7 +7,9 @@ import type { Exec } from '../src/checks.js';
 import type { GitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
 import { IllegalInputError } from '../src/machine.js';
-import type { RepoConfig } from '../src/repoConfig.js';
+import { FactoryConfig, type FactoryDef, type FactoryRepo } from '../src/factories.js';
+import { defFixture, repoFixture } from './factoryFixtures.js';
+import { nextTicket } from './nextTicket.js';
 import { SecretMissingError } from '../src/secrets.js';
 import { BlocksStore, DocTooLargeError, MAX_DOC_BYTES } from '../src/blocks/store.js';
 import { FakeBlocksData } from '../src/blocks/fakeData.js';
@@ -21,28 +23,26 @@ import type { RepoId, Task } from '../src/types.js';
 const ROOT = join(tmpdir(), 'factory-engine-test');
 const REMOTE = 'git@github.com:SELISEdigitalplatforms/blocks-data.git';
 
-const cfg: RepoConfig = {
-  repo: 'data',
-  remote: REMOTE,
-  baseBranch: 'dev',
-  checks: {
-    server: { cwd: 'server', build: 'dotnet build', test: 'dotnet test' },
-    client: { cwd: 'client', install: 'npm ci', typecheck: 'npm run tc', lint: 'npm run lint', test: 'npm test' },
-    e2e: 'off',
-  },
-};
-
-const iamCfg: RepoConfig = { ...cfg, repo: 'iam', remote: 'git@github.com:SELISEdigitalplatforms/blocks-iam.git' };
+const DEFS: FactoryDef[] = [defFixture('blocks')];
+const CHECKS = {
+  server: { cwd: 'server', build: 'dotnet build', test: 'dotnet test' },
+  client: { cwd: 'client', install: 'npm ci', typecheck: 'npm run tc', lint: 'npm run lint', test: 'npm test' },
+  e2e: 'off',
+} as const;
+const REPOS: FactoryRepo[] = [
+  repoFixture('blocks', 'data', { remote: REMOTE, checks: structuredClone(CHECKS) as never }),
+  repoFixture('blocks', 'iam', { remote: 'git@github.com:SELISEdigitalplatforms/blocks-iam.git', checks: structuredClone(CHECKS) as never }),
+];
 
 class FakeGit implements GitRepos {
   readonly calls: string[] = [];
   readonly bases: string[] = [];
   readonly pushes: { path: string; branch: string }[] = [];
-  async ensureClone(c: RepoConfig) {
-    this.calls.push(`clone ${c.repo}`);
-    return join(ROOT, '.clones', c.repo);
+  async ensureClone(factoryId: string, c: FactoryRepo) {
+    this.calls.push(`clone ${factoryId}/${c.repoId}`);
+    return join(ROOT, '.clones', factoryId, c.repoId);
   }
-  async worktree(c: RepoConfig, taskId: string, branch: string) {
+  async worktree(_factoryId: string, c: FactoryRepo, taskId: string, branch: string) {
     this.calls.push(`worktree ${taskId} ${branch}`);
     this.bases.push(c.baseBranch);
     return join(ROOT, '.clones', 'worktrees', taskId);
@@ -56,7 +56,7 @@ class FakeGit implements GitRepos {
 }
 
 function setup(
-  opts: { failing?: string[]; git?: FakeGit; onExec?: () => Promise<void>; log?: (msg: string) => void; store?: (now: () => Date) => BoardStore } = {},
+  opts: { failing?: string[]; git?: FakeGit; onExec?: () => Promise<void>; log?: (msg: string) => void; store?: (now: () => Date) => BoardStore; defs?: FactoryDef[]; repos?: FactoryRepo[] } = {},
 ) {
   const clock = { t: new Date('2026-11-09T10:00:00Z') };
   const store: BoardStore = opts.store?.(() => clock.t) ?? new MemoryStore();
@@ -70,7 +70,7 @@ function setup(
     store,
     git,
     github,
-    repos: { data: cfg, iam: iamCfg } as Record<RepoId, RepoConfig>,
+    factories: async () => new FactoryConfig(opts.defs ?? DEFS, opts.repos ?? REPOS),
     exec,
     now: () => clock.t,
     mode: 'session',
@@ -97,12 +97,119 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
+/** Two factories, `a` (repo api) and `b` (repos api and web, own docs path), for the per-factory tests. */
+const TWO = (over: { a?: Partial<FactoryDef>; b?: Partial<FactoryDef> } = {}) => ({
+  defs: [defFixture('a', over.a), defFixture('b', { docsPath: '/docs/b', ...over.b })],
+  repos: [
+    repoFixture('a', 'api'),
+    repoFixture('b', 'api', { checks: { ...structuredClone(CHECKS), e2e: 'off', server: { cwd: 'srv', build: 'make', test: 'make test' } } as never }),
+    repoFixture('b', 'web'),
+  ],
+});
+
+const putIn = async (store: BoardStore, factoryId: string, patch: Partial<Task> = { status: 'ready' }, repo = 'api'): Promise<Task> => {
+  const t = await store.createTask({ factoryId, title: 'Add widget', description: 'd', repo, baseBranch: 'dev' });
+  return Object.keys(patch).length ? store.updateTask(t.taskId, t.version, patch) : t;
+};
+
+describe('next across factories', () => {
+  test('picks the oldest workable task across both factories', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'b');
+    await putIn(store, 'a');
+    expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-1', context: { factory: { factoryId: 'b' } } });
+  });
+
+  test('a filter picks only in the named factories', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'a');
+    await putIn(store, 'b');
+    expect(await nextTicket(engine, undefined, ['b'])).toMatchObject({ taskId: 'T-2' });
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', claimBy: null });
+  });
+
+  test('a factory at maxParallel does not stop the other', async () => {
+    const { store, engine, clock } = setup(TWO());
+    await store.setSettings({ factories: { a: { factory: { ...DEFAULT_SETTINGS, maxParallel: 1 }, repos: {} } } });
+    await putIn(store, 'a', { status: 'build', stage: 'build', branch: 'factory/T-1-a', ...claimedBy('other', clock) });
+    await putIn(store, 'a');
+    await putIn(store, 'b');
+    expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-3', context: { factory: { factoryId: 'b' } } });
+  });
+
+  test('paused and inactive are reported only when every factory in the filter is', async () => {
+    const paused = setup(TWO());
+    await paused.store.setSettings({ factories: { b: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } });
+    await putIn(paused.store, 'b');
+    expect(await paused.engine.next(undefined, ['b'])).toEqual({ kind: 'none', reason: 'paused' });
+    expect((await paused.store.getTask('T-1')).claimBy).toBeNull();
+    await putIn(paused.store, 'a');
+    expect(await paused.engine.next()).toMatchObject({ kind: 'ticket', ticket: { taskId: 'T-2' } });
+
+    const inactive = setup(TWO({ b: { active: false } }));
+    await putIn(inactive.store, 'b');
+    expect(await inactive.engine.next(undefined, ['b'])).toEqual({ kind: 'none', reason: 'inactive' });
+    expect(await inactive.engine.next()).toEqual({ kind: 'none', reason: 'nothing to do' });
+  });
+
+  test('every factory paused with no filter reports paused; an unknown filter reports nothing to do', async () => {
+    const { store, engine } = setup(TWO());
+    await store.setSettings({ factories: { a: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} }, b: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } });
+    expect(await engine.next()).toEqual({ kind: 'none', reason: 'paused' });
+    expect(await engine.next(undefined, ['zzz'])).toEqual({ kind: 'none', reason: 'nothing to do' });
+  });
+
+  test('a task whose repo is gone is blocked by sync, and one whose factory is gone too', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'b', { status: 'ready' }, 'gone');
+    await putIn(store, 'x', { status: 'build', stage: 'build', branch: 'b' });
+    await putIn(store, 'b', { status: 'done' }, 'gone');
+    await engine.sync();
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'blocked', blockedReason: 'repo gone no longer exists in b' });
+    expect(await store.getTask('T-2')).toMatchObject({ status: 'blocked', blockedReason: 'factory x no longer exists' });
+    expect((await store.getTask('T-3')).status).toBe('done');
+  });
+
+  test('a gate resolved from b/api repo settings overrides b', async () => {
+    const { store, engine } = setup(TWO());
+    await store.setSettings({ factories: { b: { factory: { ...DEFAULT_SETTINGS, gates: { spec: true, plan: false, pr: true } }, repos: { api: { gates: { spec: false } } } } } });
+    await putIn(store, 'b', { status: 'spec', stage: 'spec', branch: 'factory/T-1-a' }, 'api');
+    await putIn(store, 'b', { status: 'spec', stage: 'spec', branch: 'factory/T-2-a' }, 'web');
+    for (const id of ['T-1', 'T-2']) {
+      expect(await nextTicket(engine, id)).toMatchObject({ taskId: id });
+      await engine.complete(id, 'spec', JSON.stringify({ status: 'done', summary: 's', doc: 'the spec' }));
+    }
+    expect((await store.getTask('T-1')).status).toBe('plan');
+    expect((await store.getTask('T-2')).status).toBe('spec_review');
+  });
+
+  test('the ticket context carries the factory docsPath and the repo checks', async () => {
+    const { store, engine, git } = setup(TWO());
+    await putIn(store, 'b', { status: 'ready' }, 'api');
+    const ticket = await nextTicket(engine);
+    expect(ticket!.context.factory).toEqual({ factoryId: 'b', name: 'b', docsPath: '/docs/b' });
+    expect(ticket!.context.checks.server).toEqual({ cwd: 'srv', build: 'make', test: 'make test' });
+    expect(git.calls[0]).toBe('clone b/api');
+  });
+
+  test('a definition that fails validation is logged once and is not a factory', async () => {
+    const logs: string[] = [];
+    const { store, engine } = setup({ defs: [defFixture('a'), { ...defFixture('x'), factoryId: 'GATE-gate' }], repos: [repoFixture('a', 'api')], log: (m) => logs.push(m) });
+    await putIn(store, 'a');
+    expect(await engine.next(undefined, ['GATE-gate'])).toEqual({ kind: 'none', reason: 'nothing to do' });
+    await engine.next();
+    await engine.status();
+    expect(logs.filter((l) => l.startsWith('factory GATE-gate skipped: '))).toHaveLength(1);
+    expect((await engine.status()).factories.map((f) => f.factoryId)).toEqual(['a']);
+  });
+});
+
 describe('next', () => {
   test('paused: returns null and claims nothing', async () => {
     const { store, engine } = setup();
     await store.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } });
     await put(store, { status: 'ready' });
-    expect(await engine.next()).toBeNull();
+    expect(await nextTicket(engine)).toBeNull();
     expect((await store.getTask('T-1')).claimBy).toBeNull();
   });
 
@@ -111,15 +218,15 @@ describe('next', () => {
     await store.setSettings({ factories: { blocks: { factory: DEFAULT_SETTINGS, repos: { data: { paused: true } } } } });
     await put(store, { status: 'ready' });
     await put(store, { status: 'ready' }, 'dev', 'iam');
-    expect(await engine.next()).toMatchObject({ taskId: 'T-2', step: 'spec' });
+    expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-2', step: 'spec' });
     expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', claimBy: null });
-    expect(await engine.next('T-1')).toBeNull();
+    expect(await nextTicket(engine, 'T-1')).toBeNull();
   });
 
   test('the worktree branches from the task base, not the repo default', async () => {
     const { store, engine, git } = setup();
     await put(store, { status: 'ready' }, 'feature/x');
-    await engine.next();
+    await nextTicket(engine);
     expect(git.bases).toEqual(['feature/x']);
   });
 
@@ -128,21 +235,21 @@ describe('next', () => {
     await put(store, { status: 'spec', stage: 'spec', branch: 'factory/T-1-a', ...claimedBy('other', clock) });
     await put(store, { status: 'plan', stage: 'plan', branch: 'factory/T-2-a', ...claimedBy('other', clock) });
     await put(store, { status: 'ready' });
-    expect(await engine.next()).toBeNull();
+    expect(await nextTicket(engine)).toBeNull();
     expect((await store.getTask('T-3')).status).toBe('ready');
   });
 
   test('a ready task is claimed, gets a branch and worktree, and moves to spec', async () => {
     const { store, engine, git } = setup();
     await put(store, { status: 'ready' });
-    const ticket = await engine.next();
+    const ticket = await nextTicket(engine);
     expect(ticket).toMatchObject({
       taskId: 'T-1',
       step: 'spec',
       worktree: join(ROOT, '.clones', 'worktrees', 'T-1'),
       runId: 'R-1',
     });
-    expect(git.calls).toEqual(['clone data', 'worktree T-1 factory/T-1-add-widget']);
+    expect(git.calls).toEqual(['clone blocks/data', 'worktree T-1 factory/T-1-add-widget']);
     const t = await store.getTask('T-1');
     expect(t).toMatchObject({ status: 'spec', stage: 'spec', branch: 'factory/T-1-add-widget', claimBy: 'me' });
     expect(ticket!.context.task).toEqual(t);
@@ -160,7 +267,7 @@ describe('next', () => {
     await put(store, { status: 'blocked', stage: 'build', branch: 'b3' });
     await put(store, { status: 'plan', stage: 'plan', branch: 'b4' });
     await put(store, { status: 'ready' });
-    const ticket = await engine.next();
+    const ticket = await nextTicket(engine);
     expect(ticket).toMatchObject({ taskId: 'T-4', step: 'plan' });
   });
 
@@ -168,7 +275,7 @@ describe('next', () => {
     const { store, engine } = setup();
     await put(store, { status: 'ready' });
     await put(store, { status: 'build', stage: 'build', branch: 'factory/T-2-x' });
-    expect(await engine.next('T-2')).toMatchObject({ taskId: 'T-2', step: 'build' });
+    expect(await nextTicket(engine, 'T-2')).toMatchObject({ taskId: 'T-2', step: 'build' });
   });
 
   test('context carries the current spec and plan, the answer as feedback and the latest verify doc', async () => {
@@ -178,27 +285,29 @@ describe('next', () => {
     await store.addDoc('T-1', 'spec', 'spec v2', 'a');
     await store.addDoc('T-1', 'plan', 'the plan', 'a');
     await store.addDoc('T-1', 'verify', 'checks report', 'core · checks');
-    const ticket = await engine.next();
+    const ticket = await nextTicket(engine);
     expect(ticket!.context).toEqual({
       task: await store.getTask('T-1'),
+      factory: { factoryId: 'blocks', name: 'blocks', docsPath: '/docs' },
+      checks: CHECKS,
       spec: 'spec v2',
       plan: 'the plan',
       feedback: 'fix the test',
-      checks: 'checks report',
+      checksReport: 'checks report',
     });
   });
 
   test('context omits keys that have no value', async () => {
     const { store, engine } = setup();
     await put(store, { status: 'ready' });
-    const ticket = await engine.next();
-    expect(Object.keys(ticket!.context)).toEqual(['task']);
+    const ticket = await nextTicket(engine);
+    expect(Object.keys(ticket!.context)).toEqual(['task', 'factory', 'checks']);
   });
 
   test('core steps get a ticket without a run', async () => {
     const { store, engine } = setup();
     await put(store, { status: 'verify', stage: 'check', branch: 'factory/T-1-x' });
-    const ticket = await engine.next();
+    const ticket = await nextTicket(engine);
     expect(ticket).toMatchObject({ step: 'check', runId: null });
     expect(await store.openRun('T-1', 'check')).toBeUndefined();
   });
@@ -207,16 +316,16 @@ describe('next', () => {
     constructor(private readonly broken: string) {
       super();
     }
-    override async worktree(c: RepoConfig, taskId: string, branch: string): Promise<string> {
+    override async worktree(factoryId: string, c: FactoryRepo, taskId: string, branch: string): Promise<string> {
       if (taskId === this.broken) throw new Error('worktree add failed\nfatal: details');
-      return super.worktree(c, taskId, branch);
+      return super.worktree(factoryId, c, taskId, branch);
     }
   }
 
   test('an explicit task: releases the claim and rethrows when work after the claim fails', async () => {
     const { store, engine } = setup({ git: new BrokenGit('T-1') });
     await put(store, { status: 'ready' });
-    await expect(engine.next('T-1')).rejects.toThrow('worktree add failed');
+    await expect(nextTicket(engine, 'T-1')).rejects.toThrow('worktree add failed');
     expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', claimBy: null, claimUntil: null });
   });
 
@@ -224,7 +333,7 @@ describe('next', () => {
     const { store, engine } = setup({ git: new BrokenGit('T-1') });
     await put(store, { status: 'ready' });
     await put(store, { status: 'ready' });
-    expect(await engine.next()).toMatchObject({ taskId: 'T-2', step: 'spec' });
+    expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-2', step: 'spec' });
     expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', claimBy: null, claimUntil: null });
     expect(await store.listEvents('T-1')).toContainEqual(
       expect.objectContaining({ actor: 'core · session', action: 'set', field: 'setupError', to: 'worktree add failed', reason: 'setup failed' }),
@@ -234,24 +343,24 @@ describe('next', () => {
   test('a setup failure on the only candidate gives null', async () => {
     const { store, engine } = setup({ git: new BrokenGit('T-1') });
     await put(store, { status: 'ready' });
-    expect(await engine.next()).toBeNull();
+    expect(await nextTicket(engine)).toBeNull();
     expect((await store.getTask('T-1')).claimBy).toBeNull();
   });
 
   test('reuses the open run for the step instead of starting a new one', async () => {
     const { store, engine, clock } = setup();
     await put(store, { status: 'ready' });
-    expect((await engine.next())!.runId).toBe('R-1');
+    expect((await nextTicket(engine))!.runId).toBe('R-1');
     clock.t = new Date(clock.t.getTime() + 3_600_000); // claim lapses, the run is still open
     const startRun = vi.spyOn(store, 'startRun');
-    expect(await engine.next()).toMatchObject({ taskId: 'T-1', step: 'spec', runId: 'R-1' });
+    expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-1', step: 'spec', runId: 'R-1' });
     expect(startRun).not.toHaveBeenCalled();
   });
 
   test('returns null when nothing is workable', async () => {
     const { store, engine } = setup();
     await put(store, {});
-    expect(await engine.next()).toBeNull();
+    expect(await nextTicket(engine)).toBeNull();
   });
 });
 
@@ -259,18 +368,18 @@ describe('feedback', () => {
   test('a spec-change comment does not leak into the planner or implementer feedback', async () => {
     const { store, engine } = setup();
     await put(store, { status: 'ready' });
-    await engine.next();
+    await nextTicket(engine);
     await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'v1' }));
     await store.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'changes', comment: 'drop the cache idea' });
-    const respec = await engine.next();
+    const respec = await nextTicket(engine);
     expect(respec).toMatchObject({ step: 'spec', context: { feedback: 'drop the cache idea' } });
     await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'v2' }));
     await store.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 2, decision: 'approve', comment: '' });
-    const plan = await engine.next();
+    const plan = await nextTicket(engine);
     expect(plan!.step).toBe('plan');
     expect(plan!.context.feedback).toBeUndefined();
     await engine.complete('T-1', 'plan', result({ status: 'done', summary: 's', doc: 'p' }));
-    const build = await engine.next();
+    const build = await nextTicket(engine);
     expect(build!.step).toBe('build');
     expect(build!.context.feedback).toBeUndefined();
   });
@@ -278,11 +387,11 @@ describe('feedback', () => {
   test('the answer to a verifier question reaches the resumed verifier', async () => {
     const { store, engine } = setup();
     await put(store, { status: 'verify', stage: 'verify', branch: 'factory/T-1-x' });
-    await engine.next();
+    await nextTicket(engine);
     await engine.complete('T-1', 'verify', result({ status: 'blocked', summary: 's', question: 'AC3: which API?' }));
     const b = await store.getTask('T-1');
     await store.updateTask('T-1', b.version, { answer: 'use v2' });
-    const resumed = await engine.next();
+    const resumed = await nextTicket(engine);
     expect(resumed).toMatchObject({ step: 'verify', context: { feedback: 'use v2' } });
     expect(resumed!.context.task).toMatchObject({ question: null, blockedReason: null, attempt: 0 });
   });
@@ -294,7 +403,7 @@ describe('on BlocksStore', () => {
       store: (now) => new BlocksStore(new FakeBlocksData('any', { now }), 'owner', { now }),
     });
     await put(store, { status: 'ready' });
-    await engine.next();
+    await nextTicket(engine);
     const t = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'x'.repeat(MAX_DOC_BYTES + 1) }));
     expect(t.status).toBe('blocked');
     expect(t.blockedReason).toMatch(/^invalid agent result: doc larger than/);
@@ -312,16 +421,16 @@ describe('on BlocksStore', () => {
       store: (now) => new BlocksStore(new FakeBlocksData('any', { now }), 'owner', { now }),
     });
     await put(store, { status: 'ready' });
-    await engine.next();
+    await nextTicket(engine);
     await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'same spec' }));
     await store.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'changes', comment: 'try again' });
-    expect(await engine.next()).toMatchObject({ step: 'spec', context: { feedback: 'try again' } });
+    expect(await nextTicket(engine)).toMatchObject({ step: 'spec', context: { feedback: 'try again' } });
     clock.t = new Date(clock.t.getTime() + 121_000);
     const t = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'same spec' }));
     expect(t.status).toBe('spec_review');
     expect(await store.currentDoc('T-1', 'spec')).toMatchObject({ version: 2, body: 'same spec' });
     await engine.sync();
-    expect(await engine.next()).toBeNull();
+    expect(await nextTicket(engine)).toBeNull();
     expect((await store.getTask('T-1')).status).toBe('spec_review');
   });
 
@@ -339,7 +448,7 @@ describe('on BlocksStore', () => {
       return insert(schema, row);
     };
     data.failNextReply('insert', 'FactoryEvent');
-    const p = engine.next();
+    const p = nextTicket(engine);
     await vi.runAllTimersAsync();
     expect(await p).toMatchObject({ step: 'spec' });
     const moves = (await store.listEvents('T-1')).filter((e) => e.field === 'status');
@@ -366,7 +475,7 @@ describe('on BlocksStore', () => {
       if (failReread && fields?.includes('writeId')) { failReread = false; throw new Error('blocks: getFactoryTasks transport error'); }
       return list(schema, filter, fields);
     };
-    const p = engine.next();
+    const p = nextTicket(engine);
     await vi.runAllTimersAsync();
     expect(await p).toMatchObject({ step: 'spec' });
     expect((await store.listEvents('T-1')).filter((e) => e.field === 'status')).toEqual([expect.objectContaining({ from: 'ready', to: 'spec' })]);
@@ -391,7 +500,7 @@ describe('on BlocksStore', () => {
       if (failReads > 0 && schema === 'FactoryTask' && fields === undefined) { failReads--; throw new Error('blocks: getFactoryTasks transport error'); }
       return list(schema, filter, fields);
     };
-    const p = engine.next();
+    const p = nextTicket(engine);
     await vi.runAllTimersAsync();
     expect(await p).toMatchObject({ step: 'spec', context: { task: { status: 'spec', claimBy: 'me' } } });
     expect((await store.listEvents('T-1')).filter((e) => e.field === 'status')).toEqual([expect.objectContaining({ from: 'ready', to: 'spec' })]);
@@ -405,7 +514,7 @@ describe('on BlocksStore', () => {
     });
     await put(store, { status: 'ready' });
     data.failNextReply('insert', 'FactoryRun');
-    const p = engine.next();
+    const p = nextTicket(engine);
     await vi.runAllTimersAsync();
     const ticket = await p;
     expect(data.rows('FactoryRun')).toHaveLength(1);
@@ -428,7 +537,7 @@ describe('on BlocksStore', () => {
       return insert(schema, row);
     };
     data.failNextReply('insert', 'FactoryEvent');
-    const p = engine.next();
+    const p = nextTicket(engine);
     await vi.runAllTimersAsync();
     expect(await p).toBeNull();
     expect((await store.listEvents('T-1')).filter((e) => e.field === 'setupError')).toHaveLength(1);
@@ -442,7 +551,7 @@ describe('on BlocksStore', () => {
       store: (now) => new BlocksStore(new FakeBlocksData('any', { now }), 'owner', { now }),
     });
     await put(store, { status: 'spec', stage: 'spec', branch: 'b' });
-    expect(await engine.next()).toBeNull();
+    expect(await nextTicket(engine)).toBeNull();
     expect(await store.getTask('T-1')).toMatchObject({ claimBy: null, claimUntil: null });
   });
 
@@ -451,15 +560,15 @@ describe('on BlocksStore', () => {
       store: (now) => new BlocksStore(new FakeBlocksData('any', { now }), 'owner', { now }),
     });
     await put(store, { status: 'ready' });
-    await engine.next();
+    await nextTicket(engine);
     await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'v1' }));
     await store.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'changes', comment: 'drop the cache idea' });
-    expect(await engine.next()).toMatchObject({ step: 'spec', context: { feedback: 'drop the cache idea' } });
+    expect(await nextTicket(engine)).toMatchObject({ step: 'spec', context: { feedback: 'drop the cache idea' } });
     const t = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'v2' }));
     expect(t).toMatchObject({ status: 'spec_review', answer: null, claimBy: null, claimUntil: null });
     expect(await store.getTask('T-1')).toMatchObject({ answer: null, claimBy: null, claimUntil: null });
     await store.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 2, decision: 'approve', comment: '' });
-    const plan = await engine.next();
+    const plan = await nextTicket(engine);
     expect(plan!.step).toBe('plan');
     expect(plan!.context.feedback).toBeUndefined();
   });
@@ -475,13 +584,13 @@ describe('on BlocksStore', () => {
       taskId: 'T-1', title: 'Add widget', description: 'd', repo: 'data', baseBranch: 'dev', status: 'ready',
       gateOverrides: '{}', costUsd: '0', attempt: 0, version: 1,
     });
-    expect(await engine.next()).toMatchObject({ step: 'spec' });
+    expect(await nextTicket(engine)).toMatchObject({ step: 'spec' });
     const t = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: '# Spec', costUsd: 0.5 }));
     expect(t).toMatchObject({ status: 'spec_review', costUsd: 0.5, claimBy: null });
     expect(await store.currentDoc('T-1', 'spec')).toMatchObject({ version: 1, body: '# Spec' });
     expect(await store.listEvents('T-1')).toContainEqual(expect.objectContaining({ field: 'status', to: 'spec_review' }));
     data.seed('FactoryApproval', { approvalId: 'a-1', taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'approve', comment: '', at: '2026-11-09T10:00:00.000Z' });
-    expect(await engine.next()).toMatchObject({ step: 'plan' });
+    expect(await nextTicket(engine)).toMatchObject({ step: 'plan' });
     expect(await store.getTask('T-1')).toMatchObject({ status: 'plan', stage: 'plan' });
   });
 });
@@ -502,7 +611,7 @@ describe('complete', () => {
   test('done with a doc writes the doc, finishes the run and moves on', async () => {
     const { store, engine } = setup();
     await put(store, { status: 'ready' });
-    await engine.next();
+    await nextTicket(engine);
     const t = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: '# Spec', costUsd: 1.5, turns: 4 }));
     expect(t).toMatchObject({ status: 'spec_review', stage: null, costUsd: 1.5, claimBy: null, claimUntil: null });
     expect(await store.currentDoc('T-1', 'spec')).toMatchObject({
@@ -528,7 +637,7 @@ describe('complete', () => {
     }
     const { store, engine } = setup({ store: () => new RenewingStore() });
     await put(store, { status: 'ready' });
-    await engine.next();
+    await nextTicket(engine);
     const before = (await store.getTask('T-1')).version;
     hook.onFinish = async () => {
       await engine.renew('T-1');
@@ -541,7 +650,7 @@ describe('complete', () => {
   test('accepts a lapsed claim nobody re-claimed', async () => {
     const { store, engine, clock } = setup();
     await put(store, { status: 'ready' });
-    await engine.next();
+    await nextTicket(engine);
     clock.t = new Date(clock.t.getTime() + 3_600_000);
     const t = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'x' }));
     expect(t.status).toBe('spec_review');
@@ -550,7 +659,7 @@ describe('complete', () => {
   test('a missing result blocks the task as failed', async () => {
     const { store, engine } = setup();
     await put(store, { status: 'ready' });
-    await engine.next();
+    await nextTicket(engine);
     const t = await engine.complete('T-1', 'spec', undefined);
     expect(t.status).toBe('blocked');
     expect(t.blockedReason).toMatch(/^invalid agent result/);
@@ -559,7 +668,7 @@ describe('complete', () => {
   test('a cost of 5.01 at the default limit blocks the task', async () => {
     const { store, engine } = setup();
     await put(store, { status: 'ready' });
-    await engine.next();
+    await nextTicket(engine);
     const t = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: 'x', costUsd: 5.01 }));
     expect(t).toMatchObject({ status: 'blocked', stage: 'spec', costUsd: 5.01 });
     expect(t.blockedReason).toMatch(/cost/);
@@ -570,7 +679,7 @@ describe('check', () => {
   test('passing checks write a verify doc and move to the verify agent', async () => {
     const { store, engine } = setup();
     await put(store, { status: 'verify', stage: 'check', branch: 'factory/T-1-x' });
-    await engine.next();
+    await nextTicket(engine);
     const t = await engine.check('T-1');
     expect(t).toMatchObject({ status: 'verify', stage: 'verify' });
     const doc = await store.currentDoc('T-1', 'verify');
@@ -581,7 +690,7 @@ describe('check', () => {
   test('failing checks return to build with the failing and skipped step names', async () => {
     const { store, engine } = setup({ failing: ['dotnet build'] });
     await put(store, { status: 'verify', stage: 'check', branch: 'factory/T-1-x' });
-    await engine.next();
+    await nextTicket(engine);
     const t = await engine.check('T-1');
     expect(t).toMatchObject({ status: 'build', stage: 'build', attempt: 1, answer: 'server.build, server.test' });
   });
@@ -590,7 +699,7 @@ describe('check', () => {
     const hook = { onExec: async () => {} };
     const { store, engine } = setup({ onExec: () => hook.onExec() });
     await put(store, { status: 'verify', stage: 'check', branch: 'factory/T-1-x' });
-    await engine.next();
+    await nextTicket(engine);
     let renewals = 0;
     hook.onExec = async () => {
       await engine.renew('T-1');
@@ -605,7 +714,7 @@ describe('check', () => {
     const hook = { onExec: async () => {} };
     const { store, engine, clock } = setup({ onExec: () => hook.onExec() });
     await put(store, { status: 'verify', stage: 'check', branch: 'factory/T-1-x' });
-    await engine.next();
+    await nextTicket(engine);
     hook.onExec = async () => {
       const t = await store.getTask('T-1');
       if (t.claimBy === 'me') await store.updateTask('T-1', t.version, claimedBy('other', clock));
@@ -630,7 +739,7 @@ describe('ship', () => {
     await s.store.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: prGate } }, repos: {} } } });
     await put(s.store, { status: 'review', stage: 'ship', branch: 'factory/T-1-add-widget' }, base);
     await s.store.addDoc('T-1', 'spec', 'S'.repeat(5000), 'a');
-    await s.engine.next();
+    await nextTicket(s.engine);
     return s;
   }
 
@@ -685,7 +794,7 @@ describe('ship', () => {
     // build → verify → review happen; the reviewer approves a new review doc.
     await store.updateTask('T-1', back.version, { status: 'review', stage: 'ship' });
     await store.addDoc('T-1', 'review', 'approve again', 'reviewer');
-    await engine.next();
+    await nextTicket(engine);
     const again = await engine.ship('T-1');
     expect(again).toMatchObject({ status: 'pr_open', prUrl: first.prUrl });
     expect(github.prs.size).toBe(1);
@@ -722,7 +831,7 @@ describe('ship', () => {
     await store.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: false } }, repos: {} } } });
     const pr = await github.openPr({ remote: REMOTE, head: 'factory/T-1-x', base: 'dev', title: 't', body: 'b' });
     await put(store, { status: 'review', stage: 'ship', branch: 'factory/T-1-x', prUrl: pr.url }, 'feature/x');
-    await engine.next();
+    await nextTicket(engine);
     const t = await engine.ship('T-1');
     expect(t).toMatchObject({ status: 'blocked', stage: 'ship' });
     expect(t.blockedReason).toMatch(/targets dev.*not merged/);
@@ -734,7 +843,7 @@ describe('ship', () => {
     await store.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: false } }, repos: {} } } });
     const pr = await github.openPr({ remote: REMOTE, head: 'factory/T-1-x', base: 'feature/y', title: 't', body: 'b' });
     await put(store, { status: 'review', stage: 'ship', branch: 'factory/T-1-x', prUrl: pr.url }, 'feature/x');
-    await engine.next();
+    await nextTicket(engine);
     const t = await engine.ship('T-1');
     expect(t).toMatchObject({ status: 'blocked', stage: 'ship', blockedReason: `${pr.url} targets feature/y, not feature/x; not merged` });
     expect(github.prs.get(pr.url)!.state).toBe('open');
@@ -928,7 +1037,7 @@ describe('sync', () => {
     for (let i = 0; i < 3; i++) {
       const t = await store.getTask('T-1');
       if (t.status === 'build') await store.updateTask('T-1', t.version, { status: 'verify', stage: 'check' });
-      await engine.next();
+      await nextTicket(engine);
       await engine.check('T-1');
     }
     expect(await store.getTask('T-1')).toMatchObject({ status: 'blocked', stage: 'build', attempt: 3, answer: null });
@@ -985,7 +1094,7 @@ describe('sync', () => {
 });
 
 describe('status', () => {
-  test('lists active claims, counts per status, every task and the global settings', async () => {
+  test('lists active claims, counts per status, every task and each factory', async () => {
     const { store, engine, clock } = setup();
     await put(store, { status: 'build', stage: 'build', branch: 'b', ...claimedBy('other', clock) });
     await put(store, { status: 'build', stage: 'build', branch: 'b', claimBy: 'old', claimUntil: '2026-01-01T00:00:00Z' });
@@ -1000,8 +1109,21 @@ describe('status', () => {
         { taskId: 'T-2', title: 'Add widget', repo: 'data', status: 'build', stage: 'build', blockedReason: null, question: null, prUrl: null },
         { taskId: 'T-3', title: 'Add widget', repo: 'data', status: 'blocked', stage: 'verify', blockedReason: null, question: 'which API?', prUrl: 'u' },
       ],
-      settings: DEFAULT_SETTINGS,
+      factories: [{ factoryId: 'blocks', name: 'blocks', active: true, paused: false, counts: { build: 2, blocked: 1 }, patPresent: null }],
     });
+  });
+});
+
+describe('status per factory', () => {
+  test('a filter limits tasks and factories; patPresent comes from the health row', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'a');
+    await putIn(store, 'b');
+    await store.setFactoryHealth({ factoryId: 'b', patPresent: false, checkedAt: '2026-11-10T00:00:00Z' });
+    const s = await engine.status(['b']);
+    expect(s.tasks.map((t) => t.taskId)).toEqual(['T-2']);
+    expect(s.factories).toEqual([{ factoryId: 'b', name: 'b', active: true, paused: false, counts: { ready: 1 }, patPresent: false }]);
+    expect((await engine.status()).factories.map((f) => [f.factoryId, f.patPresent])).toEqual([['a', null], ['b', false]]);
   });
 });
 

@@ -31,6 +31,10 @@ describe('ensureMain', () => {
 });
 
 describe('validateFactoryDef', () => {
+  test('the id global is reserved', () => {
+    expect(validateFactoryDef(defInput({ factoryId: 'global' }))).toEqual({ ok: false, error: 'factory id global is reserved' });
+  });
+
   test.each(['Delta', '1x', 'a'.repeat(41), 'a_b'])('rejects id %s', (id) => {
     expect(validateFactoryDef(defInput({ factoryId: id })).ok).toBe(false);
   });

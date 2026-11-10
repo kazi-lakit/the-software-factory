@@ -8,7 +8,8 @@ import type { GitRepos } from './git.js';
 import { PrBaseMismatchError, type GitHub } from './github.js';
 import { diffEvents } from './history.js';
 import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
-import type { RepoConfig } from './repoConfig.js';
+import type { Checks } from './checksSchema.js';
+import type { FactoryConfig, FactoryDef, FactoryRepo } from './factories.js';
 import { SecretMissingError } from './secrets.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from './limits.js';
 import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
@@ -16,13 +17,14 @@ import {
   CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError,
   updateHeld, VersionConflictError, type BoardStore, type StoredSettings,
 } from './store.js';
-import type { AgentResult, AgentStep, DocKind, FactoryEvent, Gate, Mode, RepoId, Settings, Status, Step, Task } from './types.js';
+import type { AgentResult, AgentStep, DocKind, FactoryEvent, Gate, Mode, Settings, Status, Step, Task } from './types.js';
 
 export interface EngineDeps {
   store: BoardStore;
   git: GitRepos;
   github: GitHub;
-  repos: Record<RepoId, RepoConfig>;
+  /** The factory definitions, read from the store each time `next`, `sync` or `status` runs. */
+  factories: () => Promise<FactoryConfig>;
   exec: Exec;
   now: () => Date;
   mode: Mode;
@@ -36,16 +38,38 @@ export interface Ticket {
   step: Step;
   worktree: string;
   runId: string | null;
-  context: { task: Task; spec?: string; plan?: string; feedback?: string; checks?: string };
+  context: {
+    task: Task;
+    factory: { factoryId: string; name: string; docsPath: string };
+    /** The repo's check commands. */
+    checks: Checks;
+    spec?: string;
+    plan?: string;
+    feedback?: string;
+    /** The report the checks step wrote (the verify doc). */
+    checksReport?: string;
+  };
+}
+
+export type NextOutcome = { kind: 'ticket'; ticket: Ticket } | { kind: 'none'; reason: 'nothing to do' | 'paused' | 'inactive' };
+
+export interface FactoryStatus {
+  factoryId: string;
+  name: string;
+  active: boolean;
+  paused: boolean;
+  counts: Partial<Record<Status, number>>;
+  /** Whether the factory's PAT was found when last checked; null when it was never checked. */
+  patPresent: boolean | null;
 }
 
 export interface EngineStatus {
+  /** True when every factory in the filter is paused. */
   paused: boolean;
   active: { taskId: string; step: Step | null; claimBy: string | null; claimUntil: string | null }[];
   counts: Partial<Record<Status, number>>;
   tasks: Pick<Task, 'taskId' | 'title' | 'repo' | 'status' | 'stage' | 'blockedReason' | 'question' | 'prUrl'>[];
-  /** Global settings. */
-  settings: Settings;
+  factories: FactoryStatus[];
 }
 
 export class ClaimError extends Error {
@@ -89,8 +113,8 @@ const AGENT_STEPS: ReadonlySet<Step> = new Set<Step>(['spec', 'plan', 'build', '
 const WORKING: ReadonlySet<Status> = new Set<Status>(['spec', 'plan', 'build', 'verify', 'review']);
 const taskNum = (id: string) => Number(id.slice(id.indexOf('-') + 1)) || 0;
 
-/** One factory's settings, defaults where none are stored. plan 6 Task 4 replaces this single-factory shim (factory `blocks`). */
-const factorySettings = (stored: StoredSettings, factoryId = 'blocks'): Settings => stored.factories[factoryId]?.factory ?? DEFAULT_SETTINGS;
+/** One factory's own settings (before repo and task overrides), defaults where none are stored. */
+const factorySettings = (stored: StoredSettings, factoryId: string): Settings => stored.factories[factoryId]?.factory ?? DEFAULT_SETTINGS;
 
 export class Engine {
   constructor(private readonly deps: EngineDeps) {}
@@ -99,11 +123,35 @@ export class Engine {
     return `core · ${this.deps.mode}`;
   }
 
-  async sync(): Promise<void> {
+  /** Reads the definitions and logs each skipped one (an invalid definition is not a factory) once. */
+  private async loadFactories(): Promise<FactoryConfig> {
+    const cfg = await retry(() => this.deps.factories());
+    for (const { id, reason } of cfg.skipped()) {
+      const note = `factory ${id} skipped: ${reason}`;
+      if (this.loggedSkips.has(note)) continue;
+      this.loggedSkips.add(note);
+      this.deps.log?.(note);
+    }
+    return cfg;
+  }
+
+  private readonly loggedSkips = new Set<string>();
+
+  /** `filter` limits the pass to those factories; left out, every factory. */
+  async sync(filter?: string[]): Promise<void> {
     const { store } = this.deps;
+    const cfg = await this.loadFactories();
     const stored = await retry(() => store.getSettings());
     for (const task of await retry(() => store.listTasks())) {
+      if (filter && !filter.includes(task.factoryId)) continue;
       try {
+        const gone = this.goneReason(cfg, task);
+        if (gone) {
+          if (!TERMINAL.has(task.status) && task.status !== 'blocked' && task.status !== 'inbox') {
+            await this.apply(task, this.decideFor(task, { kind: 'limit', reason: gone }, factorySettings(stored, task.factoryId)), this.coreActor);
+          }
+          continue;
+        }
         const settings = this.settingsFor(stored, task);
         const moved = await this.syncGate(task, settings);
         const t = moved ?? task;
@@ -118,19 +166,36 @@ export class Engine {
     }
   }
 
-  async next(taskId?: string): Promise<Ticket | null> {
-    const { store, now, claimant } = this.deps;
-    const stored = await retry(() => store.getSettings());
-    const factory = factorySettings(stored);
-    if (factory.paused) return null;
-    await this.sync();
+  /** Why the task's factory or repo cannot be found, or undefined when both are there. */
+  private goneReason(cfg: FactoryConfig, task: Task): string | undefined {
+    if (!cfg.factory(task.factoryId)) return `factory ${task.factoryId} no longer exists`;
+    if (!cfg.repo(task.factoryId, task.repo)) return `repo ${task.repo} no longer exists in ${task.factoryId}`;
+    return undefined;
+  }
 
+  /** `filter` limits claiming to those factories; left out, every factory. */
+  async next(taskId?: string, filter?: string[]): Promise<NextOutcome> {
+    const { store, now, claimant } = this.deps;
+    const cfg = await this.loadFactories();
+    const stored = await retry(() => store.getSettings());
+    const scope = cfg.factories().filter((f) => !filter || filter.includes(f.factoryId));
+    const paused = (f: FactoryDef) => factorySettings(stored, f.factoryId).paused;
+    const open = scope.filter((f) => f.active && !paused(f));
+    if (open.length === 0) {
+      const reason = scope.length === 0 ? 'nothing to do' : scope.some(paused) ? 'paused' : 'inactive';
+      return { kind: 'none', reason };
+    }
+    await this.sync(filter);
+
+    const openIds = new Set(open.map((f) => f.factoryId));
     const tasks = await retry(() => store.listTasks());
-    const active = tasks.filter((t) => !claimExpired(t, now())).length;
-    if (active >= factory.maxParallel) return null;
+    const activeBy = new Map<string, number>();
+    for (const t of tasks) if (!claimExpired(t, now())) activeBy.set(t.factoryId, (activeBy.get(t.factoryId) ?? 0) + 1);
+    const hasRoom = (factoryId: string) => (activeBy.get(factoryId) ?? 0) < factorySettings(stored, factoryId).maxParallel;
 
     const workable = (t: Task) => t.status === 'ready' || (t.stage !== null && WORKING.has(t.status));
     const candidates = tasks
+      .filter((t) => openIds.has(t.factoryId) && hasRoom(t.factoryId) && cfg.repo(t.factoryId, t.repo))
       .filter((t) => !this.settingsFor(stored, t).paused)
       .filter((t) => (taskId === undefined ? workable(t) && claimExpired(t, now()) : t.taskId === taskId && workable(t)))
       .sort((a, b) => taskNum(a.taskId) - taskNum(b.taskId));
@@ -144,7 +209,8 @@ export class Engine {
       }
       if (!claimed) continue;
       try {
-        return await this.ticket(claimed, this.settingsFor(stored, claimed));
+        const ticket = await this.ticket(claimed, this.settingsFor(stored, claimed), cfg);
+        return ticket ? { kind: 'ticket', ticket } : { kind: 'none', reason: 'nothing to do' };
       } catch (e) {
         await this.releaseOwnClaim(claimed.taskId);
         if (taskId !== undefined) throw e;
@@ -152,7 +218,7 @@ export class Engine {
         await this.noteSetupError(claimed, e);
       }
     }
-    return null;
+    return { kind: 'none', reason: 'nothing to do' };
   }
 
   async complete(taskId: string, step: AgentStep, raw: string | undefined): Promise<Task> {
@@ -196,9 +262,9 @@ export class Engine {
   async check(taskId: string): Promise<Task> {
     const { store, exec } = this.deps;
     const claimed = await this.claimedAt(taskId, 'check');
-    const cfg = this.repo(claimed);
-    const worktree = await this.worktreeFor(claimed, requireBranch(claimed));
-    const report = await runChecks(cfg, worktree, exec);
+    const { def, repo } = this.repoOf(await this.loadFactories(), claimed);
+    const worktree = await this.worktreeFor(def, repo, claimed, requireBranch(claimed));
+    const report = await runChecks(repo, worktree, exec);
     // The checks take a while and the claim may have been renewed meanwhile: decide on the fresh task.
     const task = await this.claimedAt(taskId, 'check');
     const settings = this.settingsFor(await retry(() => store.getSettings()), task);
@@ -213,7 +279,7 @@ export class Engine {
   async ship(taskId: string): Promise<Task> {
     const { store, github } = this.deps;
     const claimed = await this.claimedAt(taskId, 'ship');
-    const cfg = this.repo(claimed);
+    const { def, repo: cfg } = this.repoOf(await this.loadFactories(), claimed);
     const branch = requireBranch(claimed);
     assertPushAllowed(branch);
     const settings = this.settingsFor(await retry(() => store.getSettings()), claimed);
@@ -226,7 +292,7 @@ export class Engine {
     const state = existing ? await retry(() => github.prState(existing)) : undefined;
     if (existing && state === 'merged') return block(claimed, 'previous PR was merged; new commits are not shipped');
 
-    const worktree = await this.worktreeFor(claimed, branch);
+    const worktree = await this.worktreeFor(def, cfg, claimed, branch);
     await this.deps.git.push(worktree, branch);
 
     // An earlier ship may have opened the PR and failed before recording it: find it before opening a new one.
@@ -262,19 +328,33 @@ export class Engine {
     return renewed;
   }
 
-  async status(): Promise<EngineStatus> {
+  async status(filter?: string[]): Promise<EngineStatus> {
     const { store, now } = this.deps;
+    const cfg = await this.loadFactories();
     const stored = await retry(() => store.getSettings());
-    const tasks = await retry(() => store.listTasks());
-    const counts: Partial<Record<Status, number>> = {};
-    for (const t of tasks) counts[t.status] = (counts[t.status] ?? 0) + 1;
+    const health = new Map((await retry(() => store.listFactoryHealth())).map((h) => [h.factoryId, h.patPresent]));
+    const inScope = (factoryId: string) => !filter || filter.includes(factoryId);
+    const tasks = (await retry(() => store.listTasks())).filter((t) => inScope(t.factoryId));
+    const count = (list: Task[]) => {
+      const counts: Partial<Record<Status, number>> = {};
+      for (const t of list) counts[t.status] = (counts[t.status] ?? 0) + 1;
+      return counts;
+    };
     const active = tasks
       .filter((t) => !claimExpired(t, now()))
       .map((t) => ({ taskId: t.taskId, step: t.stage, claimBy: t.claimBy, claimUntil: t.claimUntil }));
     const list = tasks.map(({ taskId, title, repo, status, stage, blockedReason, question, prUrl }) => ({
       taskId, title, repo, status, stage, blockedReason, question, prUrl,
     }));
-    return { paused: factorySettings(stored).paused, active, counts, tasks: list, settings: factorySettings(stored) };
+    const factories = cfg.factories().filter((f) => inScope(f.factoryId)).map((f) => ({
+      factoryId: f.factoryId,
+      name: f.name,
+      active: f.active,
+      paused: factorySettings(stored, f.factoryId).paused,
+      counts: count(tasks.filter((t) => t.factoryId === f.factoryId)),
+      patPresent: health.get(f.factoryId) ?? null,
+    }));
+    return { paused: factories.length > 0 && factories.every((f) => f.paused), active, counts: count(tasks), tasks: list, factories };
   }
 
   /** The only way a task changes status: checks the move, writes with the task's version, clears the claim, logs events. */
@@ -307,7 +387,7 @@ export class Engine {
     return updated;
   }
 
-  private async openPr(task: Task, cfg: RepoConfig, branch: string): Promise<{ url: string }> {
+  private async openPr(task: Task, cfg: FactoryRepo, branch: string): Promise<{ url: string }> {
     const spec = (await retry(() => this.deps.store.currentDoc(task.taskId, 'spec')))?.body ?? '';
     return this.deps.github.openPr({
       remote: cfg.remote,
@@ -359,22 +439,22 @@ export class Engine {
   }
 
   /** Builds the ticket for a task this claimant just claimed, moving a ready task to spec first. */
-  private async ticket(claimed: Task, settings: Settings): Promise<Ticket | null> {
+  private async ticket(claimed: Task, settings: Settings, cfg: FactoryConfig): Promise<Ticket | null> {
     const { store, git, now, claimant, mode } = this.deps;
-    const cfg = this.repo(claimed);
+    const { def, repo } = this.repoOf(cfg, claimed);
     let task = claimed;
     let worktree: string;
     if (task.status === 'ready') {
       const branch = branchName(task.taskId, task.title);
-      await git.ensureClone(cfg);
-      worktree = await this.worktreeFor(task, branch);
+      await git.ensureClone(def.factoryId, repo, def.protectedBranches);
+      worktree = await this.worktreeFor(def, repo, task, branch);
       const d = this.decideFor(task, { kind: 'claimed' }, settings);
       const moved = await this.apply(task, { ...d, patch: { ...d.patch, branch } }, this.coreActor);
       const reclaimed = await retry(() => claim(store, moved, claimant, now()));
       if (!reclaimed) return null;
       task = reclaimed;
     } else {
-      worktree = await this.worktreeFor(task, requireBranch(task));
+      worktree = await this.worktreeFor(def, repo, task, requireBranch(task));
     }
 
     const step = task.stage!;
@@ -389,12 +469,14 @@ export class Engine {
     }
 
     const body = async (kind: DocKind) => (await retry(() => store.currentDoc(task.taskId, kind)))?.body;
-    const context: Ticket['context'] = { task };
+    const context: Ticket['context'] = {
+      task, factory: { factoryId: def.factoryId, name: def.name, docsPath: def.docsPath }, checks: repo.checks,
+    };
     const values = {
       spec: await body('spec'),
       plan: await body('plan'),
       feedback: task.answer ?? undefined,
-      checks: await body('verify'),
+      checksReport: await body('verify'),
     };
     for (const [k, v] of Object.entries(values) as [keyof typeof values, string | undefined][]) {
       if (v !== undefined) context[k] = v;
@@ -445,14 +527,15 @@ export class Engine {
   }
 
   /** The task's worktree; a new one branches from the task's base, not the repo default. */
-  private worktreeFor(task: Task, branch: string): Promise<string> {
-    return this.deps.git.worktree({ ...this.repo(task), baseBranch: task.baseBranch }, task.taskId, branch);
+  private worktreeFor(def: FactoryDef, repo: FactoryRepo, task: Task, branch: string): Promise<string> {
+    return this.deps.git.worktree(def.factoryId, { ...repo, baseBranch: task.baseBranch }, task.taskId, branch);
   }
 
-  private repo(task: Task): RepoConfig {
-    const cfg = this.deps.repos[task.repo];
-    if (!cfg) throw new Error(`no repo config for ${task.repo}`);
-    return cfg;
+  /** The task's factory and repo definitions; throws the blocking reason when either is gone. */
+  private repoOf(cfg: FactoryConfig, task: Task): { def: FactoryDef; repo: FactoryRepo } {
+    const gone = this.goneReason(cfg, task);
+    if (gone) throw new Error(gone);
+    return { def: cfg.factory(task.factoryId)!, repo: cfg.repo(task.factoryId, task.repo)! };
   }
 }
 

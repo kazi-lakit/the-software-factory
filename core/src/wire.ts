@@ -1,4 +1,4 @@
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { ClientCredentialsToken } from './blocks/token.js';
@@ -9,10 +9,10 @@ import { shellExec } from './checks.js';
 import { Engine } from './engine.js';
 import { LocalGitRepos } from './git.js';
 import { OctokitGitHub, type GitHub } from './github.js';
-import { loadRepoConfig, type RepoConfig } from './repoConfig.js';
+import { FactoryConfig } from './factories.js';
 import { readSecret } from './secrets.js';
 import { FileStore, type BoardStore } from './store.js';
-import type { Mode, RepoId } from './types.js';
+import type { Mode } from './types.js';
 
 export interface WireOptions {
   root: string;
@@ -24,11 +24,11 @@ export interface WireOptions {
   log?: (msg: string) => void;
 }
 
-/** `FACTORY_ROOT`, else the nearest parent folder of the cwd that contains `repos/`. */
+/** `FACTORY_ROOT`, else the nearest parent folder of the cwd that contains `core/` and `plugin/`. */
 export function findRoot(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = process.env): string {
   if (env.FACTORY_ROOT) return resolve(env.FACTORY_ROOT);
   for (let dir = resolve(cwd); ; dir = dirname(dir)) {
-    if (existsSync(join(dir, 'repos'))) return dir;
+    if (existsSync(join(dir, 'core')) && existsSync(join(dir, 'plugin'))) return dir;
     if (dirname(dir) === dir) throw new Error('factory root not found (set FACTORY_ROOT or run inside the factory folder)');
   }
 }
@@ -101,23 +101,13 @@ export class LazyBlocksStore implements BoardStore {
   updateSettingsScope(...a: Parameters<BoardStore['updateSettingsScope']>) { return this.store.then((s) => s.updateSettingsScope(...a)); }
 }
 
-/** Temporary single-factory adapter (factory `blocks`): every repos/*.yaml. Plan 6 Task 4 replaces it with FactoryConfig. */
-function loadLegacyRepoConfigs(reposDir: string): Record<RepoId, RepoConfig> {
-  const out: Record<RepoId, RepoConfig> = {};
-  for (const f of readdirSync(reposDir).filter((n) => n.endsWith('.yaml')).sort()) {
-    const id = f.slice(0, -'.yaml'.length);
-    out[id] = loadRepoConfig(reposDir, id);
-  }
-  return out;
-}
-
 export async function wire(o: WireOptions): Promise<{ engine: Engine; store: BoardStore }> {
   const store: BoardStore = o.store === 'blocks' ? new LazyBlocksStore(o.loadCredential) : new FileStore(join(o.root, '.factory', 'board.json'), { factoriesDir: join(o.root, 'factories'), ...(o.log ? { log: o.log } : {}) });
   const engine = new Engine({
     store,
     git: new LocalGitRepos(o.root),
     github: new LazyGitHub(),
-    repos: loadLegacyRepoConfigs(join(o.root, 'repos')),
+    factories: async () => new FactoryConfig(await store.listFactoryDefs(), await store.listFactoryRepos()),
     exec: shellExec,
     now: () => new Date(),
     mode: o.mode,

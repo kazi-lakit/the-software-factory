@@ -12,7 +12,7 @@ import {
   StaleDocError,
 } from '../src/owner.js';
 import { defFixture, repoFixture, seed, seedBlocksFactories } from './factoryFixtures.js';
-import type { RepoConfig } from '../src/repoConfig.js';
+import { FactoryConfig } from '../src/factories.js';
 import { IllegalMoveError } from '../src/status.js';
 import { FileStore, MemoryStore, VersionConflictError, type BoardStore } from '../src/store.js';
 import type { FactoryEvent, RepoId, Task } from '../src/types.js';
@@ -34,16 +34,7 @@ const fixtures: [string, () => { owner: BoardStore; core: BoardStore }][] = [
   }],
 ];
 
-const cfg: RepoConfig = {
-  repo: 'data',
-  remote: 'git@github.com:SELISEdigitalplatforms/blocks-data.git',
-  baseBranch: 'dev',
-  checks: {
-    server: { cwd: 'server', build: 'b', test: 't' },
-    client: { cwd: 'client', install: 'i', typecheck: 'tc', lint: 'l', test: 't' },
-    e2e: 'off',
-  },
-};
+const factories = async () => new FactoryConfig([defFixture('blocks')], [repoFixture('blocks', 'data')]);
 
 const you = (e: Partial<FactoryEvent>): FactoryEvent => ({
   taskId: 'T-1', factoryId: 'blocks', actor: 'you', action: 'set', field: null, from: null, to: null, reason: '', at: NOW, ...e,
@@ -125,7 +116,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
         you({ field: 'claimBy', from: 'w', to: null, reason: 'cancelled' }),
       ]);
       const engine = new Engine({
-        store: core, git: {} as never, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,
+        store: core, git: {} as never, github: new FakeGitHub(), factories,
         exec: async () => ({ code: 0, output: '' }), now, mode: 'session', claimant: 'w',
       });
       await expect(engine.complete('T-1', 'build', JSON.stringify({ status: 'done', summary: 's' }))).rejects.toBeInstanceOf(ClaimError);
@@ -181,7 +172,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       await put({ status: 'blocked', stage: 'build', question: 'which API?', blockedReason: 'needs input' });
       await answerTask(owner, now, 'T-1', 'the v2 one', (await owner.getTask('T-1')).version);
       const engine = new Engine({
-        store: core, git: {} as never, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,
+        store: core, git: {} as never, github: new FakeGitHub(), factories,
         exec: async () => ({ code: 0, output: '' }), now, mode: 'session', claimant: 'me',
       });
       await engine.sync();

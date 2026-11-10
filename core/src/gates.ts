@@ -4,12 +4,12 @@ import type { Approval, DocKind, Gate, RepoSettings, Settings } from './types.js
 /** Doc kind whose current version an approval at each gate must match (R1). */
 export const GATE_DOC: Readonly<Record<Gate, DocKind>> = { spec: 'spec', plan: 'plan', pr: 'review' };
 
-/** Repo settings override global ones; gates merge per key. */
-export function resolveSettings(global: Settings, repo?: RepoSettings): Settings {
-  if (!repo) return { ...global, gates: { ...global.gates } };
+/** Repo settings override the factory's; gates merge per key. */
+export function resolveSettings(factory: Settings, repo?: RepoSettings): Settings {
+  if (!repo) return { ...factory, gates: { ...factory.gates } };
   const { gates, ...rest } = repo;
   const defined = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
-  return { ...global, ...defined, gates: { ...global.gates, ...definedGates(gates) } };
+  return { ...factory, ...defined, gates: { ...factory.gates, ...definedGates(gates) } };
 }
 
 function definedGates(g?: Partial<Record<Gate, boolean>>): Partial<Record<Gate, boolean>> {

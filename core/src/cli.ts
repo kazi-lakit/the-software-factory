@@ -37,9 +37,21 @@ function choice<T extends string>(what: string, value: string, allowed: readonly
   return value as T;
 }
 
+function factoryId(value: string): string {
+  if (!isValidId(value)) throw new CliExit('--factory must be a factory id (lowercase letters, digits and hyphens)', 1);
+  return value;
+}
+
 function repoId(what: string, value: string): RepoId {
   if (!isValidId(value)) throw new CliExit(`${what} must be a repo id (lowercase letters, digits and hyphens)`, 1);
   return value;
+}
+
+const collect = (v: string, prev: string[] | undefined): string[] => [...(prev ?? []), v];
+
+function factoryFilter(ids: string[] | undefined): string[] | undefined {
+  if (!ids) return undefined;
+  return ids.map(factoryId);
 }
 
 export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) => wire(o)): Promise<number> {
@@ -64,12 +76,14 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   program
     .command('next [task]')
     .description('claim the next piece of work and print its ticket')
+    .option('--factory <id>', 'only this factory (repeat for several)', collect, undefined)
     .option('--json', 'print JSON')
-    .action(async (task: string | undefined, o: { json?: boolean }, cmd: Command) => {
-      const { engine, store } = await open(cmd);
-      const ticket = await engine.next(task);
-      // A paused factory also returns no ticket: say so, so a loop's owner is not left guessing.
-      if (!ticket) return io.out((await store.getSettings()).factories.blocks?.factory.paused /* plan 6 Task 4 replaces this */ ? 'paused' : 'nothing to do');
+    .action(async (task: string | undefined, o: { json?: boolean; factory?: string[] }, cmd: Command) => {
+      const { engine } = await open(cmd);
+      const outcome = await engine.next(task, factoryFilter(o.factory));
+      // Paused and inactive factories also return no ticket: say so, so a loop's owner is not left guessing.
+      if (outcome.kind === 'none') return io.out(outcome.reason);
+      const { ticket } = outcome;
       if (o.json) return printJson(ticket);
       io.out(`${ticket.taskId} ${ticket.step} (worktree ${ticket.worktree})`);
     });
@@ -120,12 +134,17 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   program
     .command('status')
     .description('counts per status and active claims')
+    .option('--factory <id>', 'only this factory (repeat for several)', collect, undefined)
     .option('--json', 'print JSON')
-    .action(async (o: { json?: boolean }, cmd: Command) => {
+    .action(async (o: { json?: boolean; factory?: string[] }, cmd: Command) => {
       const { engine } = await open(cmd);
-      const s = await engine.status();
+      const s = await engine.status(factoryFilter(o.factory));
       if (o.json) return printJson(s);
       io.out(`paused: ${s.paused}`);
+      for (const f of s.factories) {
+        const flags = [f.active ? '' : 'inactive', f.paused ? 'paused' : '', f.patPresent === false ? 'no PAT' : ''].filter(Boolean).join(', ');
+        io.out(`factory: ${f.factoryId} (${f.name})${flags ? ` ${flags}` : ''}`);
+      }
       for (const [status, n] of Object.entries(s.counts)) io.out(`${status}: ${n}`);
       for (const a of s.active) io.out(`active: ${a.taskId} ${a.step ?? '-'} by ${a.claimBy ?? '-'} until ${a.claimUntil ?? '-'}`);
       for (const t of s.tasks.filter((x) => x.status === 'blocked')) {
@@ -137,6 +156,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   program
     .command('new')
     .description('create a task in the Board (run by the owner from their session; inbox unless --ready)')
+    .option('--factory <id>', 'factory id', 'blocks')
     .requiredOption('--repo <id>', 'repo id')
     .requiredOption('--title <title>', 'task title')
     .option('--description <text>', 'task description')
@@ -144,7 +164,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .option('--base <branch>', 'base branch (default dev; never main)')
     .option('--ready', 'start in ready instead of inbox')
     .option('--json', 'print the task as JSON')
-    .action(async (o: { repo: string; title: string; description?: string; descriptionFile?: string; base?: string; ready?: boolean; json?: boolean }, cmd: Command) => {
+    .action(async (o: { factory: string; repo: string; title: string; description?: string; descriptionFile?: string; base?: string; ready?: boolean; json?: boolean }, cmd: Command) => {
       if ((o.description === undefined) === (o.descriptionFile === undefined)) {
         throw new CliExit('pass exactly one of --description or --description-file', 1);
       }
@@ -159,7 +179,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       }
       const { store } = await open(cmd);
       const t = await owner.createTaskAsCore(store, () => new Date(), {
-        factoryId: 'blocks', /* plan 6 Task 4 adds --factory */ title: o.title, description, repo, ...(o.base ? { baseBranch: o.base } : {}), ready: o.ready === true,
+        factoryId: factoryId(o.factory), title: o.title, description, repo, ...(o.base ? { baseBranch: o.base } : {}), ready: o.ready === true,
       });
       if (o.json) return printJson(t);
       io.out(`${t.taskId} created in ${t.status}`);
@@ -174,15 +194,16 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
 
   dev
     .command('add')
+    .option('--factory <id>', 'factory id', 'blocks')
     .requiredOption('--repo <id>', 'repo id')
     .requiredOption('--title <title>', 'task title')
     .option('--description <text>', 'task description', '')
     .option('--base <branch>', 'base branch')
-    .action(async (o: { repo: string; title: string; description: string; base?: string }, cmd: Command) => {
+    .action(async (o: { factory: string; repo: string; title: string; description: string; base?: string }, cmd: Command) => {
       const repo = repoId('--repo', o.repo);
       const store = await openDev(cmd);
       const t = await owner.createTask(store, now, {
-        factoryId: 'blocks', /* plan 6 Task 4 adds --factory */ title: o.title, description: o.description, repo, ...(o.base ? { baseBranch: o.base } : {}),
+        factoryId: factoryId(o.factory), title: o.title, description: o.description, repo, ...(o.base ? { baseBranch: o.base } : {}),
       });
       io.out(t.taskId);
     });

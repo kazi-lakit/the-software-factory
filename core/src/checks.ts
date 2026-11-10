@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import type { RepoConfig } from './repoConfig.js';
+import type { Checks } from './checksSchema.js';
 
 export type Exec = (cmd: string, cwd: string) => Promise<{ code: number; output: string }>;
 
@@ -35,7 +35,7 @@ export const shellExec: Exec = (cmd, cwd) =>
     child.on('close', (code) => resolve({ code: code ?? 1, output }));
   });
 
-export async function runChecks(cfg: RepoConfig, worktree: string, exec: Exec = shellExec): Promise<CheckReport> {
+export async function runChecks(cfg: { checks: Checks }, worktree: string, exec: Exec = shellExec): Promise<CheckReport> {
   const { server, client } = cfg.checks;
   const steps: CheckStep[] = [];
 

@@ -33,6 +33,8 @@ export type Validated<T> = { ok: true; value: T } | { ok: false; error: string }
 
 export const ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 export const ID_MAX = 40;
+/** The settings scope of the whole Board; no factory may take it. */
+export const RESERVED_ID = 'global';
 export const isValidId = (v: unknown): v is string => typeof v === 'string' && v.length <= ID_MAX && ID_PATTERN.test(v);
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -58,6 +60,7 @@ export function validateFactoryDef(input: unknown): Validated<FactoryDef> {
   if (!isObject(input)) return fail('factory must be an object');
   const { factoryId } = input;
   if (!isValidId(factoryId)) return fail(`factoryId must match ${ID_PATTERN.source} and be at most ${ID_MAX} characters`);
+  if (factoryId === RESERVED_ID) return fail(`factory id ${RESERVED_ID} is reserved`);
   const name = text(input, 'name', factoryId);
   if (name === null) return fail('name must be text');
   if (name === '') return fail('name must not be blank');
