@@ -99,7 +99,7 @@ export function FactoriesTab() {
         );
       }
       case "import":
-        return <ImportFactory entries={entries} onClose={close} />;
+        return <ImportFactory onClose={close} />;
     }
   })();
 

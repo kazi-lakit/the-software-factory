@@ -6,6 +6,7 @@ import type { StoredSettings } from "@factory/core";
 import { blocksClient } from "../lib/blocks/client";
 import { fetchSessionClaims, logout } from "../lib/blocks/auth";
 import { boardStore } from "../lib/board";
+import { defFixture } from "../test/factories";
 import { useSelectedFactory } from "../features/factories/useFactories";
 import { AppShell } from "./AppShell";
 import { AuthProvider } from "./providers/AuthProvider";
@@ -20,7 +21,7 @@ vi.mock("../lib/blocks/auth", () => ({
   startLogin: vi.fn(async () => undefined)
 }));
 
-vi.mock("../lib/board", () => ({ boardStore: { getSettings: vi.fn() } }));
+vi.mock("../lib/board", () => ({ boardStore: { getSettings: vi.fn(), listFactoryDefs: vi.fn(), listFactoryRepos: vi.fn() } }));
 
 const getSettings = vi.mocked(boardStore.getSettings);
 
@@ -54,6 +55,8 @@ beforeEach(() => {
   vi.mocked(fetchSessionClaims).mockResolvedValue({ sub: "me" });
   vi.mocked(blocksClient.iam.me).mockResolvedValue({ data: { firstName: "Kazi", lastName: "Rahman", email: "kazi@example.test", roles: ["factory-owner"] } } as never);
   getSettings.mockResolvedValue(settings(false));
+  vi.mocked(boardStore.listFactoryDefs).mockResolvedValue(["blocks", "delta", "mods"].map((id) => defFixture(id)));
+  vi.mocked(boardStore.listFactoryRepos).mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -96,6 +99,15 @@ describe("AppShell", () => {
     getSettings.mockResolvedValue(settings(true, { delta: true, mods: false }));
     renderShell();
     expect(await screen.findByText("Factories paused: blocks, delta")).toBeInTheDocument();
+  });
+
+  it("ignores_paused_settings_of_a_factory_that_is_not_listed", async () => {
+    getSettings.mockResolvedValue(settings(false, { ghost: true }));
+    renderShell();
+    await waitFor(() => expect(getSettings).toHaveBeenCalled());
+    await screen.findByText("Kazi Rahman");
+    await waitFor(() => expect(boardStore.listFactoryDefs).toHaveBeenCalled());
+    expect(screen.queryByText(/paused/)).not.toBeInTheDocument();
   });
 
   it("follows_the_selected_factory_and_ignores_the_others", async () => {

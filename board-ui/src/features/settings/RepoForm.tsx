@@ -7,15 +7,8 @@ import { describeDefinitionError } from "./FactoryForm";
 
 type Draft = { baseBranch: string; checks: string; remote: string; repoId: string };
 
-const sorted = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(sorted);
-  if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, v]) => [k, sorted(v)]));
-  }
-  return value;
-};
-/** Keys sorted, indented: the same text for the same checks, whatever the key order. */
-const pretty = (value: unknown): string => JSON.stringify(sorted(value), null, 2);
+/** Core's canonical form (keys sorted) indented, so the same checks read the same whatever the key order. */
+const pretty = (value: unknown): string => JSON.stringify(JSON.parse(canonicalJson(value)), null, 2);
 
 const draftOf = (repo: FactoryRepo | null): Draft =>
   repo ? { baseBranch: repo.baseBranch, checks: pretty(repo.checks), remote: repo.remote, repoId: repo.repoId } : { baseBranch: "dev", checks: "", remote: "", repoId: "" };
@@ -75,7 +68,7 @@ export function RepoForm({ before, def, onCancel, onReload, onSaved }: Props) {
     try {
       onSaved(await saveRepo(boardStore, now, base, after));
     } catch (error) {
-      setProblem(describeDefinitionError(error));
+      setProblem(describeDefinitionError(error, base === null ? `Repo ${draft.repoId} already exists in ${def.factoryId}. Pick another id.` : undefined));
     } finally {
       setBusy(false);
     }

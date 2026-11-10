@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FactoryConfig, type FactoryDef, type FactoryRepo } from "@factory/core";
 import { boardStore } from "../../lib/board";
 
@@ -21,17 +21,20 @@ export function useFactories() {
       const [defs, repos] = await Promise.all([boardStore.listFactoryDefs(), boardStore.listFactoryRepos()]);
       const config = new FactoryConfig(defs, repos);
       const entries = config.factories().map((def): FactoryEntry => ({ def, repos: config.repos(def.factoryId) }));
-      return { entries, skipped: config.skipped().filter((skip) => !skip.id.startsWith("GATE-")) };
+      // Every stored repo, valid or not: a settings scope of a repo that exists is not "removed".
+      const stored = new Set(repos.map((r) => `${r.factoryId}/${r.repoId}`));
+      return { entries, skipped: config.skipped().filter((skip) => !skip.id.startsWith("GATE-")), stored };
     },
     queryKey: FACTORIES_KEY,
     refetchInterval: 60_000
   });
   const entries = useMemo(() => query.data?.entries ?? [], [query.data]);
   const skipped = useMemo(() => query.data?.skipped ?? [], [query.data]);
+  const storedRepos = useMemo(() => query.data?.stored ?? new Set<string>(), [query.data]);
   const byId = useMemo(() => new Map(entries.map((entry) => [entry.def.factoryId, entry])), [entries]);
   const defs = useMemo(() => entries.map((entry) => entry.def), [entries]);
   const repos = useMemo(() => entries.flatMap((entry) => entry.repos), [entries]);
-  return { byId, defs, error: query.error, loading: query.isPending, refetch: query.refetch, repos, skipped };
+  return { byId, defs, error: query.error, loading: query.isPending, refetch: query.refetch, repos, skipped, storedRepos };
 }
 
 /** The core's last PAT check per factory; a factory with no row has not been checked. */
@@ -43,33 +46,28 @@ export function useFactoryHealth() {
   });
 }
 
-// The pick is shared by every view and the shell, so they subscribe to one source instead of each holding a copy.
-const listeners = new Set<() => void>();
-// Only used when localStorage cannot be written (private mode): the pick still applies until the page closes.
+// A pick made in this tab reaches every mounted view and the shell through these listeners. A pick made in another tab
+// is not followed while the page is open (it would remount keyed Settings forms and drop their drafts); it is read on the next load.
+const listeners = new Set<(value: string) => void>();
+// Set only when localStorage cannot be written (private mode): the pick still applies in this tab until it closes.
 let unstored: string | undefined;
 
 const read = (): string => {
+  if (unstored !== undefined) return unstored;
   try {
-    const stored = window.localStorage.getItem(SELECTED_FACTORY_KEY);
-    if (stored) return stored;
+    return window.localStorage.getItem(SELECTED_FACTORY_KEY) || "all";
   } catch {
-    // Fall through to the in-page value.
+    return "all";
   }
-  return unstored ?? "all";
-};
-
-const subscribe = (listener: () => void) => {
-  listeners.add(listener);
-  window.addEventListener("storage", listener);
-  return () => {
-    listeners.delete(listener);
-    window.removeEventListener("storage", listener);
-  };
 };
 
 /** The factory picked on the Board (`'all'` for every factory), kept in localStorage; works without it. */
 export function useSelectedFactory(): [string | "all", (value: string | "all") => void] {
-  const selected = useSyncExternalStore(subscribe, read);
+  const [selected, setSelected] = useState(read);
+  useEffect(() => {
+    listeners.add(setSelected);
+    return () => void listeners.delete(setSelected);
+  }, []);
   const set = useCallback((value: string | "all") => {
     try {
       window.localStorage.setItem(SELECTED_FACTORY_KEY, value);
@@ -77,7 +75,7 @@ export function useSelectedFactory(): [string | "all", (value: string | "all") =
     } catch {
       unstored = value;
     }
-    for (const listener of listeners) listener();
+    for (const listener of listeners) listener(value);
   }, []);
   return [selected, set];
 }

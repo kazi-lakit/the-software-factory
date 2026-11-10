@@ -334,21 +334,31 @@ export async function resetRemovedRepoSettings(store: BoardStore, now: () => Dat
  * change and no event is written. Returns the legacy names moved; empty when there is nothing to move (always, on stores
  * that hold no legacy rows). Safe to repeat. The caller then retires the legacy rows (`retireLegacySettings`).
  */
-export async function moveLegacySettings(store: BoardStore): Promise<string[]> {
+export async function moveLegacySettings(store: BoardStore): Promise<{ moved: string[]; skipped: string[] }> {
   const { unmoved } = await store.legacySettingsStatus();
-  if (unmoved.length === 0) return [];
+  if (unmoved.length === 0) return { moved: [], skipped: [] };
   await requireFactory(store, 'blocks');
   const stored = (await store.getSettings()).factories.blocks;
   // Repos first, so a half-done move never leaves the factory scope moved with its repos still legacy.
   const ordered = [...unmoved.filter((n) => n !== 'global'), ...unmoved.filter((n) => n === 'global')];
+  const moved: string[] = [];
+  const skipped: string[] = [];
   for (const name of ordered) {
-    if (name === 'global') await store.updateSettingsScope('blocks', stored?.factory ?? DEFAULT_SETTINGS, stored?.factory ?? DEFAULT_SETTINGS);
-    else {
-      const value = stored?.repos[name];
-      if (value !== undefined) await store.updateSettingsScope(`blocks/${name}`, value, value);
+    if (name === 'global') {
+      await store.updateSettingsScope('blocks', stored?.factory ?? DEFAULT_SETTINGS, stored?.factory ?? DEFAULT_SETTINGS);
+      moved.push(name);
+      continue;
     }
+    // A legacy repo row with no readable value has nothing to write.
+    const value = stored?.repos[name];
+    if (value === undefined) {
+      skipped.push(name);
+      continue;
+    }
+    await store.updateSettingsScope(`blocks/${name}`, value, value);
+    moved.push(name);
   }
-  return ordered;
+  return { moved, skipped };
 }
 
 /** A checked patch over `current`: undefined keeps, null removes, gates merge per gate. */
@@ -420,50 +430,87 @@ export async function saveRepo(store: BoardStore, now: () => Date, before: Facto
 }
 
 export type ImportOutcome = 'created' | 'already' | 'kept';
+export type ImportAction = 'create' | 'already' | 'kept';
+export interface ImportPlanRow {
+  /** `create`: not stored. `already`: stored and equal. `kept`: stored and different; it is left as it is. */
+  action: ImportAction;
+  /** The fields that differ (only for `kept`). */
+  differs: string[];
+}
+export interface ImportPlan {
+  factory: ImportPlanRow;
+  repos: (ImportPlanRow & { repoId: string })[];
+}
 export interface ImportResult {
   /** `kept`: the stored row differs from the file and was left as it is. */
   factory: ImportOutcome;
   repos: { repoId: string; outcome: ImportOutcome }[];
-  /** The legacy settings names written under `blocks` / `blocks/<repo>`, and the legacy rows retired or left. */
+  /** The legacy settings names written under `blocks` / `blocks/<repo>`; `settingsNotMoved` had no value to write. */
   settingsMoved: string[];
+  settingsNotMoved: string[];
+  /** The legacy rows retired, and those left. */
   retired: string[];
   remaining: string[];
 }
 
+const rowPlan = <T extends object>(fields: readonly (keyof T & string)[], stored: T | undefined, wanted: T): ImportPlanRow => {
+  if (!stored) return { action: 'create', differs: [] };
+  const differs = fields.filter((f) => canon(stored[f]) !== canon(wanted[f]));
+  return { action: differs.length === 0 ? 'already' : 'kept', differs };
+};
+
 /**
- * Imports a `factory migrate --export` file as the owner. Missing repos are created first, then the definition (the "done"
- * marker, so a run that stopped halfway resumes); a row that already matches is skipped and one that differs is kept.
- * When the `blocks` factory exists, the settings rows from before factories are then moved under its scopes and retired.
+ * What importing `file` would do, read-only: each repo and the definition is `create` (not stored), `already` (stored, equal)
+ * or `kept` (stored, different, with the fields). Compares the stored rows as they are, valid or not. `importFactory` acts on
+ * exactly this plan. Throws an `invalid` OwnerActionError for a bad file.
+ */
+export async function planImport(store: BoardStore, file: ImportFile): Promise<ImportPlan> {
+  const checked = validateImportFile(file);
+  if (!checked.ok) return invalid(checked.error);
+  const { factory, repos } = checked.value;
+  const storedRepos = await store.listFactoryRepos(factory.factoryId);
+  const storedDef = (await store.listFactoryDefs()).find((d) => d.factoryId === factory.factoryId);
+  return {
+    factory: rowPlan(DEF_FIELDS, storedDef, factory),
+    repos: repos.map((r) => ({ repoId: r.repoId, ...rowPlan(REPO_FIELDS, storedRepos.find((x) => x.repoId === r.repoId), r) })),
+  };
+}
+
+const OUTCOME: Record<ImportAction, ImportOutcome> = { create: 'created', already: 'already', kept: 'kept' };
+
+/**
+ * Imports a `factory migrate --export` file as the owner, as `planImport` says: missing repos are created first, then the
+ * definition (the "done" marker, so a run that stopped halfway resumes); a row that already matches is skipped and one that
+ * differs is kept. When the `blocks` factory exists, the settings rows from before factories are then moved under its scopes
+ * and retired. A factory id that collides with a legacy settings row is refused before anything is written.
  * Every step checks before it writes, so repeating the import is safe. Writes the same events as saveFactory / saveRepo.
  */
 export async function importFactory(store: BoardStore, now: () => Date, file: ImportFile): Promise<ImportResult> {
   const checked = validateImportFile(file);
   if (!checked.ok) return invalid(checked.error);
   const { factory, repos } = checked.value;
-  const at = now().toISOString();
-  const storedRepos = await store.listFactoryRepos(factory.factoryId);
-  const repoOutcomes: ImportResult['repos'] = [];
-  for (const r of repos) {
-    const have = storedRepos.find((x) => x.repoId === r.repoId);
-    if (have) {
-      const same = REPO_FIELDS.every((f) => canon(have[f]) === canon(r[f]));
-      repoOutcomes.push({ repoId: r.repoId, outcome: same ? 'already' : 'kept' });
-      continue;
+  const plan = await planImport(store, checked.value);
+  if (plan.factory.action === 'create') {
+    const legacy = await store.legacySettingsStatus();
+    if ([...legacy.unmoved, ...legacy.unretired].includes(factory.factoryId)) {
+      invalid(`factory id ${factory.factoryId} collides with legacy settings; run factory migrate first`);
     }
-    const stored = await store.saveFactoryRepo(null, r);
-    await writeEvents(store, fieldEvents(REPO_FIELDS, null, stored, stored.factoryId, (f) => `repo.${stored.repoId}.${f}`, 'repo imported', at));
-    repoOutcomes.push({ repoId: r.repoId, outcome: 'created' });
   }
-  const haveDef = (await store.listFactoryDefs()).find((d) => d.factoryId === factory.factoryId);
-  let factoryOutcome: ImportOutcome;
-  if (haveDef) factoryOutcome = DEF_FIELDS.every((f) => canon(haveDef[f]) === canon(factory[f])) ? 'already' : 'kept';
-  else {
+  const at = now().toISOString();
+  for (const row of plan.repos) {
+    if (row.action !== 'create') continue;
+    const stored = await store.saveFactoryRepo(null, repos.find((r) => r.repoId === row.repoId)!);
+    await writeEvents(store, fieldEvents(REPO_FIELDS, null, stored, stored.factoryId, (f) => `repo.${stored.repoId}.${f}`, 'repo imported', at));
+  }
+  if (plan.factory.action === 'create') {
     const stored = await store.saveFactoryDef(null, factory);
     await writeEvents(store, fieldEvents(DEF_FIELDS, null, stored, stored.factoryId, (f) => `def.${f}`, 'factory imported', at));
-    factoryOutcome = 'created';
   }
   const blocksExists = (await store.listFactoryDefs()).some((d) => d.factoryId === 'blocks');
-  const settingsMoved = blocksExists ? await moveLegacySettings(store) : [];
+  const { moved, skipped } = blocksExists ? await moveLegacySettings(store) : { moved: [], skipped: [] };
   const { retired, remaining } = blocksExists ? await store.retireLegacySettings() : { retired: [], remaining: [] };
-  return { factory: factoryOutcome, repos: repoOutcomes, settingsMoved, retired, remaining };
+  return {
+    factory: OUTCOME[plan.factory.action], repos: plan.repos.map((r) => ({ repoId: r.repoId, outcome: OUTCOME[r.action] })),
+    settingsMoved: moved, settingsNotMoved: skipped, retired, remaining,
+  };
 }

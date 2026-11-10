@@ -198,4 +198,29 @@ describe("Factories tab", () => {
     await screen.findByRole("region", { name: "Factory delta" });
     expect(screen.queryByText(/Skipped definitions/)).not.toBeInTheDocument();
   });
+
+  it("says_an_added_factory_id_already_exists_instead_of_a_reload_conflict_and_keeps_the_draft", async () => {
+    await openFactoriesTab();
+    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
+    const form = await screen.findByRole("form", { name: "Add factory" });
+    changeField("Factory id", "delta");
+    changeField("Name", "Again");
+    fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent("Factory delta already exists. Pick another id.");
+    expect(within(form).queryByRole("button", { name: "Reload" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Name")).toHaveValue("Again");
+  });
+
+  it("says_an_added_repo_id_already_exists_and_keeps_the_draft", async () => {
+    await openFactoriesTab();
+    fireEvent.click(await screen.findByRole("button", { name: "Add repo to delta" }));
+    const form = await screen.findByRole("form", { name: "Add repo to delta" });
+    changeField("Repo id", "api");
+    changeField("Remote", "git@github.com:org/api2.git");
+    changeField("Checks (JSON)", JSON.stringify(checksFixtureForTests));
+    fireEvent.click(within(form).getByRole("button", { name: "Add repo" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent("Repo api already exists in delta. Pick another id.");
+    expect(within(form).queryByRole("button", { name: "Reload" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Remote")).toHaveValue("git@github.com:org/api2.git");
+  });
 });

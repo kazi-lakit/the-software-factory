@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { defFixture, repoFixture } from "../../test/factories";
+import { defFixture, repoFixture, seedBlocksFactories } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard } from "../../test/fakeBoard";
 import { SettingsView } from "./SettingsView";
 
@@ -123,5 +123,31 @@ describe("Import factory", () => {
     const file = new File([importJson()], "factory-import.json", { type: "application/json" });
     fireEvent.change(screen.getByLabelText("Import file"), { target: { files: [file] } });
     await waitFor(() => expect(screen.getByLabelText("Or paste the JSON")).toHaveValue(importJson()));
+  });
+
+  it("previews_the_resume_case_from_the_stored_rows_and_the_import_then_does_the_same", async () => {
+    seedBlocksFactories(fakeBoard().ownerData, { defs: [], repos: [repoFixture("blocks", "data"), repoFixture("blocks", "os")] });
+    await openImport();
+    paste(importJson());
+    fireEvent.click(screen.getByRole("button", { name: "Review import" }));
+    const review = await screen.findByRole("region", { name: "Import review" });
+    expect(review).toHaveTextContent("Factory Blocks (blocks) will be created.");
+    expect(within(review).getByText("data").closest("li")).toHaveTextContent("already there");
+    expect(within(review).getByText("os").closest("li")).toHaveTextContent("already there");
+    fireEvent.click(screen.getByRole("button", { name: "Confirm import" }));
+    const result = await screen.findByRole("region", { name: "Import result" });
+    expect(result).toHaveTextContent("Factory: created.");
+    expect(result).toHaveTextContent("data: already there.");
+  });
+
+  it("previews_a_stored_definition_that_fails_validation_as_kept", async () => {
+    seedBlocksFactories(fakeBoard().ownerData, { defs: [defFixture("blocks", { gitEmail: "not-an-email", name: "Blocks" })], repos: [] });
+    await openImport();
+    paste(importJson());
+    fireEvent.click(screen.getByRole("button", { name: "Review import" }));
+    const review = await screen.findByRole("region", { name: "Import review" });
+    expect(review).toHaveTextContent("exists and differs; it is kept as it is (gitEmail)");
+    fireEvent.click(screen.getByRole("button", { name: "Confirm import" }));
+    expect(await screen.findByRole("region", { name: "Import result" })).toHaveTextContent("Factory: kept (differs from the file).");
   });
 });

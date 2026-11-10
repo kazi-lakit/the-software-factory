@@ -7,7 +7,9 @@ import { describeWriteError, now, WriteProblemNotice, type WriteProblem } from "
 export const DEFINITION_CONFLICT = "This definition changed elsewhere. Reload to see the latest.";
 
 /** A failed definition save: a conflict gets the definition wording, the rest are shared with other writes. */
-export function describeDefinitionError(error: unknown): WriteProblem {
+export function describeDefinitionError(error: unknown, existsText?: string): WriteProblem {
+  // Adding: a version conflict can only mean the id is taken, not that the owner's copy is stale.
+  if (error instanceof VersionConflictError && existsText) return { kind: "message", message: existsText };
   if (error instanceof VersionConflictError) return { kind: "conflict", message: DEFINITION_CONFLICT };
   return describeWriteError(error);
 }
@@ -69,7 +71,7 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
     try {
       onSaved(await saveFactory(boardStore, now, base, checked.value));
     } catch (error) {
-      setProblem(describeDefinitionError(error));
+      setProblem(describeDefinitionError(error, base === null ? `Factory ${draft.factoryId} already exists. Pick another id.` : undefined));
     } finally {
       setBusy(false);
     }

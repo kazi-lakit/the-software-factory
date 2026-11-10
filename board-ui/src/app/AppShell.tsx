@@ -1,7 +1,7 @@
 import type { MouseEvent, ReactNode } from "react";
 import { useAuth } from "./providers/AuthProvider";
 import { useCurrentUser, userDisplayName } from "../features/profile/useCurrentUser";
-import { useSelectedFactory } from "../features/factories/useFactories";
+import { useFactories, useSelectedFactory } from "../features/factories/useFactories";
 import { useSettings } from "../features/settings/useSettings";
 import { clearAllUnsent } from "../lib/unsent";
 
@@ -27,11 +27,13 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
   const settings = useSettings();
   const user = userDisplayName(me.data?.data);
   const [picked] = useSelectedFactory();
+  const factories = useFactories();
   const stored = settings.data?.factories ?? {};
-  // One factory picked: its own pause. All: every factory that is paused, by id. A factory without stored settings is running.
-  const pausedIds = picked === "all"
-    ? Object.entries(stored).filter(([, entry]) => entry.factory.paused === true).map(([id]) => id)
-    : stored[picked]?.factory.paused === true ? [picked] : [];
+  // One factory picked: its own pause. All: every visible, valid factory that is paused, by id. A factory without stored
+  // settings is running, and settings of a factory that is gone or invalid do not count.
+  const pausedIds = Object.entries(stored)
+    .filter(([id, entry]) => factories.byId.has(id) && (picked === "all" || picked === id) && entry.factory.paused === true)
+    .map(([id]) => id);
   const paused = pausedIds.length > 0;
   // Without settings the shell cannot say whether the factory runs; it says so rather than show nothing.
   const pauseUnknown = !settings.data && settings.isError;

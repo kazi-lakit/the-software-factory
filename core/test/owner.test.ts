@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { ClaimError, Engine } from '../src/engine.js';
 import { FakeGitHub } from '../src/github.js';
 import {
-  importFactory, answerTask, cancelTask, createTask, createTaskAsCore, decideGate, editTask, markReady, OwnerActionError, moveLegacySettings, resetRemovedRepoSettings, saveFactory, saveRepo, saveSettings,
+  importFactory, planImport, answerTask, cancelTask, createTask, createTaskAsCore, decideGate, editTask, markReady, OwnerActionError, moveLegacySettings, resetRemovedRepoSettings, saveFactory, saveRepo, saveSettings,
   StaleDocError,
 } from '../src/owner.js';
 import { defFixture, repoFixture, seed, seedBlocksFactories } from './factoryFixtures.js';
@@ -707,7 +707,7 @@ describe('moveLegacySettings', () => {
   test('writes the legacy values under blocks and blocks/<repo>, unchanged, so they can be retired', async () => {
     const { owner, data } = legacy();
     const before = await owner.getSettings();
-    expect(await moveLegacySettings(owner)).toEqual(['data', 'global']);
+    expect(await moveLegacySettings(owner)).toEqual({ moved: ['data', 'global'], skipped: [] });
     expect(await owner.getSettings()).toEqual(before);
     const status = await owner.legacySettingsStatus();
     expect({ unmoved: status.unmoved, unretired: [...status.unretired].sort() }).toEqual({ unmoved: [], unretired: ['data', 'global'] });
@@ -720,8 +720,8 @@ describe('moveLegacySettings', () => {
   test('is safe to repeat and does nothing without legacy rows', async () => {
     const { owner } = legacy();
     await moveLegacySettings(owner);
-    expect(await moveLegacySettings(owner)).toEqual([]);
-    expect(await moveLegacySettings(new MemoryStore({ factories: seed() }))).toEqual([]);
+    expect(await moveLegacySettings(owner)).toEqual({ moved: [], skipped: [] });
+    expect(await moveLegacySettings(new MemoryStore({ factories: seed() }))).toEqual({ moved: [], skipped: [] });
   });
 
   test('refuses while factory blocks does not exist', async () => {
@@ -745,7 +745,7 @@ describe.each([
     const result = await importFactory(s, now, file());
     expect(result).toEqual({
       factory: 'created', repos: [{ repoId: 'data', outcome: 'created' }, { repoId: 'os', outcome: 'created' }],
-      settingsMoved: [], retired: [], remaining: [],
+      settingsMoved: [], settingsNotMoved: [], retired: [], remaining: [],
     });
     expect(await rows(s)).toEqual([['blocks'], ['data', 'os']]);
     const fields = (await s.listEvents('-')).map((e) => e.field);
@@ -776,6 +776,40 @@ describe.each([
     expect((await s.listFactoryRepos('blocks')).find((r) => r.repoId === 'data')!.baseBranch).toBe('stg');
   });
 
+  test('planImport previews exactly what importFactory then does, in the fresh, resume, kept and invalid-stored cases', async () => {
+    const f = file();
+    // Fresh.
+    let s = make();
+    let plan = await planImport(s, f);
+    expect(plan).toEqual({ factory: { action: 'create', differs: [] }, repos: [{ repoId: 'data', action: 'create', differs: [] }, { repoId: 'os', action: 'create', differs: [] }] });
+    expect(await rows(s)).toEqual([[], []]);
+    let result = await importFactory(s, now, f);
+    expect([result.factory, ...result.repos.map((r) => r.outcome)]).toEqual(['created', 'created', 'created']);
+    // Resume: repos stored, definition missing.
+    s = make();
+    await s.saveFactoryRepo(null, repoFixture('blocks', 'data'));
+    await s.saveFactoryRepo(null, repoFixture('blocks', 'os'));
+    plan = await planImport(s, f);
+    expect([plan.factory.action, ...plan.repos.map((r) => r.action)]).toEqual(['create', 'already', 'already']);
+    result = await importFactory(s, now, f);
+    expect([result.factory, ...result.repos.map((r) => r.outcome)]).toEqual(['created', 'already', 'already']);
+    // A stored definition that fails validation (and a differing repo) is kept, with the fields.
+    s = make();
+    await s.saveFactoryDef(null, defFixture('blocks', { name: 'x', gitEmail: 'not-an-email' }));
+    await s.saveFactoryRepo(null, repoFixture('blocks', 'data', { baseBranch: 'stg' }));
+    plan = await planImport(s, f);
+    expect(plan.factory.action).toBe('kept');
+    expect(plan.factory.differs).toEqual(expect.arrayContaining(['name', 'gitEmail']));
+    expect(plan.repos[0]).toEqual({ repoId: 'data', action: 'kept', differs: ['baseBranch'] });
+    expect(plan.repos[1]!.action).toBe('create');
+    result = await importFactory(s, now, f);
+    expect([result.factory, ...result.repos.map((r) => r.outcome)]).toEqual(['kept', 'kept', 'created']);
+  });
+
+  test('planImport refuses an invalid file', async () => {
+    await expect(planImport(make(), { ...file(), repos: [{ ...repoFixture('blocks', 'data'), remote: '' }] })).rejects.toMatchObject({ code: 'invalid' });
+  });
+
   test('refuses an invalid file and writes nothing', async () => {
     const s = make();
     const bad = { ...file(), repos: [{ ...repoFixture('blocks', 'data'), remote: '' }] };
@@ -802,14 +836,30 @@ describe('importFactory moves the legacy settings of blocks', () => {
     expect(result.remaining).toEqual([]);
     expect(await owner.getSettings()).toEqual(before);
     expect(data.rows('FactorySettings').filter((r) => r.json === 'null').map((r) => r.scope).sort()).toEqual(['data', 'global']);
-    expect(await importFactory(owner, now, blocks)).toMatchObject({ settingsMoved: [], retired: [], remaining: [] });
+    expect(await importFactory(owner, now, blocks)).toMatchObject({ settingsMoved: [], settingsNotMoved: [], retired: [], remaining: [] });
     expect(await owner.getSettings()).toEqual(before);
   });
 
   test('leaves them alone when the imported factory is not blocks and blocks does not exist', async () => {
     const { owner } = legacyStore();
     const result = await importFactory(owner, now, { format: 'factory-import/1', factory: defFixture('delta'), repos: [] });
-    expect(result).toMatchObject({ factory: 'created', settingsMoved: [], retired: [], remaining: [] });
+    expect(result).toMatchObject({ factory: 'created', settingsMoved: [], settingsNotMoved: [], retired: [], remaining: [] });
     expect(await owner.legacySettingsStatus()).toEqual({ unmoved: expect.arrayContaining(['global', 'data']), unretired: [] });
+  });
+
+  test('a factory id that collides with a legacy settings row is refused before any repo is written', async () => {
+    const { owner } = legacyStore();
+    await expect(importFactory(owner, now, { format: 'factory-import/1', factory: defFixture('data'), repos: [repoFixture('data', 'api')] })).rejects.toMatchObject({ code: 'invalid' });
+    expect(await owner.listFactoryRepos()).toEqual([]);
+    expect(await owner.listFactoryDefs()).toEqual([]);
+  });
+
+  test('moveLegacySettings reports a legacy repo row with no readable value as skipped', async () => {
+    const { owner, data } = legacyStore();
+    data.seed('FactorySettings', { scope: 'iam', json: '5', version: 1 });
+    const result = await importFactory(owner, now, blocks);
+    expect(result.settingsMoved.sort()).toEqual(['data', 'global']);
+    expect(result.settingsNotMoved).toEqual(['iam']);
+    expect(result.remaining).toContain('iam');
   });
 });

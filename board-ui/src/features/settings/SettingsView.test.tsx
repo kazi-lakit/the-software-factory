@@ -265,6 +265,59 @@ describe("Factory settings tab", () => {
     ]);
   });
 
+  it("lists_settings_of_an_invalid_repo_separately_without_reset", async () => {
+    resetFakeBoard({ defs: blocksFactories().defs, repos: [...blocksFactories().repos, { ...blocksFactories().repos[0]!, repoId: "bad", remote: "" }] });
+    await fakeBoard().owner.updateSettingsScope("blocks/bad", undefined, { maxParallel: 3 });
+    await fakeBoard().owner.updateSettingsScope("blocks/gone", undefined, { maxParallel: 2 });
+    renderSettings();
+    const invalid = await screen.findByRole("region", { name: "Settings for invalid repos" });
+    expect(within(invalid).getByText("bad")).toBeInTheDocument();
+    expect(within(invalid).queryByRole("button")).not.toBeInTheDocument();
+    const removed = screen.getByRole("heading", { name: "Settings for removed repos" }).closest("section")!;
+    expect(within(removed).getByText("gone")).toBeInTheDocument();
+    expect(within(removed).queryByText("bad")).not.toBeInTheDocument();
+  });
+
+  it("shows_an_error_with_retry_when_the_factories_cannot_load", async () => {
+    window.localStorage.clear();
+    const list = vi.spyOn(fakeBoard().owner, "listFactoryDefs").mockRejectedValueOnce(new Error("blocks: unavailable"));
+    renderSettings();
+    expect(await screen.findByText("Could not load the factories.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.getByLabelText("Factory", { selector: "select" })).toHaveValue("all"));
+    expect(screen.getByText("Pick a factory to see its settings.")).toBeInTheDocument();
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps_a_draft_when_another_tab_changes_the_pick", async () => {
+    resetFakeBoard(merge(blocksFactories(), factory("delta", ["api"])));
+    renderSettings();
+    await screen.findByRole("form", { name: "Factory defaults" });
+    fireEvent.change(within(globalForm()).getByLabelText("Max parallel tasks"), { target: { value: "4" } });
+    window.localStorage.setItem("factory-board:factory", "delta");
+    window.dispatchEvent(new StorageEvent("storage", { key: "factory-board:factory", newValue: "delta" }));
+    await Promise.resolve();
+    expect(within(globalForm()).getByLabelText("Max parallel tasks")).toHaveValue("4");
+    expect(screen.getByLabelText("Factory", { selector: "select" })).toHaveValue("blocks");
+  });
+
+  it("applies_a_pick_in_this_tab_even_when_it_cannot_be_stored", async () => {
+    resetFakeBoard(merge(blocksFactories(), factory("delta", ["api"])));
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("denied"); });
+    renderSettings();
+    await screen.findByRole("form", { name: "Factory defaults" });
+    fireEvent.change(screen.getByLabelText("Factory", { selector: "select" }), { target: { value: "delta" } });
+    await waitFor(() => expect(screen.getByLabelText("Factory", { selector: "select" })).toHaveValue("delta"));
+    cleanup();
+    renderSettings();
+    await screen.findByRole("table", { name: "Repo overrides" });
+    expect(screen.getByLabelText("Factory", { selector: "select" })).toHaveValue("delta");
+    vi.restoreAllMocks();
+    // Storing again clears the in-page value, so later tests read localStorage.
+    renderSettings();
+    fireEvent.change((await screen.findAllByLabelText("Factory", { selector: "select" }))[0]!, { target: { value: "blocks" } });
+  });
+
   it("shows_no_removed_repo_section_when_every_scope_has_its_repo", async () => {
     renderSettings();
     await screen.findByRole("table", { name: "Repo overrides" });

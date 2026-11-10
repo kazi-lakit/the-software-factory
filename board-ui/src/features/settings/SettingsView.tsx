@@ -140,6 +140,14 @@ function FactorySettingsTab() {
   const entry = factories.byId.get(picked);
   const picker = <FactoryPicker defs={factories.defs} value={entry ? picked : "all"} onChange={setPicked} />;
 
+  if (!entry && factories.error && factories.byId.size === 0 && !factories.loading) {
+    return (
+      <div className="sf-problem" role="alert">
+        <span>Could not load the factories.</span>
+        <button type="button" className="sf-button" onClick={() => void factories.refetch()}>Retry</button>
+      </div>
+    );
+  }
   if (!entry) {
     return (
       <>
@@ -164,7 +172,7 @@ function FactorySettingsTab() {
       <PauseControl key={`${factoryId}:pause`} factoryId={factoryId} paused={current.factory.paused} onNotice={setNotice} onReload={reload} />
       <GlobalForm key={`${factoryId}:defaults`} factoryId={factoryId} global={current.factory} noteId={noteId} onNotice={setNotice} onReload={reload} />
       <RepoTable key={`${factoryId}:repos`} factoryId={factoryId} repos={entry.repos} stored={current} noteId={noteId} onNotice={setNotice} onReload={reload} />
-      <RemovedRepoSettings key={`${factoryId}:removed`} factoryId={factoryId} repos={entry.repos} stored={current} onNotice={setNotice} onReload={reload} />
+      <RemovedRepoSettings key={`${factoryId}:removed`} factoryId={factoryId} repos={entry.repos} existing={factories.storedRepos} stored={current} onNotice={setNotice} onReload={reload} />
     </>
   );
 }
@@ -450,13 +458,15 @@ const settingText = (s: RepoSettings): string => {
 };
 
 /** Overrides stored for repos the factory no longer has. They do nothing; the owner can reset them to inherit. */
-function RemovedRepoSettings({ factoryId, onNotice, onReload, repos, stored }: ScopeProps & { repos: readonly FactoryRepo[]; stored: FactoryStored }) {
+function RemovedRepoSettings({ existing, factoryId, onNotice, onReload, repos, stored }: ScopeProps & { existing: ReadonlySet<string>; repos: readonly FactoryRepo[]; stored: FactoryStored }) {
   const titleId = useId();
   const saved = useSaved(onNotice);
   const [busy, setBusy] = useState("");
   const [problem, setProblem] = useState<WriteProblem>();
-  const orphans = Object.keys(stored.repos).filter((id) => !repos.some((r) => r.repoId === id));
-  if (orphans.length === 0) return null;
+  // Removed: no stored repo at all. Invalid: stored but unusable, so it is not in `repos`; those settings stay as they are.
+  const orphans = Object.keys(stored.repos).filter((id) => !existing.has(`${factoryId}/${id}`));
+  const invalid = Object.keys(stored.repos).filter((id) => existing.has(`${factoryId}/${id}`) && !repos.some((r) => r.repoId === id));
+  if (orphans.length === 0 && invalid.length === 0) return null;
 
   async function reset(repo: string) {
     if (busy) return;
@@ -473,19 +483,34 @@ function RemovedRepoSettings({ factoryId, onNotice, onReload, repos, stored }: S
   }
 
   return (
-    <section className="sf-panel sf-settings-section" aria-labelledby={titleId}>
-      <h3 id={titleId}>Settings for removed repos</h3>
-      <p className="sf-hint">These repos are no longer in the factory. Reset drops their overrides.</p>
-      <ul className="sf-plain-list">
-        {orphans.map((repo) => (
-          <li key={repo} className="sf-actions">
-            <span className="sf-mono">{repo}</span>
-            <span className="sf-muted">{settingText(stored.repos[repo]!)}</span>
-            <button type="button" className="sf-button" disabled={busy !== ""} aria-label={`Reset ${repo} settings`} onClick={() => void reset(repo)}>Reset</button>
-          </li>
-        ))}
-      </ul>
-      <WriteProblemNotice problem={problem} onReload={() => { setProblem(undefined); void onReload(); }} />
-    </section>
+    <>
+      {orphans.length > 0 ? (
+        <section className="sf-panel sf-settings-section" aria-labelledby={titleId}>
+          <h3 id={titleId}>Settings for removed repos</h3>
+          <p className="sf-hint">These repos are no longer in the factory. Reset drops their overrides.</p>
+          <ul className="sf-plain-list">
+            {orphans.map((repo) => (
+              <li key={repo} className="sf-actions">
+                <span className="sf-mono">{repo}</span>
+                <span className="sf-muted">{settingText(stored.repos[repo]!)}</span>
+                <button type="button" className="sf-button" disabled={busy !== ""} aria-label={`Reset ${repo} settings`} onClick={() => void reset(repo)}>Reset</button>
+              </li>
+            ))}
+          </ul>
+          <WriteProblemNotice problem={problem} onReload={() => { setProblem(undefined); void onReload(); }} />
+        </section>
+      ) : null}
+      {invalid.length > 0 ? (
+        <section className="sf-panel sf-settings-section" aria-label="Settings for invalid repos">
+          <h3>Settings for invalid repos</h3>
+          <p className="sf-hint">These repos exist but fail validation, so they are not listed above. Fix them on the Factories tab.</p>
+          <ul className="sf-plain-list">
+            {invalid.map((repo) => (
+              <li key={repo} className="sf-actions"><span className="sf-mono">{repo}</span><span className="sf-muted">{settingText(stored.repos[repo]!)}</span></li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+    </>
   );
 }

@@ -1,29 +1,17 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import type { ChangeEvent } from "react";
-import { canonicalJson, importFactory, validateImportFile, type ImportFile, type ImportResult } from "@factory/core";
+import { importFactory, planImport, validateImportFile, type ImportAction, type ImportFile, type ImportPlan, type ImportPlanRow, type ImportResult } from "@factory/core";
 import { boardStore } from "../../lib/board";
-import { FACTORIES_KEY, type FactoryEntry } from "../factories/useFactories";
+import { FACTORIES_KEY } from "../factories/useFactories";
 import { HISTORY_KEY } from "../history/useHistory";
 import { describeWriteError, now, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 import { SETTINGS_KEY } from "./useSettings";
 
-type Plan = { file: ImportFile; factory: string; legacy: string[]; repos: { outcome: string; repoId: string }[] };
+type Review = { file: ImportFile; legacy: string[]; plan: ImportPlan };
 
-const DEF_FIELDS = ["name", "protectedBranches", "gitName", "gitEmail", "docsPath", "patAccount", "active"] as const;
-const REPO_FIELDS = ["remote", "baseBranch", "checks"] as const;
-
-/** What the import would do against the factories already stored. A row that exists is kept, never overwritten. */
-function planFor(file: ImportFile, entries: readonly FactoryEntry[], legacy: string[]): Plan {
-  const have = entries.find((e) => e.def.factoryId === file.factory.factoryId);
-  const factory = !have ? "will be created" : DEF_FIELDS.every((f) => canonicalJson(have.def[f]) === canonicalJson(file.factory[f])) ? "already there" : "exists and differs; it is kept as it is";
-  const repos = file.repos.map((r) => {
-    const stored = have?.repos.find((x) => x.repoId === r.repoId);
-    const outcome = !stored ? "will be created" : REPO_FIELDS.every((f) => canonicalJson(stored[f]) === canonicalJson(r[f])) ? "already there" : "exists and differs; it is kept as it is";
-    return { outcome, repoId: r.repoId };
-  });
-  return { factory, file, legacy, repos };
-}
+const ACTION_TEXT: Record<ImportAction, string> = { already: "already there", create: "will be created", kept: "exists and differs; it is kept as it is" };
+const actionText = (row: ImportPlanRow) => (row.action === "kept" && row.differs.length > 0 ? `${ACTION_TEXT.kept} (${row.differs.join(", ")})` : ACTION_TEXT[row.action]);
 
 const OUTCOME_TEXT = { already: "already there", created: "created", kept: "kept (differs from the file)" } as const;
 
@@ -31,12 +19,12 @@ const OUTCOME_TEXT = { already: "already there", created: "created", kept: "kept
  * Imports the JSON `factory migrate --export` wrote: pick or paste it, review what it creates, confirm. The owner's
  * session does the writes (repos, then the definition, then the legacy settings move). Repeating it is safe.
  */
-export function ImportFactory({ entries, onClose }: { entries: readonly FactoryEntry[]; onClose: () => void }) {
+export function ImportFactory({ onClose }: { onClose: () => void }) {
   const ids = useId();
   const client = useQueryClient();
   const [text, setText] = useState("");
   const [error, setError] = useState("");
-  const [plan, setPlan] = useState<Plan>();
+  const [plan, setPlan] = useState<Review>();
   const [problem, setProblem] = useState<WriteProblem>();
   const [result, setResult] = useState<ImportResult>();
   const [busy, setBusy] = useState(false);
@@ -70,7 +58,12 @@ export function ImportFactory({ entries, onClose }: { entries: readonly FactoryE
     setError("");
     // Only a note on the review: when the status cannot be read, the import still says what it moved.
     const status = await boardStore.legacySettingsStatus().catch(() => ({ unmoved: [] as string[], unretired: [] as string[] }));
-    setPlan(planFor(checked.value, entries, [...status.unmoved, ...status.unretired]));
+    try {
+      // The same comparison the import itself acts on, over the stored rows.
+      setPlan({ file: checked.value, legacy: [...status.unmoved, ...status.unretired], plan: await planImport(boardStore, checked.value) });
+    } catch (e) {
+      setError(describeWriteError(e).message);
+    }
   }
 
   async function confirm() {
@@ -100,6 +93,7 @@ export function ImportFactory({ entries, onClose }: { entries: readonly FactoryE
           <li>Factory: {OUTCOME_TEXT[result.factory]}.</li>
           {result.repos.map((r) => <li key={r.repoId}><span className="sf-mono">{r.repoId}</span>: {OUTCOME_TEXT[r.outcome]}.</li>)}
           <li>Legacy settings moved: {result.settingsMoved.join(", ") || "none"}.</li>
+          {result.settingsNotMoved.length > 0 ? <li>Legacy settings not moved (no readable value): {result.settingsNotMoved.join(", ")}.</li> : null}
           <li>Legacy settings retired: {result.retired.join(", ") || "none"}.</li>
           <li>Legacy settings left: {result.remaining.join(", ") || "none"}.</li>
         </ul>
@@ -125,10 +119,10 @@ export function ImportFactory({ entries, onClose }: { entries: readonly FactoryE
       {plan ? (
         <div className="sf-panel" role="region" aria-label="Import review">
           <p>
-            Factory <strong>{plan.file.factory.name}</strong> (<span className="sf-mono">{plan.file.factory.factoryId}</span>) {plan.factory}.
+            Factory <strong>{plan.file.factory.name}</strong> (<span className="sf-mono">{plan.file.factory.factoryId}</span>) {actionText(plan.plan.factory)}.
           </p>
           <ul className="sf-plain-list">
-            {plan.repos.map((r) => <li key={r.repoId}><span className="sf-mono">{r.repoId}</span> {r.outcome}.</li>)}
+            {plan.plan.repos.map((r) => <li key={r.repoId}><span className="sf-mono">{r.repoId}</span> {actionText(r)}.</li>)}
           </ul>
           {plan.file.factory.factoryId === "blocks" ? (
             <p className="sf-hint">
