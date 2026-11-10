@@ -456,3 +456,86 @@ describe("board_css_account_pill", () => {
     expect(t["margin-left"]).toBe("auto");
   });
 });
+
+describe("board_css_task_card", () => {
+  const css = () => read("board.css");
+  const t = (selector: string) => tokens(css(), selector);
+
+  it("card_is_surface_1px_border_3px_radius_8px_padding", () => {
+    expect(t(".sf-card")).toMatchObject({
+      background: "var(--sf-surface)",
+      border: "1px solid var(--sf-border)",
+      "border-radius": "var(--sf-radius)",
+      padding: "8px"
+    });
+  });
+
+  it("card_id_uses_label_type", () => {
+    expect(t(".sf-card-id")).toMatchObject({ ...labelType, color: "var(--sf-muted)" });
+  });
+
+  it("card_status_chip_is_outlined_label_type", () => {
+    expect(t(".sf-card-status")).toMatchObject({ ...labelType, background: "transparent" });
+    expect(t(".sf-card-status").border).toContain("1px");
+    expect(t(".sf-card-status")["font-weight"]).toBeUndefined();
+    expect(t(".sf-card-status-waiting").border).toContain("var(--sf-accent)");
+    expect(t(".sf-card-status-waiting").color).toBe("var(--sf-accent-text)");
+  });
+
+  it("title_is_text_colour_weight_500_underlined_on_hover_and_focus", () => {
+    expect(t(".sf-card-link")).toMatchObject({ color: "var(--sf-text)", "font-weight": "500", "text-decoration": "none", "overflow-wrap": "anywhere" });
+    expect(t(".sf-card-link:hover")["text-decoration"]).toBe("underline");
+    expect(t(".sf-card-link:focus-visible")["text-decoration"]).toBe("underline");
+    expect(t(".sf-card-link::after")).toMatchObject({ position: "absolute", inset: "0" });
+  });
+
+  it("steps_are_14x4px_in_the_four_state_colours", () => {
+    expect(t(".sf-step")).toMatchObject({ width: "14px", height: "4px" });
+    expect(t('.sf-step[data-state="done"]').background).toBe("var(--sf-progress)");
+    expect(t('.sf-step[data-state="current"]').background).toBe("var(--sf-muted)");
+    expect(t('.sf-step[data-state="waiting"]').background).toBe("var(--sf-accent)");
+    expect(t('.sf-step[data-state="todo"]').background).toBe("var(--sf-border)");
+  });
+
+  it("done_cards_use_done_colours_for_chip_and_steps", () => {
+    expect(t(".sf-card-muted .sf-card-status")).toMatchObject({ color: "var(--sf-done)", "border-color": "var(--sf-done)" });
+    expect(t('.sf-card-muted .sf-step[data-state="done"]').background).toBe("var(--sf-done)");
+    expect(t(".sf-card-muted")).toMatchObject({ background: "var(--sf-done-soft)", color: "var(--sf-done)" });
+  });
+
+  it("question_is_one_line_with_a_dashed_outline", () => {
+    expect(t(".sf-card-question")).toMatchObject({
+      border: "1px dashed var(--sf-border)", "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis"
+    });
+  });
+
+  it("cta_is_a_small_outlined_accent_link_above_the_stretched_link", () => {
+    expect(t(".sf-card-cta")).toMatchObject({
+      ...labelType,
+      background: "transparent",
+      border: "1px solid var(--sf-accent)",
+      color: "var(--sf-accent-text)",
+      position: "relative",
+      "z-index": "1",
+      "align-self": "flex-start",
+      padding: "2px 8px"
+    });
+    expect(t(".sf-card-cta").outline).toBeUndefined();
+    expect(t(".sf-card-cta:hover")["text-decoration"]).toBe("underline");
+  });
+
+  it("waiting_card_border_is_accent_on_all_sides", () => {
+    expect(t(".sf-card-needs-you")["border-color"]).toBe("var(--sf-accent)");
+    expect(t(".sf-card-needs-you")["border-left"]).toBeUndefined();
+  });
+
+  it("card_rules_have_no_raw_colours_or_shadows", () => {
+    const all = css();
+    const block = all.slice(all.indexOf(".sf-card {"), all.indexOf("/* Task */"));
+    expect(block).not.toMatch(/#[0-9a-f]{3,8}\b|rgb\(|box-shadow/i);
+  });
+
+  it("meta_line_wraps", () => {
+    expect(t(".sf-card-meta")["flex-wrap"]).toBe("wrap");
+  });
+});
