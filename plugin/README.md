@@ -64,7 +64,7 @@ If the stage agent errors or returns nothing, the skill records nothing and prin
 
 ## Create a task from a prompt
 
-`/factory:new [--ready] <what you want done>` drafts a task from your words (repo, base branch, title, description with acceptance criteria) and creates it on the Board by running `factory new` from your session. The task starts in **inbox**; click **Mark ready** on the Board, then run `/factory:run`. With `--ready` it starts in ready, so you can run `/factory:run` straight away. Its history reads `core · new`. After creation the factory still can't edit the title, description, repo, base branch or gate overrides; only you can, on the Board. A stage agent can't run `factory new`: the guard denies the factory CLI to agents.
+`/factory:new [--ready] <what you want done>` drafts a task from your words (repo, base branch, title, description with acceptance criteria) and creates it on the Board by running `factory new` from your session. The task starts in **inbox**; click **Mark ready** on the Board, then run `/factory:run`. With `--ready` it starts in ready, so you can run `/factory:run` straight away. Its history reads `core · new`. After creation the factory still can't edit the title, description, repo, base branch or gate overrides; only you can, on the Board. The guard denies the factory CLI to stage agents (regex defence in depth).
 
 This needs the Blocks rules to let the factory core insert a task (`blocks/data/rules.json`, regenerated with `npm run -s blocks:resources`). You deploy them; until then `factory new` fails with a one-line error.
 

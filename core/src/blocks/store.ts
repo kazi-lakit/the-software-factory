@@ -3,7 +3,7 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from '../limits.js';
 import { DEFAULT_SETTINGS } from '../defaults.js';
 import {
-  canonicalJson, CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval,
+  assertNewStatus, canonicalJson, CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval,
   settingsConflict, VersionConflictError, type BoardStore, type NewApproval, type NewTask, type StoredSettings,
 } from '../boardStore.js';
 import type {
@@ -199,6 +199,7 @@ export class BlocksStore implements BoardStore {
   }
 
   async createTask(t: NewTask): Promise<Task> {
+    assertNewStatus(t.status);
     // Both identities may insert a task: the core only through `factory new` (see createTaskAsCore).
     for (let attempt = 0; attempt <= DUPLICATE_RETRIES; attempt++) {
       const ids = await this.data.list('FactoryTask', {}, ['taskId']);

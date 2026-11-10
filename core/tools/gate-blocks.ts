@@ -81,8 +81,16 @@ export const STEPS: Step[] = [
   {
     label: '2 core insert FactoryTask ok (for `factory new`; the column rule must not block an insert)',
     async run(d, c) {
-      const r = await d.core.insert('FactoryTask', taskRow(`GATE-${c.suffix}-core`, 'cancelled'));
+      const taskId = `GATE-${c.suffix}-core`;
+      const r = await d.core.insert('FactoryTask', taskRow(taskId, 'cancelled'));
       expect(r.kind === 'inserted', `core insert of FactoryTask answered ${r.kind}`);
+      // The core made the row but still may not edit its owner-only fields; the owner may.
+      const denied = await d.core.update('FactoryTask', { taskId, version: 1 }, { title: 'gate-core-title', version: 2, writeId: `gate-${c.suffix}-i` });
+      expect(denied.kind === 'forbidden', `core title edit of its own inserted task answered ${denied.kind}`);
+      const [after] = await d.owner.list('FactoryTask', { taskId }, ['title', 'version']);
+      expect(after !== undefined && after.title === 'gate synthetic task' && Number(after.version) === 1, 'refused core title edit changed the row');
+      const ok = await d.owner.update('FactoryTask', { taskId, version: 1 }, { title: 'gate owner title', version: 2, writeId: `gate-${c.suffix}-j` });
+      expect(ok.kind === 'applied', `owner title edit of the core-inserted task was ${ok.kind}`);
     },
   },
   {

@@ -85,6 +85,11 @@ export interface StoredSettings {
 /** `status` is where the task starts (default inbox); the owner's Board and `factory new` choose it. */
 export interface NewTask { title: string; description: string; repo: RepoId; baseBranch?: string; status?: 'inbox' | 'ready' }
 
+/** A task is created only in inbox or ready; the type is no defence against a JS caller. */
+export function assertNewStatus(status: unknown): void {
+  if (status !== undefined && status !== 'inbox' && status !== 'ready') throw new Error(`a new task starts in inbox or ready, not ${String(status)}`);
+}
+
 export interface BoardStore {
   listTasks(): Promise<Task[]>;
   /** Throws NotFoundError. */

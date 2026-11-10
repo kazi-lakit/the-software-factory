@@ -495,6 +495,17 @@ describe.each(fixtures)('createTaskAsCore (%s)', (_name, make) => {
     expect(await core.listTasks()).toEqual([]);
   });
 
+  test.each(['Main', ' main ', 'origin/main', 'refs/heads/main', 'ORIGIN/MAIN'])('refuses base %s', async (baseBranch) => {
+    const { core } = setup();
+    await expect(createTaskAsCore(core, now, { ...input, baseBranch })).rejects.toThrow('the factory never targets main');
+    expect(await core.listTasks()).toEqual([]);
+  });
+
+  test('the owner createTask may still name any base', async () => {
+    const { owner } = setup();
+    expect((await createTask(owner, now, { ...input, baseBranch: 'main' })).baseBranch).toBe('main');
+  });
+
   test.each([
     ['a blank title', { title: '  ' }, 'title must not be blank'],
     ['an unknown repo', { repo: 'nope' as RepoId }, 'repo must be one of'],

@@ -23,6 +23,13 @@ export function runStoreContract(name: string, make: () => BoardStore | Promise<
       expect([r.status, i.status]).toEqual(['ready', 'inbox']);
       expect((await s.getTask(r.taskId)).status).toBe('ready');
     });
+    test('createTask refuses a start status other than inbox or ready', async () => {
+      const s = await make();
+      for (const status of ['done', 'blocked', 'cancelled']) {
+        await expect(s.createTask({ title: 'x', description: '', repo: 'data', status } as never)).rejects.toThrow('a new task starts in inbox or ready');
+      }
+      expect(await s.listTasks()).toEqual([]);
+    });
     test('getTask throws NotFoundError', async () => {
       await expect((await make()).getTask('T-9')).rejects.toBeInstanceOf(NotFoundError);
     });

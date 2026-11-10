@@ -3,6 +3,7 @@ import {
 } from './boardStore.js';
 import { GATE_DOC } from './gates.js';
 import { diffEvents } from './history.js';
+import { PROTECTED_BRANCHES } from './branches.js';
 import { assertMove } from './status.js';
 import {
   REPO_IDS, type Approval, type DocKind, type FactoryEvent, type Gate, type RepoId, type RepoSettings, type Settings, type Status, type Task,
@@ -100,8 +101,10 @@ function ownerFieldEvents(before: Task, after: Task, reason: string, at: string)
   }));
 }
 
-export async function createTask(
-  store: BoardStore, now: () => Date, input: { title: string; description: string; repo: RepoId; baseBranch?: string },
+/** The shared validation and insert-then-event of both creators; `actor` and `reason` name who made the task. */
+async function insertTask(
+  store: BoardStore, now: () => Date, input: { title: string; description: string; repo: RepoId; baseBranch?: string; status?: 'inbox' | 'ready' },
+  actor: string, reason: string,
 ): Promise<Task> {
   if (!nonBlank(input.title)) invalid('title must not be blank');
   if (typeof input.description !== 'string') invalid('description must be text');
@@ -109,15 +112,22 @@ export async function createTask(
   if (input.baseBranch !== undefined && !nonBlank(input.baseBranch)) invalid('base branch must not be blank');
   const at = now().toISOString();
   const task = await store.createTask({
-    title: input.title.trim(), description: input.description, repo: input.repo, ...(input.baseBranch !== undefined ? { baseBranch: input.baseBranch } : {}),
+    title: input.title.trim(), description: input.description, repo: input.repo,
+    ...(input.baseBranch !== undefined ? { baseBranch: input.baseBranch } : {}), ...(input.status !== undefined ? { status: input.status } : {}),
   });
-  await writeEvents(store, [
-    { taskId: task.taskId, actor: OWNER_ACTOR, action: 'create', field: null, from: null, to: task.status, reason: 'created', at },
-  ]);
+  await writeEvents(store, [{ taskId: task.taskId, actor, action: 'create', field: null, from: null, to: task.status, reason, at }]);
   return task;
 }
 
+export async function createTask(
+  store: BoardStore, now: () => Date, input: { title: string; description: string; repo: RepoId; baseBranch?: string },
+): Promise<Task> {
+  return insertTask(store, now, input, OWNER_ACTOR, 'created');
+}
+
 export const CORE_NEW_ACTOR = 'core · new';
+const normalizeRef = (ref: string) => ref.trim().toLowerCase().replace(/^refs\/heads\//, '').replace(/^origin\//, '');
+const MAIN = PROTECTED_BRANCHES[2];
 
 /**
  * `factory new`: the one task the core may insert, run by the owner from their session. Starts in inbox unless `ready`;
@@ -126,20 +136,12 @@ export const CORE_NEW_ACTOR = 'core · new';
 export async function createTaskAsCore(
   store: BoardStore, now: () => Date, input: { title: string; description: string; repo: RepoId; baseBranch?: string; ready?: boolean },
 ): Promise<Task> {
-  if (!nonBlank(input.title)) invalid('title must not be blank');
-  if (typeof input.description !== 'string') invalid('description must be text');
-  if (!isRepoId(input.repo)) invalid(`repo must be one of ${REPO_IDS.join(', ')}`);
-  if (input.baseBranch !== undefined && !nonBlank(input.baseBranch)) invalid('base branch must not be blank');
-  if (input.baseBranch?.trim() === 'main') invalid('the factory never targets main');
-  const at = now().toISOString();
-  const task = await store.createTask({
-    title: input.title.trim(), description: input.description, repo: input.repo, status: input.ready ? 'ready' : 'inbox',
-    ...(input.baseBranch !== undefined ? { baseBranch: input.baseBranch.trim() } : {}),
-  });
-  await writeEvents(store, [
-    { taskId: task.taskId, actor: CORE_NEW_ACTOR, action: 'create', field: null, from: null, to: task.status, reason: 'created by factory new', at },
-  ]);
-  return task;
+  if (typeof input.baseBranch === 'string' && normalizeRef(input.baseBranch) === MAIN) invalid('the factory never targets main');
+  const { ready, baseBranch, ...rest } = input;
+  return insertTask(
+    store, now, { ...rest, ...(typeof baseBranch === 'string' ? { baseBranch: baseBranch.trim() } : {}), status: ready ? 'ready' : 'inbox' },
+    CORE_NEW_ACTOR, 'created by factory new',
+  );
 }
 
 async function move(store: BoardStore, now: () => Date, taskId: string, to: Status, reason: string): Promise<Task> {

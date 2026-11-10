@@ -53,7 +53,7 @@ describe('runGate', () => {
   it('step 11 FAILs with a strip-build hint when core title edits are not refused', async () => {
     const { deps, lines, owner } = setup({ columnRule: false });
     expect(await runGate(deps)).toBe(false);
-    expect(lines.filter((l) => l.includes('FAIL') && !l.startsWith(' ')).map((l) => l.split(' ')[0])).toEqual(['11']);
+    expect(lines.filter((l) => l.includes('FAIL') && !l.startsWith(' ')).map((l) => l.split(' ')[0])).toEqual(['2', '11']);
     expect(lines.find((l) => l.startsWith('  11a'))).toContain('column rule not enforced (strip build?)');
     expect(lines.filter((l) => l.startsWith('  11') && l.endsWith(': pass')).map((l) => l.trim()[2])).toEqual(['b', 'c', 'd']);
     expect(owner.rows('FactoryTask').find((r) => r.taskId === 'GATE-abcd1234-cols')).toMatchObject({ status: 'cancelled' });

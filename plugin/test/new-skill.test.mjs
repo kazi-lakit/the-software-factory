@@ -31,13 +31,15 @@ describe('new skill', () => {
     expect(body).not.toMatch(/^6\. /m);
   });
 
-  it('finds the factory root from FACTORY_ROOT, then HOME', () => {
+  it('needs FACTORY_ROOT and FACTORY_STORE from the session env, with no fallback', () => {
     const step0 = body.match(/^0\. .*$/m)[0];
     expect(step0).toContain('`printenv FACTORY_ROOT`');
-    expect(step0).toContain('`printenv HOME`');
-    expect(step0).toContain('/scratchpad/selise/the-software-factory');
-    expect(step0).toContain('/repos');
-    expect(step0).toContain('`factory: factory root not found`');
+    expect(step0).toContain('`printenv FACTORY_STORE`');
+    expect(step0).toContain('`factory: session env missing; start a new session`');
+    expect(step0).toContain('create nothing');
+    expect(text).not.toContain('printenv HOME');
+    expect(text).not.toContain('/scratchpad/selise');
+    expect(body).not.toContain('--store');
   });
 
   it('reads the repo configs and drafts the four fields', () => {
@@ -61,15 +63,15 @@ describe('new skill', () => {
 
   it('creates the task with the CLI from a description file', () => {
     const step4 = body.match(/^4\. .*$/m)[0];
-    expect(step4).toContain('HUSKY=0 node "<root>/core/dist/cli.js" --mode session new --repo <repo> --base <base> --title "<title>" --description-file');
+    expect(step4).toContain('HUSKY=0 node "<root>/core/dist/cli.js" --mode session new --repo "<repo>" --base "<base>" --title "<title>" --description-file');
     expect(step4).toContain('runs/.drafts/${CLAUDE_SESSION_ID}.md');
     expect(step4).not.toContain('--store');
     expect(body.match(/^3\. .*$/m)[0]).toContain('${CLAUDE_SESSION_ID}.md');
   });
 
   it('adds --ready only when the user asked for it, and strips the flag from the prompt', () => {
-    expect(body.match(/^2\. .*$/m)[0]).toMatch(/--ready[^\n]*remove the flag from the prompt/);
-    expect(body.match(/^4\. .*$/m)[0]).toMatch(/Add `--ready`[^\n]*only if the user's arguments contained `--ready`/);
+    expect(body.match(/^2\. .*$/m)[0]).toMatch(/first word of `\$ARGUMENTS` is `--ready`[^\n]*remove it from the prompt/);
+    expect(body.match(/^4\. .*$/m)[0]).toMatch(/Add `--ready`[^\n]*only if the first word of the user's arguments was `--ready`/);
     expect(body.match(/--ready/g).length).toBeGreaterThanOrEqual(3);
   });
 
@@ -90,6 +92,11 @@ describe('new skill', () => {
     expect(step5).toContain('link.mjs');
     expect(step5).toContain('${CLAUDE_SKILL_DIR}');
     expect(step5).toMatch(/Create task/);
+  });
+
+  it('limits the base to plain branch characters and asks otherwise', () => {
+    expect(body).toContain('The base must match `[A-Za-z0-9._/-]+`');
+    expect(body).toMatch(/does not, stop and ask/);
   });
 
   it('never targets main', () => {
