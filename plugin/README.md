@@ -62,6 +62,12 @@ If the stage agent errors or returns nothing, the skill records nothing and prin
 
 - A stage agent that hits its turn limit (`maxTurns` 60) ends without a `<factory-result>` block. The core then records a malformed reply ("no `<factory-result>` block"), not a turn-limit block: verify and review go back to build (using up one return); spec, plan and build block.
 
+## Create a task from a prompt
+
+`/factory:new <what you want done>` drafts a task from your words (repo, base branch, title, description with acceptance criteria) and prints one Board link. Open it: the New task form is filled in. Check it, click **Create task**, then **Mark ready**, then run `/factory:run`. The skill never creates a task and never touches the Board; the draft is only saved under `runs/.drafts/` in the factory folder (ignored by git).
+
+The link goes to `https://dfrsgz-eseqz.slsblx.com` unless `FACTORY_BOARD_URL` is set in the shell that starts `claude`. The link works only once the Board page with the pre-fill change is deployed; before that it opens the plain Board.
+
 ## Safety layers
 
 No single layer is the boundary. In order:
