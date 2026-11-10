@@ -1,15 +1,20 @@
 import { describe, expect, test } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { BlocksStore } from '../src/blocks/store.js';
 import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { ClaimError, Engine } from '../src/engine.js';
 import { FakeGitHub } from '../src/github.js';
 import {
-  answerTask, cancelTask, createTask, createTaskAsCore, decideGate, editTask, markReady, OwnerActionError, saveSettings, StaleDocError,
+  answerTask, cancelTask, createTask, createTaskAsCore, decideGate, editTask, markReady, OwnerActionError, saveFactory, saveRepo, saveSettings,
+  StaleDocError,
 } from '../src/owner.js';
+import { defFixture, repoFixture, seed } from './factoryFixtures.js';
 import type { RepoConfig } from '../src/repoConfig.js';
 import { IllegalMoveError } from '../src/status.js';
-import { MemoryStore, VersionConflictError, type BoardStore } from '../src/store.js';
+import { FileStore, MemoryStore, VersionConflictError, type BoardStore } from '../src/store.js';
 import type { FactoryEvent, RepoId, Task } from '../src/types.js';
 
 const NOW = '2026-11-10T09:00:00.000Z';
@@ -18,14 +23,14 @@ const now = () => new Date(NOW);
 /** The owner acts on the Board; the core moves tasks and writes docs. On MemoryStore both are one store. */
 const fixtures: [string, () => { owner: BoardStore; core: BoardStore }][] = [
   ['MemoryStore', () => {
-    const s = new MemoryStore();
+    const s = new MemoryStore({ factories: seed() });
     return { owner: s, core: s };
   }],
   ['BlocksStore', () => {
     const storage = newFakeStorage();
     return {
-      owner: new BlocksStore(new FakeBlocksData('factory-owner', { storage }), 'owner'),
-      core: new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core'),
+      owner: new BlocksStore(new FakeBlocksData('factory-owner', { storage }), 'owner', { factories: seed() }),
+      core: new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core', { factories: seed() }),
     };
   }],
 ];
@@ -42,7 +47,7 @@ const cfg: RepoConfig = {
 };
 
 const you = (e: Partial<FactoryEvent>): FactoryEvent => ({
-  taskId: 'T-1', actor: 'you', action: 'set', field: null, from: null, to: null, reason: '', at: NOW, ...e,
+  taskId: 'T-1', factoryId: 'blocks', actor: 'you', action: 'set', field: null, from: null, to: null, reason: '', at: NOW, ...e,
 });
 
 describe.each(fixtures)('owner actions on %s', (_name, make) => {
@@ -50,7 +55,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
     const { owner, core } = make();
     /** A task created by the owner, then moved by the core (its events are dropped from the checks below). */
     const put = async (patch: Partial<Task> = {}, input: Partial<Parameters<typeof createTask>[2]> = {}) => {
-      const t = await createTask(owner, now, { title: 'Add widget', description: 'd', repo: 'data', ...input });
+      const t = await createTask(owner, now, { factoryId: 'blocks', title: 'Add widget', description: 'd', repo: 'data', ...input });
       return Object.keys(patch).length ? core.updateTask(t.taskId, t.version, patch) : t;
     };
     const ownerEvents = async (taskId = 'T-1') => (await owner.listEvents(taskId)).filter((e) => e.action !== 'create');
@@ -60,7 +65,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
   describe('createTask', () => {
     test('creates an inbox task and writes a create event as you', async () => {
       const { owner } = setup();
-      const t = await createTask(owner, now, { title: 'Add widget', description: 'why', repo: 'iam', baseBranch: 'feature/x' });
+      const t = await createTask(owner, now, { factoryId: 'blocks', title: 'Add widget', description: 'why', repo: 'iam', baseBranch: 'feature/x' });
       expect(t).toMatchObject({ taskId: 'T-1', title: 'Add widget', description: 'why', repo: 'iam', baseBranch: 'feature/x', status: 'inbox', version: 1 });
       expect(await owner.getTask('T-1')).toEqual(t);
       expect(await owner.listEvents('T-1')).toEqual([you({ action: 'create', to: 'inbox', reason: 'created' })]);
@@ -68,12 +73,12 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
 
     test('stores the title trimmed', async () => {
       const { owner } = setup();
-      expect((await createTask(owner, now, { title: '  Add widget \n', description: '', repo: 'data' })).title).toBe('Add widget');
+      expect((await createTask(owner, now, { factoryId: 'blocks', title: '  Add widget \n', description: '', repo: 'data' })).title).toBe('Add widget');
     });
 
     test('the base branch defaults to dev', async () => {
       const { owner } = setup();
-      expect((await createTask(owner, now, { title: 'X', description: '', repo: 'data' })).baseBranch).toBe('dev');
+      expect((await createTask(owner, now, { factoryId: 'blocks', title: 'X', description: '', repo: 'data' })).baseBranch).toBe('dev');
     });
 
     test.each([
@@ -83,7 +88,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       ['a description that is not text', { description: 7 as unknown as string }],
     ])('refuses %s', async (_what, bad) => {
       const { owner } = setup();
-      const err = await createTask(owner, now, { title: 'X', description: '', repo: 'data', ...bad }).catch((e: unknown) => e);
+      const err = await createTask(owner, now, { factoryId: 'blocks', title: 'X', description: '', repo: 'data', ...bad }).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(OwnerActionError);
       expect(err).toMatchObject({ code: 'invalid' });
       expect(await owner.listTasks()).toEqual([]);
@@ -346,58 +351,57 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
 
     test('merges a global patch and writes one event per changed key', async () => {
       const { owner } = setup();
-      const s = await saveSettings(owner, now, 'global', { maxParallel: 3, maxTurnsPerStage: DEFAULT_SETTINGS.maxTurnsPerStage, gates: { plan: true } });
+      const s = await saveSettings(owner, now, 'blocks', { maxParallel: 3, maxTurnsPerStage: DEFAULT_SETTINGS.maxTurnsPerStage, gates: { plan: true } });
       const global = { ...DEFAULT_SETTINGS, maxParallel: 3, gates: { ...DEFAULT_SETTINGS.gates, plan: true } };
-      expect(s).toEqual({ global, repos: {} });
-      expect(await owner.getSettings()).toEqual({ global, repos: {} });
+      expect(s).toEqual({ factories: { blocks: { factory: global, repos: {} } } });
+      expect(await owner.getSettings()).toEqual({ factories: { blocks: { factory: global, repos: {} } } });
       expect(await owner.listEvents('-')).toEqual([
-        setting('settings.global.maxParallel', '2', '3'),
-        setting('settings.global.gates', '{"spec":true,"plan":false,"pr":true}', '{"spec":true,"plan":true,"pr":true}'),
+        setting('settings.blocks.maxParallel', '2', '3'),
+        setting('settings.blocks.gates', '{"spec":true,"plan":false,"pr":true}', '{"spec":true,"plan":true,"pr":true}'),
       ]);
     });
 
     test('merges a repo patch over that repo and keeps the others', async () => {
       const { owner } = setup();
-      await saveSettings(owner, now, 'os', { paused: true });
-      await saveSettings(owner, now, 'data', { maxCostPerTaskUsd: 10, gates: { pr: false } });
-      await saveSettings(owner, now, 'data', { maxParallel: 1 });
+      await saveSettings(owner, now, 'blocks/os', { paused: true });
+      await saveSettings(owner, now, 'blocks/data', { maxCostPerTaskUsd: 10, gates: { pr: false } });
+      await saveSettings(owner, now, 'blocks/data', { maxParallel: 1 });
       expect(await owner.getSettings()).toEqual({
-        global: DEFAULT_SETTINGS,
-        repos: { os: { paused: true }, data: { maxCostPerTaskUsd: 10, gates: { pr: false }, maxParallel: 1 } },
+        factories: { blocks: { factory: DEFAULT_SETTINGS, repos: { os: { paused: true }, data: { maxCostPerTaskUsd: 10, gates: { pr: false }, maxParallel: 1 } } } },
       });
       expect((await owner.listEvents('-')).map((e) => [e.field, e.from, e.to])).toEqual([
-        ['settings.os.paused', null, 'true'],
-        ['settings.data.maxCostPerTaskUsd', null, '10'],
-        ['settings.data.gates', null, '{"pr":false}'],
-        ['settings.data.maxParallel', null, '1'],
+        ['settings.blocks/os.paused', null, 'true'],
+        ['settings.blocks/data.maxCostPerTaskUsd', null, '10'],
+        ['settings.blocks/data.gates', null, '{"pr":false}'],
+        ['settings.blocks/data.maxParallel', null, '1'],
       ]);
     });
 
     test('null in a repo scope inherits the global value: the key or gate is removed and the event says inherit', async () => {
       const { owner } = setup();
-      await saveSettings(owner, now, 'data', { maxParallel: 3, paused: true, gates: { pr: false, spec: true } });
-      await saveSettings(owner, now, 'os', { maxParallel: 4 });
+      await saveSettings(owner, now, 'blocks/data', { maxParallel: 3, paused: true, gates: { pr: false, spec: true } });
+      await saveSettings(owner, now, 'blocks/os', { maxParallel: 4 });
       const at = (await owner.listEvents('-')).length;
-      await saveSettings(owner, now, 'data', { maxParallel: null, maxTurnsPerStage: null, gates: { pr: null } });
-      expect((await owner.getSettings()).repos).toEqual({ data: { paused: true, gates: { spec: true } }, os: { maxParallel: 4 } });
-      await saveSettings(owner, now, 'data', { gates: { spec: null } });
-      expect((await owner.getSettings()).repos).toEqual({ data: { paused: true }, os: { maxParallel: 4 } });
-      await saveSettings(owner, now, 'data', { paused: null });
-      expect((await owner.getSettings()).repos).toEqual({ data: {}, os: { maxParallel: 4 } });
+      await saveSettings(owner, now, 'blocks/data', { maxParallel: null, maxTurnsPerStage: null, gates: { pr: null } });
+      expect((await owner.getSettings()).factories.blocks!.repos).toEqual({ data: { paused: true, gates: { spec: true } }, os: { maxParallel: 4 } });
+      await saveSettings(owner, now, 'blocks/data', { gates: { spec: null } });
+      expect((await owner.getSettings()).factories.blocks!.repos).toEqual({ data: { paused: true }, os: { maxParallel: 4 } });
+      await saveSettings(owner, now, 'blocks/data', { paused: null });
+      expect((await owner.getSettings()).factories.blocks!.repos).toEqual({ data: {}, os: { maxParallel: 4 } });
       expect((await owner.listEvents('-')).slice(at).map((e) => [e.field, e.from, e.to])).toEqual([
-        ['settings.data.maxParallel', '3', 'inherit'],
-        ['settings.data.gates', '{"pr":false,"spec":true}', '{"spec":true}'],
-        ['settings.data.gates', '{"spec":true}', 'inherit'],
-        ['settings.data.paused', 'true', 'inherit'],
+        ['settings.blocks/data.maxParallel', '3', 'inherit'],
+        ['settings.blocks/data.gates', '{"pr":false,"spec":true}', '{"spec":true}'],
+        ['settings.blocks/data.gates', '{"spec":true}', 'inherit'],
+        ['settings.blocks/data.paused', 'true', 'inherit'],
       ]);
     });
 
     test('gates: null in a repo scope drops all its gate overrides', async () => {
       const { owner } = setup();
-      await saveSettings(owner, now, 'data', { gates: { plan: true } });
-      await saveSettings(owner, now, 'data', { gates: null });
-      expect((await owner.getSettings()).repos).toEqual({ data: {} });
-      expect((await owner.listEvents('-')).at(-1)).toMatchObject({ field: 'settings.data.gates', from: '{"plan":true}', to: 'inherit' });
+      await saveSettings(owner, now, 'blocks/data', { gates: { plan: true } });
+      await saveSettings(owner, now, 'blocks/data', { gates: null });
+      expect((await owner.getSettings()).factories.blocks!.repos).toEqual({ data: {} });
+      expect((await owner.listEvents('-')).at(-1)).toMatchObject({ field: 'settings.blocks/data.gates', from: '{"plan":true}', to: 'inherit' });
     });
 
     test('a save from a stale read is a VersionConflictError and writes no event', async () => {
@@ -407,11 +411,11 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       owner.getSettings = async () => {
         const seen = await getSettings();
         owner.getSettings = getSettings;
-        await saveSettings(owner, now, 'data', { maxParallel: 5 });
+        await saveSettings(owner, now, 'blocks/data', { maxParallel: 5 });
         return seen;
       };
-      await expect(saveSettings(owner, now, 'data', { maxParallel: 3 })).rejects.toBeInstanceOf(VersionConflictError);
-      expect((await owner.getSettings()).repos.data).toEqual({ maxParallel: 5 });
+      await expect(saveSettings(owner, now, 'blocks/data', { maxParallel: 3 })).rejects.toBeInstanceOf(VersionConflictError);
+      expect((await owner.getSettings()).factories.blocks!.repos.data).toEqual({ maxParallel: 5 });
       expect((await owner.listEvents('-')).map((e) => e.to)).toEqual(['5']);
     });
 
@@ -421,16 +425,16 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       owner.getSettings = async () => {
         const seen = await getSettings();
         owner.getSettings = getSettings;
-        await saveSettings(owner, now, 'os', { paused: true });
+        await saveSettings(owner, now, 'blocks/os', { paused: true });
         return seen;
       };
-      await saveSettings(owner, now, 'data', { maxParallel: 3 });
-      expect((await owner.getSettings()).repos).toEqual({ os: { paused: true }, data: { maxParallel: 3 } });
+      await saveSettings(owner, now, 'blocks/data', { maxParallel: 3 });
+      expect((await owner.getSettings()).factories.blocks!.repos).toEqual({ os: { paused: true }, data: { maxParallel: 3 } });
     });
 
     test('a patch that changes nothing writes no event', async () => {
       const { owner } = setup();
-      await saveSettings(owner, now, 'global', { maxParallel: DEFAULT_SETTINGS.maxParallel, gates: { spec: true } });
+      await saveSettings(owner, now, 'blocks', { maxParallel: DEFAULT_SETTINGS.maxParallel, gates: { spec: true } });
       expect(await owner.listEvents('-')).toEqual([]);
     });
 
@@ -439,21 +443,21 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       { maxCostPerTaskUsd: 0 }, { maxCostPerTaskUsd: 1000 }, { maxCostPerTaskUsd: 2.5 },
     ])('accepts the bound %o', async (patch) => {
       const { owner } = setup();
-      await saveSettings(owner, now, 'global', patch);
-      expect((await owner.getSettings()).global).toMatchObject(patch);
+      await saveSettings(owner, now, 'blocks', patch);
+      expect((await owner.getSettings()).factories.blocks!.factory).toMatchObject(patch);
     });
 
     test.each([
-      ['global', { maxParallel: 0 }], ['global', { maxParallel: 11 }], ['data', { maxParallel: 1.5 }],
-      ['global', { maxTurnsPerStage: 0 }], ['data', { maxTurnsPerStage: 501 }],
-      ['global', { maxCostPerTaskUsd: -1 }], ['global', { maxCostPerTaskUsd: 1000.01 }], ['data', { maxCostPerTaskUsd: Number.NaN }],
-      ['global', { maxParallel: '3' }], ['global', { paused: 'yes' }], ['data', { gates: { spec: 1 } }], ['global', { gates: { deploy: true } }],
-      ['global', { colour: 'red' }], ['Nope!', { maxParallel: 2 }],
-      ['global', { maxParallel: null }], ['global', { gates: null }], ['global', { gates: { pr: null } }], ['data', { gates: { pr: 'off' } }],
+      ['blocks', { maxParallel: 0 }], ['blocks', { maxParallel: 11 }], ['blocks/data', { maxParallel: 1.5 }],
+      ['blocks', { maxTurnsPerStage: 0 }], ['blocks/data', { maxTurnsPerStage: 501 }],
+      ['blocks', { maxCostPerTaskUsd: -1 }], ['blocks', { maxCostPerTaskUsd: 1000.01 }], ['blocks/data', { maxCostPerTaskUsd: Number.NaN }],
+      ['blocks', { maxParallel: '3' }], ['blocks', { paused: 'yes' }], ['blocks/data', { gates: { spec: 1 } }], ['blocks', { gates: { deploy: true } }],
+      ['blocks', { colour: 'red' }], ['Nope!', { maxParallel: 2 }],
+      ['blocks', { maxParallel: null }], ['blocks', { gates: null }], ['blocks', { gates: { pr: null } }], ['blocks/data', { gates: { pr: 'off' } }],
     ])('refuses scope %s with %o', async (scope, patch) => {
       const { owner } = setup();
-      await expect(saveSettings(owner, now, scope as RepoId, patch as never)).rejects.toMatchObject({ code: 'invalid' });
-      expect(await owner.getSettings()).toEqual({ global: DEFAULT_SETTINGS, repos: {} });
+      await expect(saveSettings(owner, now, scope, patch as never)).rejects.toMatchObject({ code: 'invalid' });
+      expect(await owner.getSettings()).toEqual({ factories: {} });
       expect(await owner.listEvents('-')).toEqual([]);
     });
   });
@@ -470,14 +474,14 @@ test('OwnerActionError and StaleDocError carry their details', () => {
 
 describe.each(fixtures)('createTaskAsCore (%s)', (_name, make) => {
   const setup = () => make();
-  const input = { title: ' Fix typo ', description: 'd', repo: 'data' as RepoId };
+  const input = { factoryId: 'blocks', title: ' Fix typo ', description: 'd', repo: 'data' as RepoId };
 
   test('inserts in inbox by default with a create event from core · new', async () => {
     const { core } = setup();
     const t = await createTaskAsCore(core, now, input);
     expect(t).toMatchObject({ taskId: 'T-1', title: 'Fix typo', description: 'd', repo: 'data', baseBranch: 'dev', status: 'inbox', version: 1 });
     expect(await core.listEvents('T-1')).toEqual([
-      { taskId: 'T-1', actor: 'core · new', action: 'create', field: null, from: null, to: 'inbox', reason: 'created by factory new', at: NOW },
+      { taskId: 'T-1', factoryId: 'blocks', actor: 'core · new', action: 'create', field: null, from: null, to: 'inbox', reason: 'created by factory new', at: NOW },
     ]);
   });
 
@@ -520,5 +524,109 @@ describe.each(fixtures)('createTaskAsCore (%s)', (_name, make) => {
     const { owner } = setup();
     await createTask(owner, now, input);
     expect((await owner.listEvents('T-1'))[0]).toMatchObject({ actor: 'you', reason: 'created' });
+  });
+});
+
+describe.each(fixtures)('creating a task checks the factory and its repos (%s)', (_name, make) => {
+  const input = { title: 't', description: '', repo: 'data' };
+
+  test.each([
+    ['createTask', (st: BoardStore) => createTask(st, now, { factoryId: 'blocks', ...input, repo: 'api' })],
+    ['createTaskAsCore', (st: BoardStore) => createTaskAsCore(st, now, { factoryId: 'blocks', ...input, repo: 'api' })],
+  ])('%s refuses a repo that is not in the factory', async (_n, create) => {
+    const { owner, core } = make();
+    const store = _n === 'createTask' ? owner : core;
+    await expect(create(store)).rejects.toThrow('repo api is not in factory blocks');
+    expect(await store.listTasks()).toEqual([]);
+  });
+
+  test.each([
+    ['createTask', (st: BoardStore) => createTask(st, now, { factoryId: 'delta', ...input })],
+    ['createTaskAsCore', (st: BoardStore) => createTaskAsCore(st, now, { factoryId: 'delta', ...input })],
+  ])('%s refuses an unknown factory', async (_n, create) => {
+    const { owner, core } = make();
+    const store = _n === 'createTask' ? owner : core;
+    await expect(create(store)).rejects.toMatchObject({ code: 'invalid', message: 'factory delta does not exist' });
+    expect(await store.listTasks()).toEqual([]);
+  });
+
+  test('the same repo id in a second factory is its own repo', async () => {
+    const { owner } = make();
+    // Another factory exists, but `data` is only in blocks.
+    expect(await owner.listFactoryRepos('blocks')).toHaveLength(3);
+    await expect(createTask(owner, now, { factoryId: 'blocks', ...input })).resolves.toMatchObject({ factoryId: 'blocks', repo: 'data' });
+  });
+});
+
+describe.each([
+  ['MemoryStore', () => new MemoryStore()],
+  ['FileStore', () => new FileStore(join(mkdtempSync(join(tmpdir(), 'owner-fac-')), 'board.json'))],
+])('saveFactory and saveRepo on %s', (_name, make) => {
+  const factoryEvents = async (s: BoardStore) => (await s.listEvents('-')).map((e) => [e.factoryId, e.actor, e.field, e.from, e.to]);
+
+  test('saveFactory inserts a validated factory with main and writes an event per field', async () => {
+    const s = make();
+    const stored = await saveFactory(s, now, null, defFixture('delta', { protectedBranches: ['dev'] }));
+    expect(stored).toMatchObject({ factoryId: 'delta', protectedBranches: ['dev', 'main'], version: 1 });
+    expect(await s.listFactoryDefs()).toEqual([stored]);
+    expect((await factoryEvents(s)).map((e) => e[2])).toEqual([
+      'def.name', 'def.protectedBranches', 'def.gitName', 'def.gitEmail', 'def.docsPath', 'def.patAccount', 'def.active',
+    ]);
+    expect((await s.listEvents('-'))[0]).toMatchObject({ factoryId: 'delta', actor: 'you', action: 'set', from: null, to: 'delta', at: NOW });
+  });
+
+  test('saveFactory that removes main keeps main and writes an event for each changed field only', async () => {
+    const s = make();
+    const first = await saveFactory(s, now, null, defFixture('delta'));
+    const before = (await s.listEvents('-')).length;
+    const next = await saveFactory(s, now, first, { ...first, name: 'Delta 2', protectedBranches: ['dev', 'stg'], active: false });
+    expect(next).toMatchObject({ name: 'Delta 2', protectedBranches: ['dev', 'stg', 'main'], active: false, version: 2 });
+    expect((await factoryEvents(s)).slice(before)).toEqual([
+      ['delta', 'you', 'def.name', 'delta', 'Delta 2'],
+      ['delta', 'you', 'def.active', 'true', 'false'],
+    ]);
+  });
+
+  test('saveFactory refuses an invalid definition and a stale version, and writes nothing', async () => {
+    const s = make();
+    await expect(saveFactory(s, now, null, defFixture('Bad Id'))).rejects.toMatchObject({ code: 'invalid' });
+    const first = await saveFactory(s, now, null, defFixture('delta'));
+    await saveFactory(s, now, first, { ...first, name: 'x' });
+    const count = (await s.listEvents('-')).length;
+    await expect(saveFactory(s, now, first, { ...first, name: 'y' })).rejects.toBeInstanceOf(VersionConflictError);
+    expect((await s.listEvents('-')).length).toBe(count);
+  });
+
+  test('saveRepo changing checks writes one repo.<id>.checks event with canonical old and new JSON', async () => {
+    const s = make();
+    await saveFactory(s, now, null, defFixture('delta'));
+    const api = await saveRepo(s, now, null, repoFixture('delta', 'api'));
+    const before = (await s.listEvents('-')).length;
+    const checks = { ...api.checks, e2e: 'off' as const, server: { build: 'b2', cwd: 'server', test: 't' } };
+    await saveRepo(s, now, api, { ...api, checks });
+    expect((await factoryEvents(s)).slice(before)).toEqual([[
+      'delta', 'you', 'repo.api.checks',
+      '{"client":{"cwd":"client","install":"i","lint":"l","test":"t","typecheck":"tc"},"e2e":"off","server":{"build":"b","cwd":"server","test":"t"}}',
+      '{"client":{"cwd":"client","install":"i","lint":"l","test":"t","typecheck":"tc"},"e2e":"off","server":{"build":"b2","cwd":"server","test":"t"}}',
+    ]]);
+  });
+
+  test('saveRepo refuses a repo of an unknown factory, a main base, and a stale version', async () => {
+    const s = make();
+    await expect(saveRepo(s, now, null, repoFixture('delta', 'api'))).rejects.toThrow('factory delta does not exist');
+    await saveFactory(s, now, null, defFixture('delta'));
+    await expect(saveRepo(s, now, null, repoFixture('delta', 'api', { baseBranch: 'main' }))).rejects.toMatchObject({ code: 'invalid' });
+    const api = await saveRepo(s, now, null, repoFixture('delta', 'api'));
+    await saveRepo(s, now, api, { ...api, remote: 'git@github.com:o/other.git' });
+    await expect(saveRepo(s, now, api, { ...api, baseBranch: 'stg' })).rejects.toBeInstanceOf(VersionConflictError);
+    expect(await s.listFactoryRepos('delta')).toHaveLength(1);
+  });
+
+  test('createTask then works against a saved factory and repo', async () => {
+    const s = make();
+    await saveFactory(s, now, null, defFixture('delta'));
+    await saveRepo(s, now, null, repoFixture('delta', 'api'));
+    await expect(createTask(s, now, { factoryId: 'delta', title: 't', description: '', repo: 'api' })).resolves.toMatchObject({ factoryId: 'delta' });
+    await expect(createTask(s, now, { factoryId: 'delta', title: 't', description: '', repo: 'data' })).rejects.toThrow('repo data is not in factory delta');
   });
 });

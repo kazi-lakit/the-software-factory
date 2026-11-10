@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { saveSettings, VersionConflictError } from "@factory/core";
+import { saveSettings, VersionConflictError, type StoredSettings } from "@factory/core";
 import { AppShell } from "../../app/AppShell";
 import { AuthProvider } from "../../app/providers/AuthProvider";
 import { blocksClient } from "../../lib/blocks/client";
@@ -70,7 +70,7 @@ describe("SettingsView", () => {
   });
 
   it("lists_the_seven_repos_with_inherit_on_off_per_gate", async () => {
-    await saveSettings(fakeBoard().owner, now, "iam", { gates: { pr: false }, maxTurnsPerStage: 30 });
+    await saveSettings(fakeBoard().owner, now, "blocks/iam", { gates: { pr: false }, maxTurnsPerStage: 30 });
     renderSettings();
     await screen.findByRole("table", { name: "Repo overrides" });
     for (const repo of ["os", "iam", "monitor", "logic", "data", "localization", "release"]) {
@@ -117,9 +117,9 @@ describe("SettingsView", () => {
     fireEvent.click(within(globalForm()).getByRole("button", { name: "Save global settings" }));
     await screen.findByText("Saved global settings.");
     expect(write).toHaveBeenCalledTimes(1);
-    expect(write.mock.calls[0]![0]).toBe("global");
+    expect(write.mock.calls[0]![0]).toBe("blocks");
     const stored = await fakeBoard().owner.getSettings();
-    expect(stored.global).toEqual({ gates: { spec: true, plan: true, pr: true }, maxParallel: 4, maxTurnsPerStage: 60, maxCostPerTaskUsd: 7.5, paused: false });
+    expect(stored.factories.blocks!.factory).toEqual({ gates: { spec: true, plan: true, pr: true }, maxParallel: 4, maxTurnsPerStage: 60, maxCostPerTaskUsd: 7.5, paused: false });
   });
 
   it("saves_a_repo_override_to_that_scope_only", async () => {
@@ -133,15 +133,15 @@ describe("SettingsView", () => {
     fireEvent.change(within(globalForm()).getByLabelText("Max parallel tasks"), { target: { value: "3" } });
     fireEvent.click(within(repoRow("iam")).getByRole("button", { name: "Save iam" }));
     await screen.findByText("Saved iam settings.");
-    expect(write.mock.calls.map((call) => call[0])).toEqual(["iam"]);
+    expect(write.mock.calls.map((call) => call[0])).toEqual(["blocks/iam"]);
     const stored = await fakeBoard().owner.getSettings();
-    expect(stored.repos).toEqual({ iam: { gates: { spec: false }, maxTurnsPerStage: 25 } });
-    expect(stored.global.maxParallel).toBe(2);
+    expect(stored.factories.blocks!.repos).toEqual({ iam: { gates: { spec: false }, maxTurnsPerStage: 25 } });
+    expect(stored.factories.blocks!.factory.maxParallel).toBe(2);
     expect(within(repoRow("data")).getByRole("combobox", { name: "data PR gate" })).toHaveValue("off");
   });
 
   it("sends_inherit_as_null_so_the_repo_takes_the_global_value_again", async () => {
-    await saveSettings(fakeBoard().owner, now, "data", { gates: { pr: false, spec: true }, maxCostPerTaskUsd: 2 });
+    await saveSettings(fakeBoard().owner, now, "blocks/data", { gates: { pr: false, spec: true }, maxCostPerTaskUsd: 2 });
     renderSettings();
     await screen.findByRole("table", { name: "Repo overrides" });
     const row = repoRow("data");
@@ -151,11 +151,11 @@ describe("SettingsView", () => {
     fireEvent.click(within(row).getByRole("button", { name: "Save data" }));
     await screen.findByText("Saved data settings.");
     const stored = await fakeBoard().owner.getSettings();
-    expect(stored.repos.data).toEqual({ gates: { spec: true } });
+    expect(stored.factories.blocks!.repos.data).toEqual({ gates: { spec: true } });
     const events = await fakeBoard().owner.listEvents("-");
     expect(events.filter((e) => e.at !== now().toISOString()).map((e) => [e.field, e.to]).sort()).toEqual([
-      ["settings.data.maxCostPerTaskUsd", "inherit"],
-      ["settings.data.gates", '{"spec":true}']
+      ["settings.blocks/data.maxCostPerTaskUsd", "inherit"],
+      ["settings.blocks/data.gates", '{"spec":true}']
     ].sort());
   });
 
@@ -165,7 +165,7 @@ describe("SettingsView", () => {
     await screen.findByRole("form", { name: "Global settings" });
     fireEvent.change(within(globalForm()).getByLabelText("Max parallel tasks"), { target: { value: "4" } });
     // Someone else saves the turn limit, and this save loses the race.
-    await saveSettings(owner, now, "global", { maxTurnsPerStage: 80 });
+    await saveSettings(owner, now, "blocks", { maxTurnsPerStage: 80 });
     vi.spyOn(owner, "updateSettingsScope").mockRejectedValueOnce(new VersionConflictError("settings global", Number.NaN, Number.NaN, "changed"));
     fireEvent.click(within(globalForm()).getByRole("button", { name: "Save global settings" }));
     expect(await within(globalForm()).findByRole("alert")).toHaveTextContent("Settings changed elsewhere. Reload to see the latest.");
@@ -176,8 +176,8 @@ describe("SettingsView", () => {
     fireEvent.click(within(globalForm()).getByRole("button", { name: "Save global settings" }));
     await screen.findByText("Saved global settings.");
     const stored = await owner.getSettings();
-    expect(stored.global.maxParallel).toBe(4);
-    expect(stored.global.maxTurnsPerStage).toBe(80);
+    expect(stored.factories.blocks!.factory.maxParallel).toBe(4);
+    expect(stored.factories.blocks!.factory.maxTurnsPerStage).toBe(80);
   });
 
   it("refreshes_settings_and_history_after_a_save", async () => {
@@ -188,7 +188,7 @@ describe("SettingsView", () => {
     fireEvent.click(within(globalForm()).getByRole("button", { name: "Save global settings" }));
     await screen.findByText("Saved global settings.");
     expect(client.getQueryState(["history", { showTest: false }])?.isInvalidated).toBe(true);
-    await waitFor(() => expect(client.getQueryData<{ global: { maxTurnsPerStage: number } }>(["settings"])?.global.maxTurnsPerStage).toBe(70));
+    await waitFor(() => expect(client.getQueryData<StoredSettings>(["settings"])?.factories.blocks?.factory.maxTurnsPerStage).toBe(70));
   });
 
   it("shows_an_error_with_retry_instead_of_the_form_when_settings_cannot_load", async () => {
@@ -225,12 +225,12 @@ describe("the pause switch", () => {
     fireEvent.click(pause);
     expect(await screen.findByText("Factory paused")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("switch", { name: "Pause factory" })).toBeChecked());
-    expect(write.mock.calls.map((call) => [call[0], (call[2] as { paused: boolean }).paused])).toEqual([["global", true]]);
-    expect((await fakeBoard().owner.getSettings()).global.paused).toBe(true);
+    expect(write.mock.calls.map((call) => [call[0], (call[2] as { paused: boolean }).paused])).toEqual([["blocks", true]]);
+    expect((await fakeBoard().owner.getSettings()).factories.blocks!.factory.paused).toBe(true);
 
     fireEvent.click(screen.getByRole("switch", { name: "Pause factory" }));
     await waitFor(() => expect(screen.queryByText("Factory paused")).not.toBeInTheDocument());
-    expect((await fakeBoard().owner.getSettings()).global.paused).toBe(false);
+    expect((await fakeBoard().owner.getSettings()).factories.blocks!.factory.paused).toBe(false);
   });
 
   it("shows_why_a_pause_was_not_saved", async () => {

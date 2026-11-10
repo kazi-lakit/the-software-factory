@@ -8,7 +8,7 @@ const NOGATES: Record<Gate, boolean> = { spec: false, plan: false, pr: false };
 
 function task(over: Partial<Task> = {}): Task {
   return {
-    taskId: 'T-1', title: 't', description: 'd', repo: 'os', baseBranch: 'dev',
+    taskId: 'T-1', factoryId: 'blocks', title: 't', description: 'd', repo: 'os', baseBranch: 'dev',
     status: 'ready', stage: null, branch: null, prUrl: null, attempt: 0,
     blockedReason: null, question: null, answer: null, gateOverrides: {},
     claimBy: null, claimUntil: null, costUsd: 0, version: 1, ...over,

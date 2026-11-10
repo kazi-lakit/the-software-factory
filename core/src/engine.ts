@@ -2,7 +2,7 @@ import { parseAgentResult } from './agentResult.js';
 import { assertPushAllowed, branchName, ProtectedBranchError } from './branchGuard.js';
 import { formatReport, runChecks, type Exec } from './checks.js';
 import { claim, claimExpired, release, renew } from './claims.js';
-import { AGENT_FOR } from './defaults.js';
+import { AGENT_FOR, DEFAULT_SETTINGS } from './defaults.js';
 import { GATE_DOC, resolveGates, resolveSettings, shouldMerge, validApproval } from './gates.js';
 import type { GitRepos } from './git.js';
 import { PrBaseMismatchError, type GitHub } from './github.js';
@@ -89,6 +89,9 @@ const AGENT_STEPS: ReadonlySet<Step> = new Set<Step>(['spec', 'plan', 'build', '
 const WORKING: ReadonlySet<Status> = new Set<Status>(['spec', 'plan', 'build', 'verify', 'review']);
 const taskNum = (id: string) => Number(id.slice(id.indexOf('-') + 1)) || 0;
 
+/** One factory's settings, defaults where none are stored. plan 6 Task 4 replaces this single-factory shim (factory `blocks`). */
+const factorySettings = (stored: StoredSettings, factoryId = 'blocks'): Settings => stored.factories[factoryId]?.factory ?? DEFAULT_SETTINGS;
+
 export class Engine {
   constructor(private readonly deps: EngineDeps) {}
 
@@ -118,12 +121,13 @@ export class Engine {
   async next(taskId?: string): Promise<Ticket | null> {
     const { store, now, claimant } = this.deps;
     const stored = await retry(() => store.getSettings());
-    if (stored.global.paused) return null;
+    const factory = factorySettings(stored);
+    if (factory.paused) return null;
     await this.sync();
 
     const tasks = await retry(() => store.listTasks());
     const active = tasks.filter((t) => !claimExpired(t, now())).length;
-    if (active >= stored.global.maxParallel) return null;
+    if (active >= factory.maxParallel) return null;
 
     const workable = (t: Task) => t.status === 'ready' || (t.stage !== null && WORKING.has(t.status));
     const candidates = tasks
@@ -145,7 +149,7 @@ export class Engine {
         await this.releaseOwnClaim(claimed.taskId);
         if (taskId !== undefined) throw e;
         // One task that cannot be set up must not stop the queue: note why and try the next one.
-        await this.noteSetupError(claimed.taskId, e);
+        await this.noteSetupError(claimed, e);
       }
     }
     return null;
@@ -270,7 +274,7 @@ export class Engine {
     const list = tasks.map(({ taskId, title, repo, status, stage, blockedReason, question, prUrl }) => ({
       taskId, title, repo, status, stage, blockedReason, question, prUrl,
     }));
-    return { paused: stored.global.paused, active, counts, tasks: list, settings: stored.global };
+    return { paused: factorySettings(stored).paused, active, counts, tasks: list, settings: factorySettings(stored) };
   }
 
   /** The only way a task changes status: checks the move, writes with the task's version, clears the claim, logs events. */
@@ -399,10 +403,10 @@ export class Engine {
   }
 
   /** Best effort: records a setup failure on the task's history; errors are ignored. */
-  private async noteSetupError(taskId: string, e: unknown): Promise<void> {
+  private async noteSetupError(task: Task, e: unknown): Promise<void> {
     const events: FactoryEvent[] = [
       {
-        taskId, actor: this.coreActor, action: 'set', field: 'setupError', from: null, to: firstLine(e),
+        taskId: task.taskId, factoryId: task.factoryId, actor: this.coreActor, action: 'set', field: 'setupError', from: null, to: firstLine(e),
         reason: 'setup failed', at: this.deps.now().toISOString(),
       },
     ];
@@ -436,7 +440,8 @@ export class Engine {
   }
 
   private settingsFor(stored: StoredSettings, task: Task): Settings {
-    return resolveSettings(stored.global, stored.repos[task.repo]);
+    const entry = stored.factories[task.factoryId];
+    return resolveSettings(entry?.factory ?? DEFAULT_SETTINGS, entry?.repos[task.repo]);
   }
 
   /** The task's worktree; a new one branches from the task's base, not the repo default. */

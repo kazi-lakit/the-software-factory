@@ -12,6 +12,7 @@ export type Mode = 'sdk' | 'loop' | 'session';
 
 export interface Task {
   taskId: string;
+  factoryId: FactoryId;
   title: string;
   description: string;
   repo: RepoId;
@@ -75,6 +76,8 @@ export interface Run {
 
 export interface FactoryEvent {
   taskId: string;
+  /** '' when the event belongs to no factory. */
+  factoryId: string;
   actor: string;
   action: 'move' | 'set' | 'create';
   field: string | null;

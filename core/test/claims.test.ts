@@ -5,7 +5,7 @@ import { MemoryStore } from '../src/store.js';
 const NOW = new Date('2026-01-01T00:00:00Z');
 const setup = async () => {
   const s = new MemoryStore();
-  const t = await s.createTask({ title: 'a', description: '', repo: 'data' });
+  const t = await s.createTask({ factoryId: 'blocks', title: 'a', description: '', repo: 'data' });
   return { s, t };
 };
 

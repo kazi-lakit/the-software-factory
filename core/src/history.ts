@@ -10,6 +10,7 @@ export function diffEvents(before: Task, after: Task, actor: string, reason: str
     if (before[field] === after[field]) continue;
     events.push({
       taskId: after.taskId,
+      factoryId: after.factoryId,
       actor,
       action: field === 'status' ? 'move' : 'set',
       field,

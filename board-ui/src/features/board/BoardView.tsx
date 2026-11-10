@@ -8,6 +8,7 @@ import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, t
 import { COLUMNS, isTestTask, MUTED, STATUS_LABEL } from "./status";
 import { TaskCard } from "./TaskCard";
 import { useBoard } from "./useBoard";
+import { BLOCKS_FACTORY } from "../../lib/blocksSettings";
 
 type Navigate = (path: string) => void;
 
@@ -198,7 +199,7 @@ function NewTaskForm({ id, repoNote, onRepoChange, onClose, onCreated }: { id: s
     try {
       // A blank base branch is left to the store's default (dev).
       const base = baseBranch.trim();
-      const task = await createTask(boardStore, now, { description, repo: repo as RepoId, title, ...(base ? { baseBranch: base } : {}) });
+      const task = await createTask(boardStore, now, { factoryId: BLOCKS_FACTORY, description, repo: repo as RepoId, title, ...(base ? { baseBranch: base } : {}) });
       clearTitle();
       clearDescription();
       clearRepo();

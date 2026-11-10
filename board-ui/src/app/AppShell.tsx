@@ -3,6 +3,7 @@ import { useAuth } from "./providers/AuthProvider";
 import { useCurrentUser, userDisplayName } from "../features/profile/useCurrentUser";
 import { useSettings } from "../features/settings/useSettings";
 import { clearAllUnsent } from "../lib/unsent";
+import { blocksSettings } from "../lib/blocksSettings";
 
 export const PROJECT_NAME = "the-software-factory";
 
@@ -25,7 +26,7 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
   const me = useCurrentUser();
   const settings = useSettings();
   const user = userDisplayName(me.data?.data);
-  const paused = settings.data?.global.paused === true;
+  const paused = (settings.data ? blocksSettings(settings.data).factory.paused : false) === true;
   // Without settings the shell cannot say whether the factory runs; it says so rather than show nothing.
   const pauseUnknown = !settings.data && settings.isError;
   const pauseText = paused ? "Factory paused" : pauseUnknown ? "Pause state unknown" : "";

@@ -1,14 +1,15 @@
 import { describe, expect, test } from 'vitest';
-import { existsSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { FileStore, MemoryStore, RereadAfterUpdateError, updateHeld, VersionConflictError } from '../src/store.js';
 import { runStoreContract } from './storeContract.js';
 
-const mk = (s: MemoryStore, title = 'a') => s.createTask({ title, description: '', repo: 'data' });
+const mk = (s: MemoryStore, title = 'a') => s.createTask({ factoryId: 'blocks', title, description: '', repo: 'data' });
 
-runStoreContract('MemoryStore', () => new MemoryStore());
-runStoreContract('FileStore', () => new FileStore(join(mkdtempSync(join(tmpdir(), 'fs-contract-')), 'board.json')));
+runStoreContract('MemoryStore', (identity) => new MemoryStore({ identity }));
+runStoreContract('FileStore', (identity) => new FileStore(join(mkdtempSync(join(tmpdir(), 'fs-contract-')), 'board.json'), { identity }));
 
 describe('updateHeld', () => {
   test('a write that landed but could not be read back is the held task plus the patch', async () => {
@@ -48,7 +49,7 @@ describe('FileStore', () => {
     const b = new FileStore(path);
     expect((await b.listTasks()).map((t) => t.taskId)).toEqual(['T-1']);
     expect((await b.currentDoc('T-1', 'spec'))?.body).toBe('body');
-    expect((await b.createTask({ title: 'n', description: '', repo: 'os' })).taskId).toBe('T-2');
+    expect((await b.createTask({ factoryId: 'blocks', title: 'n', description: '', repo: 'os' })).taskId).toBe('T-2');
     expect((await b.startRun({ taskId: 'T-1', step: 'spec', mode: 'sdk', agent: 'x' })).runId).toBe('R-2');
   });
 
@@ -61,7 +62,7 @@ describe('FileStore', () => {
     const b = new FileStore(path); // a second CLI process
     const bt = await b.getTask('T-1');
     await b.updateTask('T-1', bt.version, { status: 'cancelled' });
-    await b.addEvents([{ taskId: 'T-1', actor: 'you', action: 'move', field: 'status', from: 'inbox', to: 'cancelled', reason: 'c', at: 'now' }]);
+    await b.addEvents([{ taskId: 'T-1', factoryId: 'blocks', actor: 'you', action: 'move', field: 'status', from: 'inbox', to: 'cancelled', reason: 'c', at: 'now' }]);
     expect((await a.getTask('T-1')).status).toBe('cancelled');
     // A long-running process that read version 1 earlier must not overwrite the cancel.
     await expect(a.updateTask('T-1', t.version, { title: 'y' })).rejects.toBeInstanceOf(VersionConflictError);
@@ -101,5 +102,41 @@ describe('FileStore', () => {
     await mk(a);
     expect(existsSync(`${path}.lock`)).toBe(false);
     expect(await new FileStore(path).listTasks()).toHaveLength(1);
+  });
+});
+
+describe('FileStore factories', () => {
+  const dir = () => mkdtempSync(join(tmpdir(), 'fs-fac-'));
+
+  test('seeds definitions from <root>/factories the first time, then keeps what the owner saves', async () => {
+    const root = dir();
+    mkdirSync(join(root, 'factories', 'delta', 'repos'), { recursive: true });
+    writeFileSync(join(root, 'factories', 'delta', 'factory.yaml'), 'factoryId: delta\nname: Delta\n');
+    writeFileSync(
+      join(root, 'factories', 'delta', 'repos', 'api.yaml'),
+      'repoId: api\nremote: git@github.com:o/api.git\nchecks:\n  server: { cwd: s, build: b, test: t }\n  client: { cwd: c, install: i, typecheck: tc, lint: l, test: t }\n  e2e: off\n',
+    );
+    const s = new FileStore(join(root, 'board.json'));
+    expect((await s.listFactoryDefs()).map((d) => d.factoryId)).toEqual(['delta']);
+    expect((await s.listFactoryRepos('delta')).map((r) => r.repoId)).toEqual(['api']);
+    const [def] = await s.listFactoryDefs();
+    await s.saveFactoryDef(def!, { ...def!, name: 'Delta 2' });
+    expect((await new FileStore(join(root, 'board.json')).listFactoryDefs())[0]).toMatchObject({ name: 'Delta 2', version: 2 });
+  });
+
+  test('an old file without factories loads as factory blocks', async () => {
+    const root = dir();
+    const task = { taskId: 'T-1', title: 't', description: '', repo: 'data', baseBranch: 'dev', status: 'inbox', stage: null, branch: null, prUrl: null,
+      attempt: 0, blockedReason: null, question: null, answer: null, gateOverrides: {}, claimBy: null, claimUntil: null, costUsd: 0, version: 1 };
+    const event = { taskId: 'T-1', actor: 'you', action: 'create', field: null, from: null, to: 'inbox', reason: '', at: 't' };
+    const legacy = { tasks: [task], docs: [], approvals: [], runs: [], events: [event],
+      settings: { global: { ...DEFAULT_SETTINGS, paused: true }, repos: { data: { maxParallel: 1 } } } };
+    writeFileSync(join(root, 'board.json'), JSON.stringify(legacy));
+    const s = new FileStore(join(root, 'board.json'));
+    expect((await s.listTasks())[0]).toMatchObject({ taskId: 'T-1', factoryId: 'blocks' });
+    expect((await s.listEvents('T-1'))[0]).toMatchObject({ factoryId: 'blocks' });
+    expect(await s.getSettings()).toEqual({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: { data: { maxParallel: 1 } } } } });
+    await s.updateSettingsScope('blocks/data', { maxParallel: 1 }, { maxParallel: 2 });
+    expect((await new FileStore(join(root, 'board.json')).getSettings()).factories.blocks!.repos.data).toEqual({ maxParallel: 2 });
   });
 });

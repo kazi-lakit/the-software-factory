@@ -187,7 +187,7 @@ describe("GatePanel", () => {
   describe("pr gate", () => {
     const PR_URL = "https://github.com/SELISEdigitalplatforms/blocks-data/pull/7";
     async function atPrGate(baseBranch: string): Promise<{ docs: Doc[]; task: Task }> {
-      const created = await fakeBoard().owner.createTask({ baseBranch, description: "", repo: "data", title: "Ship me" });
+      const created = await fakeBoard().owner.createTask({ factoryId: "blocks", baseBranch, description: "", repo: "data", title: "Ship me" });
       const t = await fakeBoard().core.updateTask(created.taskId, created.version, { prUrl: PR_URL, stage: "ship", status: "pr_open" });
       await fakeBoard().core.addDoc(t.taskId, "review", "# Review\nAll good.", "reviewer");
       return { docs: await fakeBoard().owner.listDocs(t.taskId, "review"), task: t };

@@ -69,7 +69,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       const { engine, store } = await open(cmd);
       const ticket = await engine.next(task);
       // A paused factory also returns no ticket: say so, so a loop's owner is not left guessing.
-      if (!ticket) return io.out((await store.getSettings()).global.paused ? 'paused' : 'nothing to do');
+      if (!ticket) return io.out((await store.getSettings()).factories.blocks?.factory.paused /* plan 6 Task 4 replaces this */ ? 'paused' : 'nothing to do');
       if (o.json) return printJson(ticket);
       io.out(`${ticket.taskId} ${ticket.step} (worktree ${ticket.worktree})`);
     });
@@ -159,7 +159,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       }
       const { store } = await open(cmd);
       const t = await owner.createTaskAsCore(store, () => new Date(), {
-        title: o.title, description, repo, ...(o.base ? { baseBranch: o.base } : {}), ready: o.ready === true,
+        factoryId: 'blocks', /* plan 6 Task 4 adds --factory */ title: o.title, description, repo, ...(o.base ? { baseBranch: o.base } : {}), ready: o.ready === true,
       });
       if (o.json) return printJson(t);
       io.out(`${t.taskId} created in ${t.status}`);
@@ -182,7 +182,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       const repo = repoId('--repo', o.repo);
       const store = await openDev(cmd);
       const t = await owner.createTask(store, now, {
-        title: o.title, description: o.description, repo, ...(o.base ? { baseBranch: o.base } : {}),
+        factoryId: 'blocks', /* plan 6 Task 4 adds --factory */ title: o.title, description: o.description, repo, ...(o.base ? { baseBranch: o.base } : {}),
       });
       io.out(t.taskId);
     });

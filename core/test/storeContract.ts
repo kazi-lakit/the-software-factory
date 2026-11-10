@@ -1,10 +1,17 @@
 import { describe, expect, test } from 'vitest';
-import { NotFoundError, VersionConflictError, type BoardStore } from '../src/store.js';
+import { NotFoundError, OwnerOnlyError, VersionConflictError, type BoardStore, type StoreIdentity } from '../src/store.js';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
+import { defFixture, repoFixture } from './factoryFixtures.js';
 
-/** Behaviour every BoardStore must share. Assertions follow the interface, not one store's internals. */
-export function runStoreContract(name: string, make: () => BoardStore | Promise<BoardStore>): void {
-  const mk = (s: BoardStore, title = 'a') => s.createTask({ title, description: '', repo: 'data' });
+/**
+ * Behaviour every BoardStore must share. Assertions follow the interface, not one store's internals.
+ * `factories: false` skips the definition, health and multi-factory tests (BlocksStore until plan 6 Task 3).
+ * `make(identity)` builds a store for the owner or the core; with none, one that checks nothing.
+ */
+export function runStoreContract(
+  name: string, make: (identity?: StoreIdentity) => BoardStore | Promise<BoardStore>, opts: { factories?: boolean } = {},
+): void {
+  const mk = (s: BoardStore, title = 'a') => s.createTask({ factoryId: 'blocks', title, description: '', repo: 'data' });
 
   describe(`${name} (store contract)`, () => {
     test('createTask assigns T-1, T-2 with defaults', async () => {
@@ -18,15 +25,15 @@ export function runStoreContract(name: string, make: () => BoardStore | Promise<
     });
     test('createTask with status ready inserts a ready task; the default is inbox', async () => {
       const s = await make();
-      const r = await s.createTask({ title: 'r', description: '', repo: 'data', status: 'ready' });
-      const i = await s.createTask({ title: 'i', description: '', repo: 'data', status: 'inbox' });
+      const r = await s.createTask({ factoryId: 'blocks', title: 'r', description: '', repo: 'data', status: 'ready' });
+      const i = await s.createTask({ factoryId: 'blocks', title: 'i', description: '', repo: 'data', status: 'inbox' });
       expect([r.status, i.status]).toEqual(['ready', 'inbox']);
       expect((await s.getTask(r.taskId)).status).toBe('ready');
     });
     test('createTask refuses a start status other than inbox or ready', async () => {
       const s = await make();
       for (const status of ['done', 'blocked', 'cancelled']) {
-        await expect(s.createTask({ title: 'x', description: '', repo: 'data', status } as never)).rejects.toThrow('a new task starts in inbox or ready');
+        await expect(s.createTask({ factoryId: 'blocks', title: 'x', description: '', repo: 'data', status } as never)).rejects.toThrow('a new task starts in inbox or ready');
       }
       expect(await s.listTasks()).toEqual([]);
     });
@@ -111,48 +118,51 @@ export function runStoreContract(name: string, make: () => BoardStore | Promise<
       expect(await s.listApprovals('T-1')).toEqual([first]);
     });
     test('empty store settings are defaults', async () => {
-      expect(await (await make()).getSettings()).toEqual({ global: DEFAULT_SETTINGS, repos: {} });
+      expect(await (await make()).getSettings()).toEqual({ factories: {} });
     });
     test('setSettings roundtrip', async () => {
       const s = await make();
-      const stored = { global: { ...DEFAULT_SETTINGS, paused: true }, repos: { data: { maxParallel: 1 } } };
+      const stored = { factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: { data: { maxParallel: 1 } } } } };
       await s.setSettings(stored);
       expect(await s.getSettings()).toEqual(stored);
-      const next = { global: { ...DEFAULT_SETTINGS, maxParallel: 4 }, repos: { os: { gates: { pr: false } } } };
+      const next = { factories: { blocks: { factory: { ...DEFAULT_SETTINGS, maxParallel: 4 }, repos: { os: { gates: { pr: false } } } } } };
       await s.setSettings(next);
       expect(await s.getSettings()).toEqual(next);
     });
     test('updateSettingsScope writes only its scope; null removes a repo scope', async () => {
       const s = await make();
-      await s.updateSettingsScope('data', undefined, { maxParallel: 1 });
-      await s.updateSettingsScope('os', undefined, { gates: { pr: false } });
-      expect(await s.getSettings()).toEqual({ global: DEFAULT_SETTINGS, repos: { data: { maxParallel: 1 }, os: { gates: { pr: false } } } });
-      await s.updateSettingsScope('global', DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, paused: true });
-      // `before` compares as canonical JSON: key order does not matter.
-      await s.updateSettingsScope('os', { gates: { pr: false } }, { gates: { pr: false }, paused: true });
-      await s.updateSettingsScope('data', { maxParallel: 1 }, null);
+      await s.updateSettingsScope('blocks/data', undefined, { maxParallel: 1 });
+      await s.updateSettingsScope('blocks/os', undefined, { gates: { pr: false } });
       expect(await s.getSettings()).toEqual({
-        global: { ...DEFAULT_SETTINGS, paused: true }, repos: { os: { gates: { pr: false }, paused: true } },
+        factories: { blocks: { factory: DEFAULT_SETTINGS, repos: { data: { maxParallel: 1 }, os: { gates: { pr: false } } } } },
+      });
+      await s.updateSettingsScope('blocks', DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, paused: true });
+      // `before` compares as canonical JSON: key order does not matter.
+      await s.updateSettingsScope('blocks/os', { gates: { pr: false } }, { gates: { pr: false }, paused: true });
+      await s.updateSettingsScope('blocks/data', { maxParallel: 1 }, null);
+      expect(await s.getSettings()).toEqual({
+        factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: { os: { gates: { pr: false }, paused: true } } } },
       });
       const reordered = { paused: true, gates: { spec: true, pr: true, plan: false }, maxCostPerTaskUsd: 5, maxTurnsPerStage: 60, maxParallel: 2 };
-      await s.updateSettingsScope('global', reordered, DEFAULT_SETTINGS);
-      expect((await s.getSettings()).global).toEqual(DEFAULT_SETTINGS);
+      await s.updateSettingsScope('blocks', reordered, DEFAULT_SETTINGS);
+      expect((await s.getSettings()).factories.blocks!.factory).toEqual(DEFAULT_SETTINGS);
     });
     test('updateSettingsScope refuses a lost update and keeps the first write', async () => {
       const s = await make();
-      const a = await s.getSettings();
-      const b = await s.getSettings();
-      await s.updateSettingsScope('data', a.repos.data, { maxParallel: 2 });
-      await expect(s.updateSettingsScope('data', b.repos.data, { maxParallel: 3 })).rejects.toBeInstanceOf(VersionConflictError);
-      await s.updateSettingsScope('global', a.global, { ...a.global, maxParallel: 4 });
-      await expect(s.updateSettingsScope('global', b.global, { ...b.global, paused: true })).rejects.toBeInstanceOf(VersionConflictError);
+      await s.updateSettingsScope('blocks', DEFAULT_SETTINGS, DEFAULT_SETTINGS);
+      const a = (await s.getSettings()).factories.blocks!;
+      const b = (await s.getSettings()).factories.blocks!;
+      await s.updateSettingsScope('blocks/data', a.repos.data, { maxParallel: 2 });
+      await expect(s.updateSettingsScope('blocks/data', b.repos.data, { maxParallel: 3 })).rejects.toBeInstanceOf(VersionConflictError);
+      await s.updateSettingsScope('blocks', a.factory, { ...a.factory, maxParallel: 4 });
+      await expect(s.updateSettingsScope('blocks', b.factory, { ...b.factory, paused: true })).rejects.toBeInstanceOf(VersionConflictError);
       // Another scope read in the same old snapshot is not a conflict.
-      await s.updateSettingsScope('os', b.repos.os, { paused: true });
+      await s.updateSettingsScope('blocks/os', b.repos.os, { paused: true });
       expect(await s.getSettings()).toEqual({
-        global: { ...DEFAULT_SETTINGS, maxParallel: 4 }, repos: { data: { maxParallel: 2 }, os: { paused: true } },
+        factories: { blocks: { factory: { ...DEFAULT_SETTINGS, maxParallel: 4 }, repos: { data: { maxParallel: 2 }, os: { paused: true } } } },
       });
-      await expect(s.updateSettingsScope('data', undefined, null)).rejects.toBeInstanceOf(VersionConflictError);
-      expect((await s.getSettings()).repos.data).toEqual({ maxParallel: 2 });
+      await expect(s.updateSettingsScope('blocks/data', undefined, null)).rejects.toBeInstanceOf(VersionConflictError);
+      expect((await s.getSettings()).factories.blocks!.repos.data).toEqual({ maxParallel: 2 });
     });
     // Run ids are store-specific (MemoryStore: R-<n>; BlocksStore: R-<uuid>), so only the returned id is used.
     test('runs: start, open, finish', async () => {
@@ -186,10 +196,80 @@ export function runStoreContract(name: string, make: () => BoardStore | Promise<
     });
     test('events append and filter', async () => {
       const s = await make();
-      const e = { actor: 'x', action: 'set' as const, field: 'stage', from: null, to: 'a', reason: '', at: 't' };
+      const e = { factoryId: 'blocks', actor: 'x', action: 'set' as const, field: 'stage', from: null, to: 'a', reason: '', at: 't' };
       await s.addEvents([{ taskId: 'T-1', ...e }, { taskId: 'T-2', ...e }]);
       expect(await s.listEvents()).toHaveLength(2);
       expect(await s.listEvents('T-2')).toEqual([{ taskId: 'T-2', ...e }]);
+    });
+    if (opts.factories === false) return;
+
+    describe('factories', () => {
+      const def = defFixture('delta');
+      const repo = repoFixture('delta', 'api');
+
+      test('an owner saves a def and lists it back; a stale before is a VersionConflictError', async () => {
+        const s = await make('owner');
+        const stored = await s.saveFactoryDef(null, def);
+        expect(stored).toEqual({ ...def, version: 1 });
+        expect(await s.listFactoryDefs()).toEqual([stored]);
+        const renamed = await s.saveFactoryDef(stored, { ...stored, name: 'Delta 2' });
+        expect(renamed).toMatchObject({ name: 'Delta 2', version: 2 });
+        await expect(s.saveFactoryDef(stored, { ...stored, name: 'Delta 3' })).rejects.toBeInstanceOf(VersionConflictError);
+        await expect(s.saveFactoryDef(null, def)).rejects.toBeInstanceOf(VersionConflictError);
+        expect(await s.listFactoryDefs()).toEqual([renamed]);
+      });
+      test('an owner saves a repo with the same compare-and-set; listFactoryRepos filters by factory', async () => {
+        const s = await make('owner');
+        const api = await s.saveFactoryRepo(null, repo);
+        const other = await s.saveFactoryRepo(null, repoFixture('mods', 'api'));
+        expect((await s.listFactoryRepos('delta')).map((r) => `${r.factoryId}/${r.repoId}`)).toEqual(['delta/api']);
+        expect(await s.listFactoryRepos()).toHaveLength(2);
+        expect(other.factoryId).toBe('mods');
+        const next = await s.saveFactoryRepo(api, { ...api, baseBranch: 'stg' });
+        expect(next).toMatchObject({ baseBranch: 'stg', version: 2 });
+        await expect(s.saveFactoryRepo(api, { ...api, baseBranch: 'x' })).rejects.toBeInstanceOf(VersionConflictError);
+      });
+      test('the core may not save a def or a repo', async () => {
+        const s = await make('core');
+        await expect(s.saveFactoryDef(null, def)).rejects.toBeInstanceOf(OwnerOnlyError);
+        await expect(s.saveFactoryRepo(null, repo)).rejects.toBeInstanceOf(OwnerOnlyError);
+        expect(await s.listFactoryDefs()).toEqual([]);
+      });
+      test('health is set by the core and listed; the owner may not set it', async () => {
+        const core = await make('core');
+        const h = { factoryId: 'delta', patPresent: true, checkedAt: '2026-11-10T00:00:00.000Z' };
+        await core.setFactoryHealth(h);
+        await core.setFactoryHealth({ ...h, patPresent: false });
+        expect(await core.listFactoryHealth()).toEqual([{ ...h, patPresent: false }]);
+        await expect((await make('owner')).setFactoryHealth(h)).rejects.toBeInstanceOf(OwnerOnlyError);
+      });
+      test('tasks in two factories with the same repo id keep their factoryId', async () => {
+        const s = await make();
+        const a = await s.createTask({ factoryId: 'delta', title: 'a', description: '', repo: 'api' });
+        const b = await s.createTask({ factoryId: 'mods', title: 'b', description: '', repo: 'api' });
+        expect((await s.listTasks()).map((t) => [t.taskId, t.factoryId, t.repo])).toEqual([['T-1', 'delta', 'api'], ['T-2', 'mods', 'api']]);
+        expect((await s.getTask(b.taskId)).factoryId).toBe('mods');
+        expect(a.factoryId).toBe('delta');
+      });
+      test('updateSettingsScope on a repo scope changes only that scope', async () => {
+        const s = await make();
+        await s.updateSettingsScope('delta/api', undefined, { maxParallel: 1 });
+        await s.updateSettingsScope('mods/api', undefined, { maxParallel: 3 });
+        expect(await s.getSettings()).toEqual({
+          factories: {
+            delta: { factory: DEFAULT_SETTINGS, repos: { api: { maxParallel: 1 } } },
+            mods: { factory: DEFAULT_SETTINGS, repos: { api: { maxParallel: 3 } } },
+          },
+        });
+        await s.updateSettingsScope('delta', DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, paused: true });
+        expect((await s.getSettings()).factories.mods!.factory).toEqual(DEFAULT_SETTINGS);
+      });
+      test('events keep their factoryId', async () => {
+        const s = await make();
+        const e = { taskId: '-', factoryId: 'delta', actor: 'you', action: 'set' as const, field: 'def.name', from: 'a', to: 'b', reason: '', at: 't' };
+        await s.addEvents([e]);
+        expect(await s.listEvents()).toEqual([e]);
+      });
     });
   });
 }

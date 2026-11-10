@@ -2,6 +2,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
+import { DEFAULT_SETTINGS } from '../src/defaults.js';
+import { seed } from './factoryFixtures.js';
 import type { Exec } from '../src/checks.js';
 import { run, type WireOptions } from '../src/cli.js';
 import { Engine } from '../src/engine.js';
@@ -33,7 +35,7 @@ const git: GitRepos = {
 };
 
 function setup() {
-  const store = new MemoryStore();
+  const store = new MemoryStore({ factories: seed() });
   const exec: Exec = async () => ({ code: 0, output: '' });
   const engine = new Engine({
     store, git, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,
@@ -51,7 +53,7 @@ function setup() {
 }
 
 const put = async (store: MemoryStore, patch: Partial<Task>) => {
-  const t = await store.createTask({ title: 'Add widget', description: 'd', repo: 'data' });
+  const t = await store.createTask({ factoryId: 'blocks', title: 'Add widget', description: 'd', repo: 'data' });
   return store.updateTask(t.taskId, t.version, patch);
 };
 
@@ -90,8 +92,7 @@ describe('factory cli', () => {
 
   test('next prints paused when the factory is paused', async () => {
     const { store, out, go } = setup();
-    const settings = await store.getSettings();
-    await store.setSettings({ ...settings, global: { ...settings.global, paused: true } });
+    await store.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } });
     await put(store, { status: 'ready' });
     expect(await go('next', '--json')).toBe(0);
     expect(out).toEqual(['paused']);
@@ -350,7 +351,7 @@ describe('new', () => {
 
   test('works with a BlocksStore (core identity)', async () => {
     const storage = newFakeStorage();
-    const store = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core');
+    const store = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core', { factories: seed() });
     const out: string[] = [];
     const engine = new Engine({
       store, git, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,

@@ -1,19 +1,22 @@
 import { randomBytes } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DEFAULT_SETTINGS } from './defaults.js';
+import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
+import { loadFactoriesFromDir } from './factoriesFs.js';
 import type {
-  Approval, Doc, DocKind, FactoryEvent, Mode, RepoId, RepoSettings, Run, Settings, Step, Task,
+  Approval, Doc, DocKind, FactoryEvent, Mode, RepoSettings, Run, Settings, Step, Task,
 } from './types.js';
 
 export {
   canonicalJson, CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval, updateHeld,
   VersionConflictError,
 } from './boardStore.js';
-export type { BoardStore, NewApproval, StoredSettings } from './boardStore.js';
+export type { BoardStore, NewApproval, StoredSettings, StoreIdentity } from './boardStore.js';
 import {
   CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval, updateHeld,
-  VersionConflictError, assertNewStatus, canonicalJson, settingsConflict, type BoardStore, type NewApproval, type NewTask, type StoredSettings,
+  VersionConflictError, assertNewStatus, canonicalJson, parseScope, settingsConflict, type BoardStore, type NewApproval, type NewTask, type StoredSettings,
+  type StoreIdentity,
 } from './boardStore.js';
 
 interface State {
@@ -24,17 +27,54 @@ interface State {
   settings: StoredSettings | null;
   runs: Run[];
   events: FactoryEvent[];
+  factoryDefs: FactoryDef[];
+  factoryRepos: FactoryRepo[];
+  health: FactoryHealth[];
 }
 
-const emptyState = (): State => ({ tasks: [], docs: [], approvals: [], settings: null, runs: [], events: [] });
+const emptyState = (): State => ({
+  tasks: [], docs: [], approvals: [], settings: null, runs: [], events: [], factoryDefs: [], factoryRepos: [], health: [],
+});
 const clone = <T>(v: T): T => structuredClone(v);
 const num = (id: string) => Number(id.slice(id.indexOf('-') + 1)) || 0;
 const publicApproval = ({ approvalId: _id, ...a }: Approval & { approvalId?: string }): Approval => clone(a);
 const byStart = (a: Run, b: Run) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0);
+/** The row a compare-and-set save stores: version 1 for an insert, else the stored version + 1. */
+function versionedSave<T extends { version: number }>(what: string, current: T | undefined, before: T | null, after: T): T {
+  if (before === null) {
+    if (current) throw new VersionConflictError(what, 0, current.version, `${what} already exists; reload and save again`);
+    return { ...clone(after), version: 1 };
+  }
+  if (!current || current.version !== before.version) {
+    throw new VersionConflictError(what, before.version, current?.version ?? 0, `${what} changed since it was read; reload and save again`);
+  }
+  return { ...clone(after), version: current.version + 1 };
+}
 const nextId = (prefix: string, ids: string[]) => `${prefix}-${1 + Math.max(0, ...ids.map(num))}`;
+
+export interface MemoryStoreOptions {
+  /** Who calls: the owner-only and core-only methods refuse the other. Left out, nothing is checked (tests, dev). */
+  identity?: StoreIdentity;
+  /** Definitions the store starts with (tests, dev). A FileStore reads them from `<dir>/factories` instead. */
+  factories?: { defs: FactoryDef[]; repos: FactoryRepo[] };
+}
 
 export class MemoryStore implements BoardStore {
   protected state: State = emptyState();
+  protected readonly identity: StoreIdentity | undefined;
+
+  constructor(opts: MemoryStoreOptions = {}) {
+    this.identity = opts.identity;
+    if (opts.factories) this.state = { ...emptyState(), factoryDefs: clone(opts.factories.defs), factoryRepos: clone(opts.factories.repos) };
+  }
+
+  private ownerOnly(method: string): void {
+    if (this.identity === 'core') throw new OwnerOnlyError(`${method} is done on the Board, not by the factory core`);
+  }
+
+  private coreOnly(method: string): void {
+    if (this.identity === 'owner') throw new OwnerOnlyError(`${method} is done by the factory core, not on the Board`);
+  }
 
   /** Runs a read against the current state. */
   protected async read<T>(fn: () => T): Promise<T> {
@@ -65,6 +105,7 @@ export class MemoryStore implements BoardStore {
     return this.write(() => {
       const task: Task = {
         taskId: nextId('T', this.state.tasks.map((x) => x.taskId)),
+        factoryId: t.factoryId,
         title: t.title,
         description: t.description,
         repo: t.repo,
@@ -142,8 +183,53 @@ export class MemoryStore implements BoardStore {
     return this.read(() => this.state.approvals.filter((a) => a.taskId === taskId).map(publicApproval));
   }
 
+  listFactoryDefs() {
+    return this.read(() => clone(this.state.factoryDefs));
+  }
+
+  listFactoryRepos(factoryId?: string) {
+    return this.read(() => clone(this.state.factoryRepos.filter((r) => factoryId === undefined || r.factoryId === factoryId)));
+  }
+
+  async saveFactoryDef(before: FactoryDef | null, after: FactoryDef) {
+    this.ownerOnly('saveFactoryDef');
+    return this.write(() => {
+      const defs = this.state.factoryDefs;
+      const i = defs.findIndex((d) => d.factoryId === after.factoryId);
+      const stored = versionedSave(`factory ${after.factoryId}`, defs[i], before, after);
+      if (i < 0) defs.push(stored);
+      else defs[i] = stored;
+      return clone(stored);
+    });
+  }
+
+  async saveFactoryRepo(before: FactoryRepo | null, after: FactoryRepo) {
+    this.ownerOnly('saveFactoryRepo');
+    return this.write(() => {
+      const repos = this.state.factoryRepos;
+      const i = repos.findIndex((r) => r.factoryId === after.factoryId && r.repoId === after.repoId);
+      const stored = versionedSave(`repo ${after.factoryId}/${after.repoId}`, repos[i], before, after);
+      if (i < 0) repos.push(stored);
+      else repos[i] = stored;
+      return clone(stored);
+    });
+  }
+
+  listFactoryHealth() {
+    return this.read(() => clone(this.state.health));
+  }
+
+  async setFactoryHealth(h: FactoryHealth) {
+    this.coreOnly('setFactoryHealth');
+    return this.write(() => {
+      const i = this.state.health.findIndex((x) => x.factoryId === h.factoryId);
+      if (i < 0) this.state.health.push(clone(h));
+      else this.state.health[i] = clone(h);
+    });
+  }
+
   getSettings(): Promise<StoredSettings> {
-    return this.read(() => clone(this.state.settings ?? { global: DEFAULT_SETTINGS, repos: {} }));
+    return this.read(() => clone(this.state.settings ?? { factories: {} }));
   }
 
   setSettings(s: StoredSettings) {
@@ -152,15 +238,19 @@ export class MemoryStore implements BoardStore {
     });
   }
 
-  updateSettingsScope(scope: 'global' | RepoId, before: unknown, after: Settings | RepoSettings | null) {
-    if (scope === 'global' && after === null) return Promise.reject(new Error('global settings cannot be removed'));
+  async updateSettingsScope(scope: string, before: unknown, after: Settings | RepoSettings | null) {
+    this.ownerOnly('updateSettingsScope');
+    const { factoryId, repoId } = parseScope(scope);
+    if (repoId === undefined && after === null) throw new Error('factory settings cannot be removed');
     return this.write(() => {
-      const s = this.state.settings ?? { global: clone(DEFAULT_SETTINGS), repos: {} };
-      const current = scope === 'global' ? s.global : s.repos[scope];
+      const s: StoredSettings = this.state.settings ?? { factories: {} };
+      const entry = s.factories[factoryId];
+      const current = repoId === undefined ? (entry?.factory ?? DEFAULT_SETTINGS) : entry?.repos[repoId];
       if (canonicalJson(current) !== canonicalJson(before)) throw settingsConflict(scope);
-      if (scope === 'global') s.global = clone(after as Settings);
-      else if (after === null) delete s.repos[scope];
-      else s.repos[scope] = clone(after as RepoSettings);
+      const target = (s.factories[factoryId] ??= { factory: clone(DEFAULT_SETTINGS), repos: {} });
+      if (repoId === undefined) target.factory = clone(after as Settings);
+      else if (after === null) delete target.repos[repoId];
+      else target.repos[repoId] = clone(after as RepoSettings);
       this.state.settings = s;
     });
   }
@@ -214,9 +304,11 @@ export class MemoryStore implements BoardStore {
   }
 }
 
+/** Until `factory migrate` runs, what a store written before factories holds is the Blocks factory's. */
+const LEGACY_FACTORY = 'blocks';
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export interface FileStoreOptions {
+export interface FileStoreOptions extends Omit<MemoryStoreOptions, 'factories'> {
   /** How long a write waits for the lock before it gives up (default 5 s). */
   lockTimeoutMs?: number;
 }
@@ -233,7 +325,7 @@ export class FileStore extends MemoryStore {
   private readonly lockTimeoutMs: number;
 
   constructor(private readonly path: string, opts: FileStoreOptions = {}) {
-    super();
+    super(opts);
     this.lockPath = `${path}.lock`;
     this.lockTimeoutMs = opts.lockTimeoutMs ?? 5_000;
     this.reload();
@@ -258,7 +350,28 @@ export class FileStore extends MemoryStore {
   }
 
   private reload(): void {
-    this.state = existsSync(this.path) ? (JSON.parse(readFileSync(this.path, 'utf8')) as State) : emptyState();
+    const raw = existsSync(this.path) ? (JSON.parse(readFileSync(this.path, 'utf8')) as Record<string, unknown>) : {};
+    this.state = this.upgrade(raw);
+  }
+
+  /**
+   * A file written before factories: its tasks and events belong to factory `blocks`, and its `{ global, repos }`
+   * settings are that factory's. Definitions the file lacks are seeded from `<dir>/factories` (see loadFactoriesFromDir).
+   */
+  private upgrade(raw: Record<string, unknown>): State {
+    const state = { ...emptyState(), ...raw } as State;
+    state.tasks = state.tasks.map((t) => ({ ...t, factoryId: t.factoryId ?? LEGACY_FACTORY }));
+    state.events = state.events.map((e) => ({ ...e, factoryId: e.factoryId ?? LEGACY_FACTORY }));
+    const legacy = state.settings as unknown as { global?: Settings; repos?: Record<string, RepoSettings> } | null;
+    if (legacy && 'global' in legacy) {
+      state.settings = { factories: { [LEGACY_FACTORY]: { factory: legacy.global ?? clone(DEFAULT_SETTINGS), repos: legacy.repos ?? {} } } };
+    }
+    if (state.factoryDefs.length === 0 && state.factoryRepos.length === 0) {
+      const seeded = loadFactoriesFromDir(join(dirname(this.path), 'factories'));
+      state.factoryDefs = seeded.defs;
+      state.factoryRepos = seeded.repos;
+    }
+    return state;
   }
 
   private persist(): void {

@@ -6,6 +6,7 @@ import {
   type Gate, type RepoId, type RepoSettings, type RepoSettingsPatch, type Settings, type StoredSettings
 } from "@factory/core";
 import { boardStore } from "../../lib/board";
+import { BLOCKS_FACTORY, blocksSettings } from "../../lib/blocksSettings";
 import { REPO_IDS } from "../../lib/repoIds";
 import { HISTORY_KEY } from "../history/useHistory";
 import { describeWriteError, now, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
@@ -98,6 +99,7 @@ export function SettingsView() {
     );
   }
   const stored = settings.data;
+  const current = blocksSettings(stored);
   const reload = async () => { await settings.refetch(); };
 
   return (
@@ -110,8 +112,8 @@ export function SettingsView() {
           <button type="button" className="sf-button" onClick={() => void reload()}>Retry</button>
         </div>
       ) : null}
-      <PauseControl paused={stored.global.paused} onNotice={setNotice} onReload={reload} />
-      <GlobalForm global={stored.global} noteId={noteId} onNotice={setNotice} onReload={reload} />
+      <PauseControl paused={current.factory.paused} onNotice={setNotice} onReload={reload} />
+      <GlobalForm global={current.factory} noteId={noteId} onNotice={setNotice} onReload={reload} />
       <RepoTable stored={stored} noteId={noteId} onNotice={setNotice} onReload={reload} />
     </div>
   );
@@ -131,8 +133,8 @@ function PauseControl({ onNotice, onReload, paused }: ScopeProps & { paused: boo
     setBusy(true);
     setProblem(undefined);
     try {
-      const stored = await saveSettings(boardStore, now, "global", { paused: !paused });
-      await saved(stored, stored.global.paused ? "Factory paused." : "Factory running.");
+      const stored = await saveSettings(boardStore, now, BLOCKS_FACTORY, { paused: !paused });
+      await saved(stored, blocksSettings(stored).factory.paused ? "Factory paused." : "Factory running.");
     } catch (error) {
       setProblem(describeSettingsError(error));
     } finally {
@@ -194,8 +196,8 @@ function GlobalForm({ global, noteId, onNotice, onReload }: ScopeProps & { globa
     setBusy(true);
     setProblem(undefined);
     try {
-      const stored = await saveSettings(boardStore, now, "global", patch);
-      draft.settle(globalDraft(stored.global));
+      const stored = await saveSettings(boardStore, now, BLOCKS_FACTORY, patch);
+      draft.settle(globalDraft(blocksSettings(stored).factory));
       setDone(true);
       await saved(stored, "Saved global settings.");
     } catch (error) {
@@ -286,7 +288,7 @@ function RepoTable({ noteId, onNotice, onReload, stored }: ScopeProps & { noteId
           </thead>
           <tbody>
             {REPO_IDS.map((repo) => (
-              <RepoRow key={repo} repo={repo} global={stored.global} stored={stored.repos[repo]} noteId={noteId} onNotice={onNotice} onReload={onReload} />
+              <RepoRow key={repo} repo={repo} global={blocksSettings(stored).factory} stored={blocksSettings(stored).repos[repo]} noteId={noteId} onNotice={onNotice} onReload={onReload} />
             ))}
           </tbody>
         </table>
@@ -323,8 +325,8 @@ function RepoRow({ global, noteId, onNotice, onReload, repo, stored }: ScopeProp
     setBusy(true);
     setProblem(undefined);
     try {
-      const next = await saveSettings(boardStore, now, repo, patch);
-      draft.settle(repoDraft(next.repos[repo]));
+      const next = await saveSettings(boardStore, now, `${BLOCKS_FACTORY}/${repo}`, patch);
+      draft.settle(repoDraft(blocksSettings(next).repos[repo]));
       setDone(true);
       await saved(next, `Saved ${repo} settings.`);
     } catch (error) {

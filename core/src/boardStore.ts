@@ -1,3 +1,4 @@
+import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
 import type { Approval, Doc, DocKind, FactoryEvent, Mode, RepoId, RepoSettings, Run, Settings, Step, Task } from './types.js';
 
 // The store contract, its errors and updateHeld. Pure (no Node API), so the browser entry can import it; store.ts re-exports it.
@@ -77,13 +78,22 @@ export const canonicalJson = (v: unknown): string =>
 export const settingsConflict = (scope: string): VersionConflictError =>
   new VersionConflictError(`settings ${scope}`, Number.NaN, Number.NaN, `settings ${scope} changed since they were read; reload and save again`);
 
+/** Settings per factory: the factory's own scope and one scope per repo. A factory without stored settings is absent. */
 export interface StoredSettings {
-  global: Settings;
-  repos: Partial<Record<RepoId, RepoSettings>>;
+  factories: Record<string, { factory: Settings; repos: Record<string, RepoSettings> }>;
+}
+
+/** Who calls a store that checks it: the owner on the Board, or the factory core. A store made without one checks nothing. */
+export type StoreIdentity = 'owner' | 'core';
+
+/** The settings scope of a factory (`<f>`) or of one of its repos (`<f>/<r>`). */
+export function parseScope(scope: string): { factoryId: string; repoId?: string } {
+  const slash = scope.indexOf('/');
+  return slash < 0 ? { factoryId: scope } : { factoryId: scope.slice(0, slash), repoId: scope.slice(slash + 1) };
 }
 
 /** `status` is where the task starts (default inbox); the owner's Board and `factory new` choose it. */
-export interface NewTask { title: string; description: string; repo: RepoId; baseBranch?: string; status?: 'inbox' | 'ready' }
+export interface NewTask { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string; status?: 'inbox' | 'ready' }
 
 /** A task is created only in inbox or ready; the type is no defence against a JS caller. */
 export function assertNewStatus(status: unknown): void {
@@ -104,15 +114,29 @@ export interface BoardStore {
   /** A caller-supplied `approvalId` makes a retry safe: the same id returns the approval already stored. */
   addApproval(a: NewApproval): Promise<Approval>;
   listApprovals(taskId: string): Promise<Approval[]>;
+  /** The factory definitions. */
+  listFactoryDefs(): Promise<FactoryDef[]>;
+  /** One factory's repos, or every factory's when `factoryId` is left out. */
+  listFactoryRepos(factoryId?: string): Promise<FactoryRepo[]>;
+  /**
+   * Owner only. Compare-and-set on `version`: `before` null inserts (a VersionConflictError if the factory exists),
+   * otherwise `before.version` must be the stored one. Returns the stored definition with the next version.
+   */
+  saveFactoryDef(before: FactoryDef | null, after: FactoryDef): Promise<FactoryDef>;
+  /** Owner only. As saveFactoryDef, keyed by factory and repo id. */
+  saveFactoryRepo(before: FactoryRepo | null, after: FactoryRepo): Promise<FactoryRepo>;
+  listFactoryHealth(): Promise<FactoryHealth[]>;
+  /** Core only: the owner reads health, the core writes it. */
+  setFactoryHealth(h: FactoryHealth): Promise<void>;
   getSettings(): Promise<StoredSettings>;
   /** Dev use only (writes every scope, no conflict check). The Board uses updateSettingsScope. */
   setSettings(s: StoredSettings): Promise<void>;
   /**
-   * Writes one scope only, if its stored value (as getSettings gives it: global merged over the defaults, a missing
-   * repo scope undefined) still equals `before` as canonical JSON; otherwise throws VersionConflictError.
-   * `after` null removes a repo scope.
+   * Writes one scope only (`<factoryId>` or `<factoryId>/<repoId>`), if its stored value (a factory scope merged over
+   * the defaults, a missing repo scope undefined) still equals `before` as canonical JSON; otherwise throws
+   * VersionConflictError. `after` null removes a repo scope.
    */
-  updateSettingsScope(scope: 'global' | RepoId, before: unknown, after: Settings | RepoSettings | null): Promise<void>;
+  updateSettingsScope(scope: string, before: unknown, after: Settings | RepoSettings | null): Promise<void>;
   startRun(r: { taskId: string; step: Step; mode: Mode; agent: string }): Promise<Run>;
   openRun(taskId: string, step: Step): Promise<Run | undefined>;
   finishRun(runId: string, p: { result: string; turns: number | null; costUsd: number | null }): Promise<void>;

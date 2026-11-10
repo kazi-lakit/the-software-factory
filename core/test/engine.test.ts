@@ -82,7 +82,7 @@ function setup(
 
 /** Creates a task and puts it straight into the given state. */
 async function put(store: BoardStore, patch: Partial<Task>, base = 'dev', repo: RepoId = 'data'): Promise<Task> {
-  const t = await store.createTask({ title: 'Add widget', description: 'd', repo, baseBranch: base });
+  const t = await store.createTask({ factoryId: 'blocks', title: 'Add widget', description: 'd', repo, baseBranch: base });
   return Object.keys(patch).length ? store.updateTask(t.taskId, t.version, patch) : t;
 }
 
@@ -100,7 +100,7 @@ afterEach(() => {
 describe('next', () => {
   test('paused: returns null and claims nothing', async () => {
     const { store, engine } = setup();
-    await store.setSettings({ global: { ...DEFAULT_SETTINGS, paused: true }, repos: {} });
+    await store.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } });
     await put(store, { status: 'ready' });
     expect(await engine.next()).toBeNull();
     expect((await store.getTask('T-1')).claimBy).toBeNull();
@@ -108,7 +108,7 @@ describe('next', () => {
 
   test('skips tasks in a paused repo but still claims in other repos', async () => {
     const { store, engine } = setup();
-    await store.setSettings({ global: DEFAULT_SETTINGS, repos: { data: { paused: true } } });
+    await store.setSettings({ factories: { blocks: { factory: DEFAULT_SETTINGS, repos: { data: { paused: true } } } } });
     await put(store, { status: 'ready' });
     await put(store, { status: 'ready' }, 'dev', 'iam');
     expect(await engine.next()).toMatchObject({ taskId: 'T-2', step: 'spec' });
@@ -627,7 +627,7 @@ describe('check', () => {
 describe('ship', () => {
   async function atShip(base: string, prGate: boolean) {
     const s = setup();
-    await s.store.setSettings({ global: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: prGate } }, repos: {} });
+    await s.store.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: prGate } }, repos: {} } } });
     await put(s.store, { status: 'review', stage: 'ship', branch: 'factory/T-1-add-widget' }, base);
     await s.store.addDoc('T-1', 'spec', 'S'.repeat(5000), 'a');
     await s.engine.next();
@@ -719,7 +719,7 @@ describe('ship', () => {
 
   test('a reused PR into dev is not merged after the task base changed to feature/x; the task blocks', async () => {
     const { store, engine, github } = setup();
-    await store.setSettings({ global: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: false } }, repos: {} });
+    await store.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: false } }, repos: {} } } });
     const pr = await github.openPr({ remote: REMOTE, head: 'factory/T-1-x', base: 'dev', title: 't', body: 'b' });
     await put(store, { status: 'review', stage: 'ship', branch: 'factory/T-1-x', prUrl: pr.url }, 'feature/x');
     await engine.next();
@@ -731,7 +731,7 @@ describe('ship', () => {
 
   test('a PR into another unprotected base is not merged either', async () => {
     const { store, engine, github } = setup();
-    await store.setSettings({ global: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: false } }, repos: {} });
+    await store.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: false } }, repos: {} } } });
     const pr = await github.openPr({ remote: REMOTE, head: 'factory/T-1-x', base: 'feature/y', title: 't', body: 'b' });
     await put(store, { status: 'review', stage: 'ship', branch: 'factory/T-1-x', prUrl: pr.url }, 'feature/x');
     await engine.next();

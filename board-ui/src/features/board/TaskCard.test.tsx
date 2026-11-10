@@ -6,7 +6,7 @@ import { TaskCard } from "./TaskCard";
 function task(patch: Partial<Task> = {}): Task {
   return {
     answer: null, attempt: 0, baseBranch: "dev", blockedReason: null, branch: null, claimBy: null, claimUntil: null, costUsd: 0,
-    description: "", gateOverrides: {}, prUrl: null, question: null, repo: "data", stage: null, status: "inbox",
+    description: "", factoryId: "blocks", gateOverrides: {}, prUrl: null, question: null, repo: "data", stage: null, status: "inbox",
     taskId: "T-7", title: "Add a filter", version: 1, ...patch
   };
 }

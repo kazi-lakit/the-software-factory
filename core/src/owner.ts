@@ -1,10 +1,11 @@
 import {
-  canonicalJson as canon, ForbiddenError, OwnerOnlyError, updateHeld, VersionConflictError, type BoardStore, type StoredSettings,
+  canonicalJson as canon, ForbiddenError, OwnerOnlyError, parseScope, updateHeld, VersionConflictError, type BoardStore, type StoredSettings,
 } from './boardStore.js';
 import { GATE_DOC } from './gates.js';
 import { diffEvents } from './history.js';
 import { PROTECTED_BRANCHES } from './branches.js';
-import { isValidId } from './factories.js';
+import { DEFAULT_SETTINGS } from './defaults.js';
+import { isValidId, validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from './factories.js';
 import { assertMove } from './status.js';
 import {
   type Approval, type DocKind, type FactoryEvent, type Gate, type RepoId, type RepoSettings, type Settings, type Status, type Task,
@@ -38,7 +39,8 @@ export const GATE_STATUS: Readonly<Record<Gate, Status>> = { spec: 'spec_review'
 export const EDITABLE_STATUSES: readonly Status[] = ['inbox', 'ready'];
 const EDITABLE_FIELDS = ['title', 'description', 'repo', 'baseBranch', 'gateOverrides'] as const;
 export type TaskEdit = Partial<Pick<Task, (typeof EDITABLE_FIELDS)[number]>>;
-export type SettingsScope = 'global' | RepoId;
+/** `<factoryId>` or `<factoryId>/<repoId>`. */
+export type SettingsScope = string;
 const SETTING_KEYS = ['maxParallel', 'maxTurnsPerStage', 'maxCostPerTaskUsd', 'paused', 'gates'] as const;
 /** Inclusive ranges; maxParallel and maxTurnsPerStage are whole numbers. */
 export const SETTING_RANGES = {
@@ -60,7 +62,7 @@ const defined = <T extends object>(o: T): Partial<T> =>
 const randomUUID = (): string => globalThis.crypto.randomUUID();
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-/** `inherit`: a gate may be null (a repo scope going back to the global switch). */
+/** `inherit`: a gate may be null (a repo scope going back to the factory's switch). */
 function checkGates(v: unknown, what: string, inherit = false): void {
   if (!isObject(v)) invalid(`${what} must be an object of gate switches`);
   for (const [gate, on] of Object.entries(v as object)) {
@@ -99,30 +101,35 @@ async function ownerUpdate(store: BoardStore, now: () => Date, task: Task, patch
 function ownerFieldEvents(before: Task, after: Task, reason: string, at: string): FactoryEvent[] {
   const text = (v: unknown) => (typeof v === 'string' ? v : canon(v));
   return EDITABLE_FIELDS.filter((f) => canon(before[f]) !== canon(after[f])).map((field) => ({
-    taskId: after.taskId, actor: OWNER_ACTOR, action: 'set' as const, field, from: text(before[field]), to: text(after[field]), reason, at,
+    taskId: after.taskId, factoryId: after.factoryId, actor: OWNER_ACTOR, action: 'set' as const, field, from: text(before[field]), to: text(after[field]), reason, at,
   }));
 }
 
 /** The shared validation and insert-then-event of both creators; `actor` and `reason` name who made the task. */
 async function insertTask(
-  store: BoardStore, now: () => Date, input: { title: string; description: string; repo: RepoId; baseBranch?: string; status?: 'inbox' | 'ready' },
+  store: BoardStore, now: () => Date, input: { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string; status?: 'inbox' | 'ready' },
   actor: string, reason: string,
 ): Promise<Task> {
+  if (!isValidId(input.factoryId)) invalid(`factoryId must be a factory id (${REPO_ID_RULE})`);
   if (!nonBlank(input.title)) invalid('title must not be blank');
   if (typeof input.description !== 'string') invalid('description must be text');
   if (!isRepoId(input.repo)) invalid(`repo must be a repo id (${REPO_ID_RULE})`);
   if (input.baseBranch !== undefined && !nonBlank(input.baseBranch)) invalid('base branch must not be blank');
+  if (!(await store.listFactoryDefs()).some((d) => d.factoryId === input.factoryId)) invalid(`factory ${input.factoryId} does not exist`);
+  if (!(await store.listFactoryRepos(input.factoryId)).some((r) => r.repoId === input.repo)) {
+    invalid(`repo ${input.repo} is not in factory ${input.factoryId}`);
+  }
   const at = now().toISOString();
   const task = await store.createTask({
-    title: input.title.trim(), description: input.description, repo: input.repo,
+    factoryId: input.factoryId, title: input.title.trim(), description: input.description, repo: input.repo,
     ...(input.baseBranch !== undefined ? { baseBranch: input.baseBranch } : {}), ...(input.status !== undefined ? { status: input.status } : {}),
   });
-  await writeEvents(store, [{ taskId: task.taskId, actor, action: 'create', field: null, from: null, to: task.status, reason, at }]);
+  await writeEvents(store, [{ taskId: task.taskId, factoryId: task.factoryId, actor, action: 'create', field: null, from: null, to: task.status, reason, at }]);
   return task;
 }
 
 export async function createTask(
-  store: BoardStore, now: () => Date, input: { title: string; description: string; repo: RepoId; baseBranch?: string },
+  store: BoardStore, now: () => Date, input: { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string },
 ): Promise<Task> {
   return insertTask(store, now, input, OWNER_ACTOR, 'created');
 }
@@ -136,7 +143,7 @@ const MAIN = PROTECTED_BRANCHES[2];
  * the owner-only fields stay the owner's afterwards (the Blocks column rule). The base is never main.
  */
 export async function createTaskAsCore(
-  store: BoardStore, now: () => Date, input: { title: string; description: string; repo: RepoId; baseBranch?: string; ready?: boolean },
+  store: BoardStore, now: () => Date, input: { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string; ready?: boolean },
 ): Promise<Task> {
   if (typeof input.baseBranch === 'string' && normalizeRef(input.baseBranch) === MAIN) invalid('the factory never targets main');
   const { ready, baseBranch, ...rest } = input;
@@ -194,7 +201,7 @@ export async function decideGate(
   if (doc.version !== seenDocVersion) throw new StaleDocError(taskId, kind, seenDocVersion, doc.version);
   const reason = comment.trim() || (decision === 'approve' ? 'approved' : 'changes requested');
   const events: FactoryEvent[] = [{
-    taskId, actor: OWNER_ACTOR, action: 'set', field: 'approval', from: null, to: `${gate}:${decision}@v${doc.version}`, reason, at: now().toISOString(),
+    taskId, factoryId: task.factoryId, actor: OWNER_ACTOR, action: 'set', field: 'approval', from: null, to: `${gate}:${decision}@v${doc.version}`, reason, at: now().toISOString(),
   }];
   const approval = await store.addApproval({ approvalId: approvalId ?? randomUUID(), taskId, gate, docVersion: doc.version, decision, comment });
   await writeEvents(store, events);
@@ -225,33 +232,37 @@ export async function editTask(store: BoardStore, now: () => Date, taskId: strin
   return ownerUpdate(store, now, task, clean, 'edited');
 }
 
-/** A repo scope's patch: null (for a key, or for one gate) means inherit the global value. */
+/** A repo scope's patch: null (for a key, or for one gate) means inherit the factory's value. */
 export type RepoSettingsPatch = { [K in Exclude<keyof Settings, 'gates'>]?: Settings[K] | null } & {
   gates?: Partial<Record<Gate, boolean | null>> | null;
 };
 
-/** The event text for a repo key that went back to the global value. */
+/** The event text for a repo key that went back to the factory's value. */
 export const INHERIT = 'inherit';
 
 /**
- * Merges `patch` over the global settings or over one repo's overrides and writes one event per changed key.
- * A key left out (or undefined) is kept. In a repo scope, null removes the key (or the gate) so the global value
+ * Merges `patch` over a factory's settings or over one of its repos' overrides and writes one event per changed key.
+ * A key left out (or undefined) is kept. In a repo scope, null removes the key (or the gate) so the factory's value
  * applies again; a gates object left empty is dropped. Returns the stored settings.
  */
 export async function saveSettings(
   store: BoardStore, now: () => Date, scope: SettingsScope, patch: RepoSettingsPatch | RepoSettings | Settings,
 ): Promise<StoredSettings> {
-  if (scope !== 'global' && !isRepoId(scope)) invalid(`scope must be global or a repo id (${REPO_ID_RULE})`);
+  const { factoryId, repoId } = parseScope(String(scope));
+  if (!isValidId(factoryId) || (repoId !== undefined && !isValidId(repoId))) {
+    invalid(`scope must be a factory id or <factory id>/<repo id> (${REPO_ID_RULE})`);
+  }
+  const isFactory = repoId === undefined;
   if (!isObject(patch)) invalid('settings must be an object');
   for (const [key, value] of Object.entries(patch)) {
     if (!(SETTING_KEYS as readonly string[]).includes(key)) invalid(`unknown setting ${key}`);
     if (value === undefined) continue;
     if (value === null) {
-      if (scope === 'global') invalid(`${key} cannot inherit: global settings have no parent`);
+      if (isFactory) invalid(`${key} cannot inherit: factory settings have no parent`);
       continue;
     }
     if (key === 'paused' && typeof value !== 'boolean') invalid('paused must be true or false');
-    if (key === 'gates') checkGates(value, 'gates', scope !== 'global');
+    if (key === 'gates') checkGates(value, 'gates', !isFactory);
     if (key in SETTING_RANGES) {
       const r = SETTING_RANGES[key as keyof typeof SETTING_RANGES];
       const ok = typeof value === 'number' && Number.isFinite(value) && value >= r.min && value <= r.max && (!r.integer || Number.isInteger(value));
@@ -259,7 +270,8 @@ export async function saveSettings(
     }
   }
   const stored = await store.getSettings();
-  const read = scope === 'global' ? stored.global : stored.repos[scope];
+  const entry = stored.factories[factoryId];
+  const read = isFactory ? (entry?.factory ?? DEFAULT_SETTINGS) : entry?.repos[repoId];
   const current: RepoSettings = read ?? {};
   const next = mergeSettings(current, patch as RepoSettingsPatch);
   const changed = SETTING_KEYS.filter((k) => canon(current[k]) !== canon(next[k]));
@@ -267,11 +279,13 @@ export async function saveSettings(
   const at = now().toISOString();
   const json = (v: unknown) => (v === undefined ? null : JSON.stringify(v));
   const events: FactoryEvent[] = changed.map((k) => ({
-    taskId: '-', actor: OWNER_ACTOR, action: 'set', field: `settings.${scope}.${k}`,
+    taskId: '-', factoryId, actor: OWNER_ACTOR, action: 'set', field: `settings.${scope}.${k}`,
     from: json(current[k]), to: next[k] === undefined ? INHERIT : json(next[k]), reason: 'settings saved', at,
   }));
-  const updated: StoredSettings =
-    scope === 'global' ? { global: next as Settings, repos: stored.repos } : { global: stored.global, repos: { ...stored.repos, [scope]: next } };
+  const base = entry ?? { factory: DEFAULT_SETTINGS, repos: {} };
+  const updated: StoredSettings = {
+    factories: { ...stored.factories, [factoryId]: isFactory ? { ...base, factory: next as Settings } : { ...base, repos: { ...base.repos, [repoId]: next } } },
+  };
   // Only this scope, and only if it is still what was read: a concurrent save is a VersionConflictError, not lost.
   await store.updateSettingsScope(scope, read, next);
   await writeEvents(store, events);
@@ -297,4 +311,46 @@ function mergeSettings(current: RepoSettings, patch: RepoSettingsPatch): RepoSet
     else delete next.gates;
   }
   return next as RepoSettings;
+}
+
+const DEF_FIELDS = ['name', 'protectedBranches', 'gitName', 'gitEmail', 'docsPath', 'patAccount', 'active'] as const;
+const REPO_FIELDS = ['remote', 'baseBranch', 'checks'] as const;
+const eventText = (v: unknown): string => (typeof v === 'string' ? v : canon(v));
+
+/** One event per field whose value differs (every field on an insert, from null). */
+function fieldEvents<T extends object>(
+  fields: readonly (keyof T & string)[], before: T | null, after: T, factoryId: string, name: (f: string) => string, reason: string, at: string,
+): FactoryEvent[] {
+  return fields
+    .filter((f) => before === null || canon(before[f]) !== canon(after[f]))
+    .map((f) => ({
+      taskId: '-', factoryId, actor: OWNER_ACTOR, action: 'set' as const, field: name(f),
+      from: before === null ? null : eventText(before[f]), to: eventText(after[f]), reason, at,
+    }));
+}
+
+/**
+ * Saves a factory definition (`before` null inserts) after validating it; `main` is added to the protected branches if
+ * missing. Writes one `def.<field>` event per changed field, compared with the validated value. Returns the stored one.
+ */
+export async function saveFactory(store: BoardStore, now: () => Date, before: FactoryDef | null, after: FactoryDef): Promise<FactoryDef> {
+  const checked = validateFactoryDef(after);
+  if (!checked.ok) return invalid(checked.error);
+  if (before !== null && before.factoryId !== after.factoryId) invalid('factoryId cannot be changed');
+  const stored = await store.saveFactoryDef(before, checked.value);
+  await writeEvents(store, fieldEvents(DEF_FIELDS, before, stored, stored.factoryId, (f) => `def.${f}`, 'factory saved', now().toISOString()));
+  return stored;
+}
+
+/** Saves a repo of an existing factory (`before` null inserts) after validating it. One `repo.<repoId>.<field>` event per changed field. */
+export async function saveRepo(store: BoardStore, now: () => Date, before: FactoryRepo | null, after: FactoryRepo): Promise<FactoryRepo> {
+  if (!isObject(after)) return invalid('repo must be an object');
+  const def = (await store.listFactoryDefs()).find((d) => d.factoryId === after.factoryId);
+  if (!def) return invalid(`factory ${String(after.factoryId)} does not exist`);
+  const checked = validateFactoryRepo(after, def);
+  if (!checked.ok) return invalid(checked.error);
+  if (before !== null && (before.factoryId !== after.factoryId || before.repoId !== after.repoId)) invalid('factoryId and repoId cannot be changed');
+  const stored = await store.saveFactoryRepo(before, checked.value);
+  await writeEvents(store, fieldEvents(REPO_FIELDS, before, stored, stored.factoryId, (f) => `repo.${stored.repoId}.${f}`, 'repo saved', now().toISOString()));
+  return stored;
 }

@@ -6,6 +6,8 @@ import type { ReactElement } from "react";
 import type { BoardStore, RepoId, Status, Task } from "@factory/core";
 import { BlocksStore } from "../../../core/src/blocks/store";
 import { FakeBlocksData, newFakeStorage } from "../../../core/src/blocks/fakeData";
+import { seed } from "../../../core/test/factoryFixtures";
+import { REPO_IDS } from "../lib/repoIds";
 
 type FakeBoard = { owner: BlocksStore; core: BlocksStore; ownerData: FakeBlocksData };
 
@@ -14,10 +16,12 @@ let current: FakeBoard | undefined;
 /** A fresh shared project: the owner's store (what the page uses) and the core's (to move tasks and write docs). */
 export function resetFakeBoard(): FakeBoard {
   const storage = newFakeStorage();
+  // plan 6 Task 7/8 replaces this: the factory and its repos come from the store.
+  const factories = seed("blocks", [...REPO_IDS]);
   const ownerData = new FakeBlocksData("factory-owner", { storage });
   current = {
-    core: new BlocksStore(new FakeBlocksData("factory-core", { storage }), "core"),
-    owner: new BlocksStore(ownerData, "owner"),
+    core: new BlocksStore(new FakeBlocksData("factory-core", { storage }), "core", { factories }),
+    owner: new BlocksStore(ownerData, "owner", { factories }),
     ownerData
   };
   return current;
@@ -47,7 +51,7 @@ export async function seedTask(
   coreFields: Partial<Task> = {}
 ): Promise<Task> {
   const { core, owner } = fakeBoard();
-  const task = await owner.createTask({ description: input.description ?? "", repo: input.repo ?? "data", title: input.title ?? "A task" });
+  const task = await owner.createTask({ factoryId: "blocks", description: input.description ?? "", repo: input.repo ?? "data", title: input.title ?? "A task" });
   if (status === "inbox" && Object.keys(coreFields).length === 0) return task;
   return core.updateTask(task.taskId, task.version, { status, ...coreFields });
 }

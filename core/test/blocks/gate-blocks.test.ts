@@ -38,7 +38,7 @@ describe('runGate', () => {
     // Rows the gate inserts directly can be updated: version 1, empty writeId.
     // The settings row is nulled afterwards so getSettings skips it.
     expect(owner.rows('FactorySettings')[0]).toMatchObject({ json: 'null' });
-    expect(await deps.ownerStore.getSettings()).toEqual({ global: expect.anything(), repos: {} });
+    expect(await deps.ownerStore.getSettings()).toEqual({ factories: { blocks: { factory: expect.anything(), repos: {} } } });
   });
 
   it('step 11 passes when the column rule holds: refusal leaves the row unchanged', async () => {

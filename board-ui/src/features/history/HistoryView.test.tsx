@@ -14,7 +14,7 @@ function seedTaskRow(taskId: string, title = `Task ${taskId}`) {
 }
 
 function event(taskId: string, actor: string, field: string, at: string, from: string | null = "a", to = "b"): FactoryEvent {
-  return { action: "set", actor, at, field, from, reason: `${field} by ${actor.split(" · ")[0]}`, taskId, to };
+  return { action: "set", actor, at, factoryId: "blocks", field, from, reason: `${field} by ${actor.split(" · ")[0]}`, taskId, to };
 }
 
 async function addEvents(...events: FactoryEvent[]) {

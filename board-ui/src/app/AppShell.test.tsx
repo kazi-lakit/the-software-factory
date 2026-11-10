@@ -24,8 +24,7 @@ const getSettings = vi.mocked(boardStore.getSettings);
 
 function settings(paused: boolean): StoredSettings {
   return {
-    global: { gates: { spec: true, plan: true, pr: true }, maxParallel: 2, maxTurnsPerStage: 40, maxCostPerTaskUsd: 5, paused },
-    repos: {}
+    factories: { blocks: { factory: { gates: { spec: true, plan: true, pr: true }, maxParallel: 2, maxTurnsPerStage: 40, maxCostPerTaskUsd: 5, paused }, repos: {} } }
   };
 }
 

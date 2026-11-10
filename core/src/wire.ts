@@ -82,6 +82,12 @@ export class LazyBlocksStore implements BoardStore {
   currentDoc(taskId: string, kind: Parameters<BoardStore['currentDoc']>[1]) { return this.store.then((s) => s.currentDoc(taskId, kind)); }
   addApproval(a: Parameters<BoardStore['addApproval']>[0]) { return this.store.then((s) => s.addApproval(a)); }
   listApprovals(taskId: string) { return this.store.then((s) => s.listApprovals(taskId)); }
+  listFactoryDefs() { return this.store.then((s) => s.listFactoryDefs()); }
+  listFactoryRepos(factoryId?: string) { return this.store.then((s) => s.listFactoryRepos(factoryId)); }
+  saveFactoryDef(before: Parameters<BoardStore['saveFactoryDef']>[0], after: Parameters<BoardStore['saveFactoryDef']>[1]) { return this.store.then((s) => s.saveFactoryDef(before, after)); }
+  saveFactoryRepo(before: Parameters<BoardStore['saveFactoryRepo']>[0], after: Parameters<BoardStore['saveFactoryRepo']>[1]) { return this.store.then((s) => s.saveFactoryRepo(before, after)); }
+  listFactoryHealth() { return this.store.then((s) => s.listFactoryHealth()); }
+  setFactoryHealth(h: Parameters<BoardStore['setFactoryHealth']>[0]) { return this.store.then((s) => s.setFactoryHealth(h)); }
   getSettings() { return this.store.then((s) => s.getSettings()); }
   setSettings(v: Parameters<BoardStore['setSettings']>[0]) { return this.store.then((s) => s.setSettings(v)); }
   startRun(r: Parameters<BoardStore['startRun']>[0]) { return this.store.then((s) => s.startRun(r)); }

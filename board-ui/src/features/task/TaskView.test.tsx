@@ -73,8 +73,8 @@ describe("TaskView", () => {
     const task = await seedTask({ title: "History" });
     const { owner } = fakeBoard();
     await owner.addEvents([
-      { action: "move", actor: "you", at: "2026-11-10T09:00:00.000Z", field: "status", from: "inbox", reason: "marked ready", taskId: task.taskId, to: "ready" },
-      { action: "move", actor: "core", at: "2026-11-10T10:00:00.000Z", field: "status", from: "ready", reason: "claimed", taskId: task.taskId, to: "spec" }
+      { action: "move", actor: "you", factoryId: "blocks", at: "2026-11-10T09:00:00.000Z", field: "status", from: "inbox", reason: "marked ready", taskId: task.taskId, to: "ready" },
+      { action: "move", actor: "core", factoryId: "blocks", at: "2026-11-10T10:00:00.000Z", field: "status", from: "ready", reason: "claimed", taskId: task.taskId, to: "spec" }
     ]);
     renderTask(task.taskId);
     const history = await screen.findByRole("list", { name: "History" });

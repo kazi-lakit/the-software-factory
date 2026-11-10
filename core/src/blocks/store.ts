@@ -2,8 +2,9 @@ import { sha256 as nobleSha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from '../limits.js';
 import { DEFAULT_SETTINGS } from '../defaults.js';
+import type { FactoryDef, FactoryHealth, FactoryRepo } from '../factories.js';
 import {
-  assertNewStatus, canonicalJson, CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval,
+  assertNewStatus, canonicalJson, parseScope, CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval,
   settingsConflict, VersionConflictError, type BoardStore, type NewApproval, type NewTask, type StoredSettings,
 } from '../boardStore.js';
 import type {
@@ -89,9 +90,14 @@ function encodeTaskValue(key: keyof Task, value: Task[keyof Task]): Value {
   return value as Value;
 }
 
+/** Until plan 6 Task 3 stores factories in Blocks, every row belongs to factory `blocks`. */
+const BLOCKS_FACTORY = 'blocks';
+const notYet = (what: string) => new Error(`BlocksStore: ${what} is not implemented yet (plan 6 Task 3)`);
+
 function decodeTask(r: Row): Task {
   return {
     taskId: text(r.taskId),
+    factoryId: BLOCKS_FACTORY,
     title: text(r.title),
     description: text(r.description),
     repo: text(r.repo) as RepoId,
@@ -129,7 +135,7 @@ const decodeRun = (r: Row): Run => ({
 });
 
 const decodeEvent = (r: Row): FactoryEvent => ({
-  taskId: text(r.taskId), actor: text(r.actor), action: text(r.action) as FactoryEvent['action'],
+  taskId: text(r.taskId), factoryId: BLOCKS_FACTORY, actor: text(r.actor), action: text(r.action) as FactoryEvent['action'],
   field: str(r.field), from: str(r.from), to: str(r.to), reason: text(r.reason), at: text(r.at),
 });
 
@@ -178,9 +184,16 @@ export class BlocksStore implements BoardStore {
   private readonly pending = new Map<string, string[]>();
 
   /** `now` decides the addDoc retry window (default: real time). */
-  constructor(private readonly data: BlocksData, private readonly identity: 'core' | 'owner', opts: { now?: () => Date } = {}) {
+  constructor(
+    private readonly data: BlocksData, private readonly identity: 'core' | 'owner',
+    opts: { now?: () => Date; factories?: { defs: FactoryDef[]; repos: FactoryRepo[] } } = {},
+  ) {
+    this.interimFactories = opts.factories ?? { defs: [], repos: [] };
     this.now = opts.now ?? (() => new Date());
   }
+
+  /** Interim (plan 6 Task 3 stores definitions in Blocks): what the caller gave, read-only. */
+  private readonly interimFactories: { defs: FactoryDef[]; repos: FactoryRepo[] };
 
   private ownerOnly(method: string): void {
     if (this.identity !== 'owner') throw new OwnerOnlyError(`${method} is done on the Board, not by the factory core`);
@@ -200,12 +213,14 @@ export class BlocksStore implements BoardStore {
 
   async createTask(t: NewTask): Promise<Task> {
     assertNewStatus(t.status);
+    if (t.factoryId !== BLOCKS_FACTORY) throw notYet(`a task in factory ${t.factoryId}`);
     // Both identities may insert a task: the core only through `factory new` (see createTaskAsCore).
     for (let attempt = 0; attempt <= DUPLICATE_RETRIES; attempt++) {
       const ids = await this.data.list('FactoryTask', {}, ['taskId']);
       const taskId = `T-${1 + Math.max(0, ...ids.map((r) => taskNumber(r.taskId)))}`;
       const task: Task = {
         taskId,
+        factoryId: BLOCKS_FACTORY,
         title: t.title,
         description: t.description,
         repo: t.repo,
@@ -227,7 +242,7 @@ export class BlocksStore implements BoardStore {
       // The writeId finds this row again if the insert's reply is lost.
       const writeId = randomUUID();
       const row: Record<string, Value> = { writeId };
-      for (const [key, value] of Object.entries(task)) row[key] = encodeTaskValue(key as keyof Task, value);
+      for (const [key, value] of Object.entries(task)) if (key !== 'factoryId') row[key] = encodeTaskValue(key as keyof Task, value);
       let r: Awaited<ReturnType<BlocksData['insert']>>;
       try {
         r = await this.data.insert('FactoryTask', row);
@@ -343,21 +358,50 @@ export class BlocksStore implements BoardStore {
     return byAt((await this.data.list('FactoryApproval', { taskId })).map(decodeApproval));
   }
 
-  async getSettings(): Promise<StoredSettings> {
-    const rows = await this.data.list('FactorySettings', {});
-    let global = scopeValue('global', undefined) as Settings;
-    const repos: StoredSettings['repos'] = {};
-    for (const r of rows) {
-      const value = scopeValue(text(r.scope), r.json);
-      if (r.scope === 'global') global = value as Settings;
-      else if (value !== undefined) repos[text(r.scope) as RepoId] = value as RepoSettings;
-    }
-    return { global, repos };
+  async listFactoryDefs(): Promise<FactoryDef[]> {
+    return structuredClone(this.interimFactories.defs);
   }
 
-  async updateSettingsScope(scope: 'global' | RepoId, before: unknown, after: Settings | RepoSettings | null): Promise<void> {
+  async listFactoryRepos(factoryId?: string): Promise<FactoryRepo[]> {
+    return structuredClone(this.interimFactories.repos.filter((r) => factoryId === undefined || r.factoryId === factoryId));
+  }
+
+  async saveFactoryDef(_before: FactoryDef | null, _after: FactoryDef): Promise<FactoryDef> {
+    throw notYet('saveFactoryDef');
+  }
+
+  async saveFactoryRepo(_before: FactoryRepo | null, _after: FactoryRepo): Promise<FactoryRepo> {
+    throw notYet('saveFactoryRepo');
+  }
+
+  async listFactoryHealth(): Promise<FactoryHealth[]> {
+    throw notYet('listFactoryHealth');
+  }
+
+  async setFactoryHealth(_h: FactoryHealth): Promise<void> {
+    throw notYet('setFactoryHealth');
+  }
+
+  /** Until plan 6 Task 3, the rows are factory `blocks`' scopes: `global` is the factory, any other scope a repo of it. */
+  async getSettings(): Promise<StoredSettings> {
+    const rows = await this.data.list('FactorySettings', {});
+    if (rows.length === 0) return { factories: {} };
+    let factory = scopeValue('global', undefined) as Settings;
+    const repos: Record<string, RepoSettings> = {};
+    for (const r of rows) {
+      const value = scopeValue(text(r.scope), r.json);
+      if (r.scope === 'global') factory = value as Settings;
+      else if (value !== undefined) repos[text(r.scope)] = value as RepoSettings;
+    }
+    return { factories: { [BLOCKS_FACTORY]: { factory, repos } } };
+  }
+
+  async updateSettingsScope(factoryScope: string, before: unknown, after: Settings | RepoSettings | null): Promise<void> {
     this.ownerOnly('updateSettingsScope');
-    if (scope === 'global' && after === null) throw new Error('global settings cannot be removed');
+    const { factoryId, repoId } = parseScope(factoryScope);
+    if (factoryId !== BLOCKS_FACTORY) throw notYet(`settings of factory ${factoryId}`);
+    const scope = repoId ?? 'global';
+    if (scope === 'global' && after === null) throw new Error('factory settings cannot be removed');
     const [row] = await this.data.list('FactorySettings', { scope }, ['version', 'json']);
     if (canonicalJson(scopeValue(scope, row?.json)) !== canonicalJson(before)) throw settingsConflict(scope);
     const json = after === null ? 'null' : JSON.stringify(after);
@@ -380,8 +424,10 @@ export class BlocksStore implements BoardStore {
   async setSettings(s: StoredSettings): Promise<void> {
     this.ownerOnly('setSettings');
     const existing = await this.data.list('FactorySettings', {}, ['scope']);
-    const wanted = new Map<string, string>([['global', JSON.stringify(s.global)]]);
-    for (const [scope, value] of Object.entries(s.repos)) if (value !== undefined) wanted.set(scope, JSON.stringify(value));
+    for (const id of Object.keys(s.factories)) if (id !== BLOCKS_FACTORY) throw notYet(`settings of factory ${id}`);
+    const entry = s.factories[BLOCKS_FACTORY];
+    const wanted = new Map<string, string>([['global', JSON.stringify(entry?.factory ?? DEFAULT_SETTINGS)]]);
+    for (const [scope, value] of Object.entries(entry?.repos ?? {})) wanted.set(scope, JSON.stringify(value));
     // Rows cannot be deleted, so a repo scope left out is written as null json.
     for (const r of existing) if (!wanted.has(text(r.scope))) wanted.set(text(r.scope), 'null');
     for (const [scope, json] of wanted) await this.writeSettings(scope, json);

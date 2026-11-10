@@ -76,7 +76,7 @@ const result = (r: object) => JSON.stringify(r);
 const devSha = () => git(tmp, 'ls-remote', bare, 'refs/heads/dev').trim();
 
 async function readyTask(store: MemoryStore) {
-  const t = await store.createTask({ title: 'Add widget', description: 'd', repo: 'data', baseBranch: 'dev' });
+  const t = await store.createTask({ factoryId: 'blocks', title: 'Add widget', description: 'd', repo: 'data', baseBranch: 'dev' });
   await store.updateTask(t.taskId, t.version, { status: 'ready' });
 }
 

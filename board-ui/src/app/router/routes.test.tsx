@@ -26,7 +26,7 @@ vi.mock("../../lib/blocks/auth", () => ({
 // The shell reads the settings for its pause indicator; no test reaches Blocks Data.
 vi.mock("../../lib/board", () => ({
   boardStore: {
-    getSettings: vi.fn(async () => ({ global: { gates: { spec: true, plan: true, pr: true }, maxParallel: 1, maxTurnsPerStage: 1, maxCostPerTaskUsd: 1, paused: false }, repos: {} })),
+    getSettings: vi.fn(async () => ({ factories: { blocks: { factory: { gates: { spec: true, plan: true, pr: true }, maxParallel: 1, maxTurnsPerStage: 1, maxCostPerTaskUsd: 1, paused: false }, repos: {} } } })),
     getTask: vi.fn(async (id: string) => ({
       answer: null, attempt: 0, baseBranch: "dev", blockedReason: null, branch: null, claimBy: null, claimUntil: null, costUsd: 0, description: "",
       gateOverrides: {}, prUrl: null, question: null, repo: "data", stage: null, status: "inbox", taskId: id, title: "Routed task", version: 1
