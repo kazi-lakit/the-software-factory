@@ -533,7 +533,7 @@ describe("BoardView lanes", () => {
   it("places_tasks_in_the_lane_for_their_status", async () => {
     await seedAll();
     renderBoard();
-    await screen.findByText("Stuck");
+    await within(await screen.findByRole("region", { name: "Needs you" })).findByText("Stuck");
     for (const title of ["Spec rev", "PR task", "Stuck"]) expect(within(lane("Needs you")).getByText(title)).toBeInTheDocument();
     for (const title of ["In inbox", "Is ready"]) expect(within(lane("Queued")).getByText(title)).toBeInTheDocument();
     expect(within(lane("Working")).getByText("Building")).toBeInTheDocument();
@@ -555,7 +555,7 @@ describe("BoardView lanes", () => {
   it("each_lane_shows_name_count_and_hint", async () => {
     await seedAll();
     renderBoard();
-    await screen.findByText("Stuck");
+    await within(await screen.findByRole("region", { name: "Needs you" })).findByText("Stuck");
     const needs = lane("Needs you");
     expect(within(needs).getByText("Waiting for your review or answer")).toBeInTheDocument();
     const name = needs.querySelector("h3");
