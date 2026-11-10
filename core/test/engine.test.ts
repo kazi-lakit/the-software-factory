@@ -120,6 +120,37 @@ describe('next across factories', () => {
     expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-1', context: { factory: { factoryId: 'b' } } });
   });
 
+  test("the ticket carries the model the factory set for the step's stage", async () => {
+    const { store, engine } = setup(TWO({ b: { agentModels: { spec: 'haiku' } } }));
+    await putIn(store, 'b');
+    const ticket = await nextTicket(engine);
+    expect(ticket).toMatchObject({ step: 'spec', model: 'haiku' });
+    expect(JSON.parse(JSON.stringify(ticket)).model).toBe('haiku');
+  });
+
+  test('the ticket has no model key when the stage has no entry or the factory has none', async () => {
+    const first = setup(TWO({ a: { agentModels: { plan: 'opus' } } }));
+    await putIn(first.store, 'a');
+    const ticket = (await nextTicket(first.engine))!;
+    expect(ticket.step).toBe('spec');
+    expect('model' in ticket).toBe(false);
+    expect(JSON.stringify(ticket)).not.toContain('"model"');
+
+    const second = setup(TWO());
+    await putIn(second.store, 'b');
+    const other = (await nextTicket(second.engine))!;
+    expect(other.step).toBe('spec');
+    expect('model' in other).toBe(false);
+  });
+
+  test('check and ship tickets never carry a model', async () => {
+    const { store, engine } = setup(TWO({ a: { agentModels: { spec: 'opus', plan: 'opus', build: 'opus', verify: 'opus', review: 'opus' } } }));
+    await putIn(store, 'a', { status: 'verify', stage: 'check', branch: 'factory/T-1-a' });
+    const ticket = (await nextTicket(engine))!;
+    expect(ticket.step).toBe('check');
+    expect('model' in ticket).toBe(false);
+  });
+
   test('a filter picks only in the named factories', async () => {
     const { store, engine } = setup(TWO());
     await putIn(store, 'a');

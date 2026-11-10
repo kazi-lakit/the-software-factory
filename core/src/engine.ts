@@ -10,7 +10,7 @@ import { unfinishedDeps } from './dependencies.js';
 import { diffEvents } from './history.js';
 import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
 import type { Checks } from './checksSchema.js';
-import type { FactoryConfig, FactoryDef, FactoryRepo } from './factories.js';
+import type { AgentModel, FactoryConfig, FactoryDef, FactoryRepo } from './factories.js';
 import { GhLoginMissingError, SecretMissingError } from './secrets.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from './limits.js';
 import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
@@ -40,6 +40,8 @@ export interface Ticket {
   step: Step;
   worktree: string;
   runId: string | null;
+  /** The model the factory set for this agent step's stage; absent means the session's model. */
+  model?: AgentModel;
   context: {
     task: Task;
     factory: { factoryId: string; name: string; docsPath: string };
@@ -565,7 +567,8 @@ export class Engine {
     for (const [k, v] of Object.entries(values) as [keyof typeof values, string | undefined][]) {
       if (v !== undefined) context[k] = v;
     }
-    return { taskId: task.taskId, step, worktree, runId, context };
+    const model = AGENT_STEPS.has(step) ? def.agentModels?.[step as AgentStep] : undefined;
+    return { taskId: task.taskId, step, worktree, runId, ...(model ? { model } : {}), context };
   }
 
   /** Best effort: records a setup failure on the task's history; errors are ignored. */

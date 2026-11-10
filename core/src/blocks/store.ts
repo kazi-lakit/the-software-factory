@@ -176,10 +176,31 @@ const decodeBranches = (v: Value | undefined): string[] => {
   return text(v) as unknown as string[];
 };
 
-const decodeDef = (r: Row): FactoryDef => ({
-  factoryId: text(r.factoryId), name: text(r.name), protectedBranches: decodeBranches(r.protectedBranches), gitName: text(r.gitName),
-  gitEmail: text(r.gitEmail), docsPath: text(r.docsPath), ghUser: text(r.ghUser), active: num(r.active) === 1, version: num(r.version),
-});
+/**
+ * A missing column, empty text or `{}` means no agentModels. Text that is not a JSON object decodes to the raw text,
+ * which validation refuses, so the factory is skipped with a reason instead of guessing.
+ */
+const decodeAgentModels = (v: Value | undefined): FactoryDef['agentModels'] | undefined => {
+  if (v === null || v === undefined || v === '') return undefined;
+  try {
+    const parsed: unknown = JSON.parse(text(v));
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return Object.keys(parsed).length === 0 ? undefined : (parsed as FactoryDef['agentModels']);
+    }
+  } catch {
+    // falls through to the refused value
+  }
+  return text(v) as never;
+};
+
+const decodeDef = (r: Row): FactoryDef => {
+  const agentModels = decodeAgentModels(r.agentModels);
+  return {
+    factoryId: text(r.factoryId), name: text(r.name), protectedBranches: decodeBranches(r.protectedBranches), gitName: text(r.gitName),
+    gitEmail: text(r.gitEmail), docsPath: text(r.docsPath), ghUser: text(r.ghUser), active: num(r.active) === 1,
+    ...(agentModels === undefined ? {} : { agentModels }), version: num(r.version),
+  };
+};
 
 /** A repo whose checks are not a JSON object decodes with empty checks, which validation then skips. */
 const decodeRepo = (r: Row): FactoryRepo => ({
@@ -192,6 +213,8 @@ const decodeHealth = (r: Row): FactoryHealth => ({ factoryId: text(r.factoryId),
 const encodeDef = (d: FactoryDef): Record<string, Value> => ({
   name: d.name, protectedBranches: JSON.stringify(d.protectedBranches), gitName: d.gitName, gitEmail: d.gitEmail, docsPath: d.docsPath,
   ghUser: d.ghUser, active: d.active ? 1 : 0,
+  // Always written, so an edit can clear every entry: Blocks ignores null in an update.
+  agentModels: JSON.stringify(d.agentModels ?? {}),
 });
 
 const encodeRepo = (r: FactoryRepo): Record<string, Value> => ({ remote: r.remote, baseBranch: r.baseBranch, checks: canonicalJson(r.checks) });

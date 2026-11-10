@@ -704,6 +704,32 @@ describe.each([
     ]);
   });
 
+  test('saveFactory writes a def.agentModels event when the models change, and none when they stay the same', async () => {
+    const s = make();
+    const first = await saveFactory(s, now, null, defFixture('delta'));
+    const mark = (await s.listEvents('-')).length;
+    const second = await saveFactory(s, now, first, { ...first, agentModels: { review: 'opus', build: 'sonnet' } });
+    expect((await factoryEvents(s)).slice(mark)).toEqual([
+      ['delta', 'you', 'def.agentModels', '{}', '{"build":"sonnet","review":"opus"}'],
+    ]);
+    const mark2 = (await s.listEvents('-')).length;
+    const third = await saveFactory(s, now, second, { ...second, agentModels: { build: 'sonnet', review: 'opus' } });
+    expect((await s.listEvents('-')).length).toBe(mark2);
+    const { agentModels: _drop, ...noModels } = third;
+    await saveFactory(s, now, third, noModels);
+    expect((await factoryEvents(s)).slice(mark2)).toEqual([
+      ['delta', 'you', 'def.agentModels', '{"build":"sonnet","review":"opus"}', '{}'],
+    ]);
+  });
+
+  test('saveFactory inserting a factory with agentModels writes a def.agentModels event', async () => {
+    const s = make();
+    await saveFactory(s, now, null, defFixture('delta', { agentModels: { spec: 'haiku' } }));
+    expect((await factoryEvents(s)).filter((e) => e[2] === 'def.agentModels')).toEqual([
+      ['delta', 'you', 'def.agentModels', null, '{"spec":"haiku"}'],
+    ]);
+  });
+
   test('saveFactory refuses an invalid definition and a stale version, and writes nothing', async () => {
     const s = make();
     await expect(saveFactory(s, now, null, defFixture('Bad Id'))).rejects.toMatchObject({ code: 'invalid' });
@@ -903,6 +929,22 @@ describe.each([
     expect(plan.repos[1]!.action).toBe('create');
     result = await importFactory(s, now, f);
     expect([result.factory, ...result.repos.map((r) => r.outcome)]).toEqual(['kept', 'kept', 'created']);
+  });
+
+  test('planImport and importFactory see a difference in agentModels only', async () => {
+    const s = make();
+    await s.saveFactoryDef(null, defFixture('blocks', { agentModels: { review: 'opus' } }));
+    const plan = await planImport(s, file());
+    expect(plan.factory).toEqual({ action: 'kept', differs: ['agentModels'] });
+    expect((await importFactory(s, now, file())).factory).toBe('kept');
+    const same = { ...file(), factory: defFixture('blocks', { agentModels: { review: 'opus' } }) };
+    expect((await planImport(s, same)).factory).toEqual({ action: 'already', differs: [] });
+  });
+
+  test('importFactory creating a factory with agentModels writes a def.agentModels event', async () => {
+    const s = make();
+    await importFactory(s, now, { ...file(), factory: defFixture('blocks', { agentModels: { plan: 'fable' } }) });
+    expect((await s.listEvents('-')).filter((e) => e.field === 'def.agentModels').map((e) => [e.from, e.to])).toEqual([[null, '{"plan":"fable"}']]);
   });
 
   test('planImport refuses an invalid file', async () => {

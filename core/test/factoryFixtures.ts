@@ -26,7 +26,7 @@ export function seedBlocksFactories(data: FakeBlocksData, factories: { defs: Fac
   for (const d of factories.defs) {
     data.seed('FactoryDef', {
       factoryId: d.factoryId, name: d.name, protectedBranches: JSON.stringify(d.protectedBranches), gitName: d.gitName, gitEmail: d.gitEmail,
-      docsPath: d.docsPath, ghUser: d.ghUser, active: d.active ? 1 : 0, version: d.version, writeId: '',
+      docsPath: d.docsPath, ghUser: d.ghUser, active: d.active ? 1 : 0, agentModels: JSON.stringify(d.agentModels ?? {}), version: d.version, writeId: '',
     });
   }
   for (const r of factories.repos) {

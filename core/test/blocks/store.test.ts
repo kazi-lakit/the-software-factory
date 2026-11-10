@@ -83,6 +83,44 @@ describe('BlocksStore factories', () => {
     },
   );
 
+  it('stores agentModels as JSON text and reads it back', async () => {
+    const data = new FakeBlocksData('any');
+    const s = new BlocksStore(data, 'owner');
+    const saved = await s.saveFactoryDef(null, defFixture('delta', { agentModels: { spec: 'opus', review: 'haiku' } }));
+    expect(JSON.parse(String(data.rows('FactoryDef')[0]!.agentModels))).toEqual({ spec: 'opus', review: 'haiku' });
+    expect((await s.listFactoryDefs())[0]!.agentModels).toEqual({ spec: 'opus', review: 'haiku' });
+    await s.saveFactoryDef(saved, { ...saved, agentModels: undefined });
+    expect(data.rows('FactoryDef')[0]!.agentModels).toBe('{}');
+    const def = (await s.listFactoryDefs())[0]!;
+    expect('agentModels' in def).toBe(false);
+  });
+
+  it.each([['missing', undefined], ['empty text', ''], ['an empty object', '{}']])(
+    'a def whose agentModels is %s has none and stays valid',
+    async (_what, raw) => {
+      const data = new FakeBlocksData('any');
+      const row = { ...defFixture('delta'), protectedBranches: '["dev","main"]', active: 1, writeId: '' } as Record<string, unknown>;
+      if (raw === undefined) delete row.agentModels;
+      else row.agentModels = raw;
+      data.seed('FactoryDef', row as never);
+      const defs = await new BlocksStore(data, 'owner').listFactoryDefs();
+      expect('agentModels' in defs[0]!).toBe(false);
+      expect(new FactoryConfig(defs, []).factory('delta')).toBeDefined();
+    },
+  );
+
+  it.each([['not json', '{opus'], ['a list', '["opus"]'], ['a bad model', '{"build":"gpt"}']])(
+    'a def whose agentModels is %s is skipped with a reason',
+    async (_what, raw) => {
+      const data = new FakeBlocksData('any');
+      const row = { ...defFixture('delta'), protectedBranches: '["dev","main"]', active: 1, writeId: '', agentModels: raw } as Record<string, unknown>;
+      data.seed('FactoryDef', row as never);
+      const cfg = new FactoryConfig(await new BlocksStore(data, 'owner').listFactoryDefs(), []);
+      expect(cfg.factory('delta')).toBeUndefined();
+      expect(cfg.skipped()[0]!.reason).toMatch(/^agentModels/);
+    },
+  );
+
   it('a repo id may exist in two factories: they are two rows', async () => {
     const s = new BlocksStore(new FakeBlocksData('any'), 'owner');
     await s.saveFactoryRepo(null, repoFixture('delta', 'api'));

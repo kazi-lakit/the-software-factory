@@ -44,6 +44,7 @@ export const FIELDS: Record<SchemaName, Field[]> = {
     s('factoryId', 'Unique id of the factory.'), s('name', 'Display name.'), s('protectedBranches', 'JSON text of the protected branch names.'),
     s('gitName', 'Git author name.'), s('gitEmail', 'Git author email.'), s('docsPath', 'Folder the factory writes docs to.'),
     s('ghUser', 'GitHub login of the gh CLI account the factory uses (never a token).'), i('active', '1 if the factory is active, else 0.'),
+    s('agentModels', 'JSON text of the per-stage agent models (stage to opus, sonnet, haiku or fable).'),
     i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
   ],
   FactoryRepo: [

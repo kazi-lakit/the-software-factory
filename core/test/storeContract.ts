@@ -230,6 +230,12 @@ export function runStoreContract(
         await expect(s.saveFactoryDef(null, def)).rejects.toBeInstanceOf(VersionConflictError);
         expect(await s.listFactoryDefs()).toEqual([renamed]);
       });
+      test('a def with agentModels round-trips', async () => {
+        const s = await make('owner');
+        const withModels = defFixture('delta', { agentModels: { build: 'sonnet' } });
+        await s.saveFactoryDef(null, withModels);
+        expect(await s.listFactoryDefs()).toEqual([{ ...withModels, version: 1 }]);
+      });
       test('an owner saves a repo with the same compare-and-set; listFactoryRepos filters by factory', async () => {
         const s = await make('owner');
         const api = await s.saveFactoryRepo(null, repo);
