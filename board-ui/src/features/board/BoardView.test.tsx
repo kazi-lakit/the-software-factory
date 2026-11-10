@@ -1079,3 +1079,14 @@ describe("BoardView empty lane text", () => {
     expect(screen.queryByText(/^Nothing in /)).not.toBeInTheDocument();
   });
 });
+
+describe("New task form action bar", () => {
+  it("Create_task_sits_in_sf_action_bar_and_Close_is_in_the_same_bar", async () => {
+    renderBoard();
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    const form = screen.getByRole("form", { name: "New task" });
+    const bar = within(form).getByRole("button", { name: "Create task" }).parentElement;
+    expect(bar).toHaveClass("sf-actions", "sf-action-bar");
+    expect(bar).toContainElement(within(form).getByRole("button", { name: "Close" }));
+  });
+});

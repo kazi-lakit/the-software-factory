@@ -281,3 +281,12 @@ describe("AnswerPanel review fixes", () => {
     expect(screen.getByText("No question was given.")).toBeInTheDocument();
   });
 });
+
+describe("AnswerPanel action bar", () => {
+  it("Send_answer_sits_in_sf_action_bar", async () => {
+    await renderPanel();
+    const bar = screen.getByRole("button", { name: "Send answer" }).parentElement;
+    expect(bar).toHaveClass("sf-actions", "sf-action-bar");
+    expect(screen.getByRole("button", { name: "Send answer" })).toHaveClass("sf-button-accent");
+  });
+});
