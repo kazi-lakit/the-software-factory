@@ -276,6 +276,8 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
                       <li key={task.taskId}><TaskCard task={task} showFactory={all} onNavigate={onNavigate} /></li>
                     ))}
                   </ul>
+                ) : selectedLane === lane.id ? (
+                  <p className="sf-empty sf-lane-empty">Nothing in {lane.name}.</p>
                 ) : null}
               </section>
             );

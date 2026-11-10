@@ -1053,3 +1053,29 @@ describe("BoardView lane pills", () => {
     expect(pill("Needs you")).toHaveAttribute("aria-pressed", "true");
   });
 });
+
+describe("BoardView empty lane text", () => {
+  it("an_empty_selected_lane_shows_Nothing_in_Stopped", async () => {
+    await seedTask({ title: "Spec rev" }, "spec_review", { stage: "spec" });
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    fireEvent.click(screen.getByRole("button", { name: /^Stopped/ }));
+    const text = within(screen.getByRole("region", { name: "Stopped" })).getByText("Nothing in Stopped.");
+    expect(text).toHaveClass("sf-empty", "sf-lane-empty");
+  });
+
+  it("only_the_selected_lane_renders_the_empty_text", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Needs you" });
+    expect(screen.getAllByText(/^Nothing in /).map((e) => e.textContent)).toEqual(["Nothing in Needs you."]);
+    fireEvent.click(screen.getByRole("button", { name: /^Working/ }));
+    expect(screen.getAllByText(/^Nothing in /).map((e) => e.textContent)).toEqual(["Nothing in Working."]);
+  });
+
+  it("a_lane_with_tasks_renders_no_empty_text", async () => {
+    await seedTask({ title: "Spec rev" }, "spec_review", { stage: "spec" });
+    renderBoard();
+    await screen.findAllByText("Spec rev");
+    expect(screen.queryByText(/^Nothing in /)).not.toBeInTheDocument();
+  });
+});

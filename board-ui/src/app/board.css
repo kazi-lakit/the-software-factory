@@ -1393,6 +1393,10 @@ textarea.sf-input {
   display: none;
 }
 
+.sf-lane-empty {
+  display: none;
+}
+
 /* Waiting for you */
 .sf-strip {
   background: var(--sf-accent-soft);
