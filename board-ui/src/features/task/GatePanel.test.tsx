@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VersionConflictError, type Approval, type Doc, type Task } from "@factory/core";
 import { clearAllUnsent } from "../../lib/unsent";
+import { BLOCKS_REPOS, factory } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
 import { GatePanel } from "./GatePanel";
 
@@ -199,7 +200,7 @@ describe("GatePanel", () => {
       const seeded = await atPrGate("dev");
       task = seeded.task;
       renderPr(seeded.docs);
-      expect(screen.getByText(/The factory never merges into/)).toHaveTextContent(
+      expect(await screen.findByText(/The factory never merges into/)).toHaveTextContent(
         "The factory never merges into dev. Merge the PR on GitHub to finish this task."
       );
       const link = screen.getByRole("link", { name: /Open the PR on GitHub/ });
@@ -234,17 +235,50 @@ describe("GatePanel", () => {
       renderPr(seeded.docs, [approval]);
       expect(screen.getByRole("button", { name: "Request changes" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
-      expect(screen.getByText(/The factory never merges into/)).toHaveTextContent("main");
+      expect(await screen.findByText(/The factory never merges into/)).toHaveTextContent("main");
     });
 
     it("still_offers_approve_on_a_feature_base", async () => {
       const seeded = await atPrGate("feature/x");
       task = seeded.task;
       renderPr(seeded.docs);
+      expect(await screen.findByRole("button", { name: "Approve" })).toBeInTheDocument();
       expect(screen.queryByText(/The factory never merges into/)).not.toBeInTheDocument();
       expect(screen.queryByRole("link")).not.toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Request changes" })).toBeInTheDocument();
+    });
+
+    describe("with the factory's own protected list ['rel', 'main']", () => {
+      beforeEach(() => {
+        resetFakeBoard(factory("blocks", BLOCKS_REPOS, { protectedBranches: ["rel", "main"] }));
+      });
+
+      it("says_to_merge_on_github_for_base_rel", async () => {
+        const seeded = await atPrGate("rel");
+        task = seeded.task;
+        renderPr(seeded.docs);
+        expect(await screen.findByText(/The factory never merges into/)).toHaveTextContent(
+          "The factory never merges into rel. Merge the PR on GitHub to finish this task."
+        );
+        expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+      });
+
+      it("offers_approve_for_base_dev", async () => {
+        const seeded = await atPrGate("dev");
+        task = seeded.task;
+        renderPr(seeded.docs);
+        expect(await screen.findByRole("button", { name: "Approve" })).toBeInTheDocument();
+        expect(screen.queryByText(/Merge the PR on GitHub/)).not.toBeInTheDocument();
+      });
+    });
+
+    it("says_to_merge_on_github_while_the_factory's_list_is_unknown", async () => {
+      const seeded = await atPrGate("feature/x");
+      task = { ...seeded.task, factoryId: "gone" };
+      renderPr(seeded.docs);
+      expect(await screen.findByText(/Merge the PR on GitHub to finish this task/)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     });
   });
 });

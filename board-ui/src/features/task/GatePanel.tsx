@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { decideGate, GATE_DOC, isProtected, type Approval, type Doc, type Gate, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
+import { useFactories } from "../factories/useFactories";
 import { useUnsent } from "../../lib/unsent";
 import { DocVersions } from "./DocVersions";
 import { currentOf } from "./useTask";
@@ -26,8 +27,10 @@ type Props = {
  */
 export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
   const kind = GATE_DOC[gate];
-  // The factory never merges into dev, stg or main: the owner merges on GitHub, so there is nothing to approve.
-  const mergeOnGitHub = gate === "pr" && isProtected(task.baseBranch);
+  // The factory never merges into its factory's protected branches: the owner merges on GitHub, so there is nothing
+  // to approve. While that list is unknown (not loaded, or the factory is gone), the safe side is the same.
+  const protectedBranches = useFactories().byId.get(task.factoryId)?.def.protectedBranches;
+  const mergeOnGitHub = gate === "pr" && (protectedBranches === undefined || isProtected(task.baseBranch, protectedBranches));
   const headingId = useId();
   const commentId = useId();
   const [comment, setComment, clearComment] = useUnsent(`gate:${task.taskId}:${gate}`);
@@ -106,7 +109,11 @@ export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
       <h3 id={headingId}>Your decision: {GATE_LABEL[gate]}</h3>
       {mergeOnGitHub ? (
         <p>
-          The factory never merges into <span className="sf-mono">{task.baseBranch}</span>. Merge the PR on GitHub to finish this task.
+          {protectedBranches === undefined ? (
+            <>The Board has not read this factory&apos;s protected branches. Merge the PR on GitHub to finish this task.</>
+          ) : (
+            <>The factory never merges into <span className="sf-mono">{task.baseBranch}</span>. Merge the PR on GitHub to finish this task.</>
+          )}
           {task.prUrl ? (
             <>
               {" "}

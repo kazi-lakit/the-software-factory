@@ -13,7 +13,15 @@ import { describeWriteError, now, WriteProblemNotice, type WriteProblem } from "
 import { FactoriesTab } from "./FactoriesTab";
 import { SETTINGS_KEY, useSettings } from "./useSettings";
 
-export const PR_GATE_NOTE = "Turning this off lets the factory merge into other branches. A PR into dev, stg or main always waits for you.";
+/** The PR gate's note for one factory's protected branches, or for every factory when no list is given (All). */
+export function prGateNote(protectedBranches?: readonly string[]): string {
+  const into = protectedBranches === undefined || protectedBranches.length === 0
+    ? "each factory's protected branches"
+    : protectedBranches.length === 1
+      ? protectedBranches[0]
+      : `${protectedBranches.slice(0, -1).join(", ")} or ${protectedBranches.at(-1)}`;
+  return `Turning this off lets the factory merge into other branches. A PR into ${into} always waits for you.`;
+}
 export const SETTINGS_CONFLICT = "Settings changed elsewhere. Reload to see the latest.";
 
 const GATES: readonly Gate[] = ["spec", "plan", "pr"];
@@ -170,7 +178,7 @@ function FactorySettingsTab() {
         </div>
       ) : null}
       <PauseControl key={`${factoryId}:pause`} factoryId={factoryId} paused={current.factory.paused} onNotice={setNotice} onReload={reload} />
-      <GlobalForm key={`${factoryId}:defaults`} factoryId={factoryId} global={current.factory} noteId={noteId} onNotice={setNotice} onReload={reload} />
+      <GlobalForm key={`${factoryId}:defaults`} factoryId={factoryId} global={current.factory} protectedBranches={entry.def.protectedBranches} noteId={noteId} onNotice={setNotice} onReload={reload} />
       <RepoTable key={`${factoryId}:repos`} factoryId={factoryId} repos={entry.repos} stored={current} noteId={noteId} onNotice={setNotice} onReload={reload} />
       <RemovedRepoSettings key={`${factoryId}:removed`} factoryId={factoryId} repos={entry.repos} existing={factories.storedRepos} stored={current} onNotice={setNotice} onReload={reload} />
     </>
@@ -230,7 +238,9 @@ const globalDraft = (s: Settings): Record<GlobalKey, string> => ({
   spec: String(s.gates.spec)
 });
 
-function GlobalForm({ factoryId, global, noteId, onNotice, onReload }: ScopeProps & { global: Settings; noteId: string }) {
+function GlobalForm({
+  factoryId, global, noteId, onNotice, onReload, protectedBranches
+}: ScopeProps & { global: Settings; noteId: string; protectedBranches: readonly string[] }) {
   const ids = useId();
   const draft = useScopeDraft(GLOBAL_KEYS, globalDraft(global));
   const [busy, setBusy] = useState(false);
@@ -282,7 +292,7 @@ function GlobalForm({ factoryId, global, noteId, onNotice, onReload }: ScopeProp
               />
               <span>{GATE_LABEL[gate]} gate</span>
             </label>
-            {gate === "pr" ? <p id={noteId} className="sf-hint">{PR_GATE_NOTE}</p> : null}
+            {gate === "pr" ? <p id={noteId} className="sf-hint">{prGateNote(protectedBranches)}</p> : null}
           </div>
         ))}
       </fieldset>

@@ -9,7 +9,7 @@ import { fetchSessionClaims } from "../../lib/blocks/auth";
 import { clearAllUnsent } from "../../lib/unsent";
 import { blocksFactories, factory, merge } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard } from "../../test/fakeBoard";
-import { SettingsView } from "./SettingsView";
+import { prGateNote, SettingsView } from "./SettingsView";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
 vi.mock("../../lib/blocks/client", () => ({ blocksClient: { iam: { me: vi.fn() } } }));
@@ -58,6 +58,19 @@ describe("SettingsView", () => {
     expect(within(form).getByLabelText("Turn limit per stage")).toHaveValue("60");
     expect(within(form).getByLabelText("Cost limit per task (USD)")).toHaveValue("5");
     expect(screen.getByRole("switch", { name: "Pause factory" })).not.toBeChecked();
+  });
+
+  it("builds_the_pr_gate_note_from_the_selected_factory's_list", async () => {
+    resetFakeBoard(factory("blocks", ["data"], { protectedBranches: ["rel", "main"] }));
+    renderSettings();
+    await screen.findByRole("form", { name: "Factory defaults" });
+    const note = "Turning this off lets the factory merge into other branches. A PR into rel or main always waits for you.";
+    expect(within(globalForm()).getByRole("switch", { name: "PR gate" })).toHaveAccessibleDescription(note);
+  });
+
+  it("words_the_pr_gate_note_for_all_factories", () => {
+    expect(prGateNote()).toBe("Turning this off lets the factory merge into other branches. A PR into each factory's protected branches always waits for you.");
+    expect(prGateNote(["main"])).toBe("Turning this off lets the factory merge into other branches. A PR into main always waits for you.");
   });
 
   it("drops_unsaved_changes_when_the_view_unmounts", async () => {
