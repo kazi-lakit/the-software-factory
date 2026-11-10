@@ -267,6 +267,75 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
     });
   });
 
+  describe('dependencies', () => {
+    const base = { factoryId: 'blocks', title: 'X', description: '', repo: 'data' };
+    const code = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => (e instanceof OwnerActionError ? e.code : e));
+
+    test('create stores the list deduped and sorted', async () => {
+      const { owner, put } = setup();
+      await put();
+      await put();
+      const t = await createTask(owner, now, { ...base, dependsOn: ['T-2', 'T-1', 'T-1'] });
+      expect(t.dependsOn).toEqual(['T-1', 'T-2']);
+      expect((await owner.getTask(t.taskId)).dependsOn).toEqual(['T-1', 'T-2']);
+    });
+
+    test.each([
+      ['a non-array', 'T-1'],
+      ['a non-string item', [1]],
+      ['an unknown id', ['T-99']],
+    ])('create refuses %s', async (_n, dependsOn) => {
+      const { owner, put } = setup();
+      await put();
+      expect(await code(createTask(owner, now, { ...base, dependsOn: dependsOn as never }))).toBe('invalid');
+    });
+
+    test('create refuses a task in another factory', async () => {
+      const { owner } = setup();
+      const other = await owner.createTask({ factoryId: 'other', title: 'O', description: '', repo: 'data' });
+      expect(await code(createTask(owner, now, { ...base, dependsOn: [other.taskId] }))).toBe('invalid');
+    });
+
+    test('createTaskAsCore accepts dependsOn', async () => {
+      const { owner, put } = setup();
+      await put();
+      await put();
+      const t = await createTaskAsCore(owner, now, { ...base, dependsOn: ['T-2', 'T-1'] } as never);
+      expect(t.dependsOn).toEqual(['T-1', 'T-2']);
+      expect(await code(createTaskAsCore(owner, now, { ...base, dependsOn: ['T-99'] } as never))).toBe('invalid');
+    });
+
+    test('edit refuses self and cycles', async () => {
+      const { owner, put } = setup();
+      const a = await put();
+      const b = await put({}, { dependsOn: ['T-1'] });
+      expect(await code(editTask(owner, now, 'T-1', a.version, { dependsOn: ['T-1'] }))).toBe('invalid');
+      expect(await code(editTask(owner, now, 'T-1', a.version, { dependsOn: ['T-2'] }))).toBe('invalid');
+      expect(b.dependsOn).toEqual(['T-1']);
+      expect((await owner.getTask('T-1')).dependsOn).toEqual([]);
+    });
+
+    test('edit refuses a bad shape and a task the core is working on', async () => {
+      const { owner, put } = setup();
+      await put();
+      const t = await put({ status: 'spec', stage: 'spec' });
+      expect(await code(editTask(owner, now, 'T-1', 1, { dependsOn: 'T-2' as never }))).toBe('invalid');
+      expect(await code(editTask(owner, now, 'T-2', t.version, { dependsOn: ['T-1'] }))).toBe('not-editable');
+    });
+
+    test('edit writes one set event; an edit that normalizes to the stored list writes nothing', async () => {
+      const { owner, put, ownerEvents } = setup();
+      const t = await put();
+      await put();
+      const u = await editTask(owner, now, 'T-2', 1, { dependsOn: ['T-1'] });
+      expect(u.dependsOn).toEqual(['T-1']);
+      expect(await ownerEvents('T-2')).toEqual([you({ taskId: 'T-2', field: 'dependsOn', from: '[]', to: '["T-1"]', reason: 'edited' })]);
+      expect(await editTask(owner, now, 'T-2', u.version, { dependsOn: ['T-1', 'T-1'] })).toEqual(u);
+      expect(await ownerEvents('T-2')).toHaveLength(1);
+      expect(t.version).toBe(1);
+    });
+  });
+
   describe('editTask', () => {
     test.each(['inbox', 'ready'] as const)('edits a %s task and writes one event per changed field', async (status) => {
       const { owner, put, ownerEvents } = setup();
