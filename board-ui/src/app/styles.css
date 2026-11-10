@@ -29,29 +29,27 @@
   --radius: 0.5rem;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --popover: 222.2 84% 4.9%;
-    --primary: 218 75% 45%;
-    --primary-foreground: 0 0% 96%;
-    --secondary: 217.2 32.6% 17.5%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --high-emphasis: 0 0% 96%;
-    --low-emphasis: 0 0% 62%;
-    --success-bg: 146 40% 16%;
-    --success-fg: 146 60% 75%;
-    --warning-bg: 40 50% 18%;
-    --warning-fg: 43 90% 70%;
-  }
+:root:not([data-theme="light"]) {
+  --background: 222.2 84% 4.9%;
+  --foreground: 210 40% 98%;
+  --card: 222.2 84% 4.9%;
+  --popover: 222.2 84% 4.9%;
+  --primary: 218 75% 45%;
+  --primary-foreground: 0 0% 96%;
+  --secondary: 217.2 32.6% 17.5%;
+  --muted: 217.2 32.6% 17.5%;
+  --muted-foreground: 215 20.2% 65.1%;
+  --accent: 217.2 32.6% 17.5%;
+  --accent-foreground: 210 40% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 210 40% 98%;
+  --border: 217.2 32.6% 17.5%;
+  --high-emphasis: 0 0% 96%;
+  --low-emphasis: 0 0% 62%;
+  --success-bg: 146 40% 16%;
+  --success-fg: 146 60% 75%;
+  --warning-bg: 40 50% 18%;
+  --warning-fg: 43 90% 70%;
 }
 
 * { box-sizing: border-box; }

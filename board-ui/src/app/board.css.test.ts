@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { tokens } from "../test/cssTokens";
 
 // The scaffold's Tailwind scan emits `.grid` and `.outline` utilities, and its
 // styles.css once had a bare `aside` rule that hit every <aside>. jsdom cannot
@@ -72,16 +73,124 @@ describe("the stylesheets", () => {
     expect(cssClashes(read("styles.css"))).toEqual([]);
   });
 
-  it("board_css_defines_the_tokens_with_a_dark_set", () => {
+  it("styles_css_dark_block_does_not_use_prefers_color_scheme", () => {
+    const css = read("styles.css");
+    expect(css).not.toContain("prefers-color-scheme");
+    expect(css).toContain(':root:not([data-theme="light"])');
+  });
+});
+
+const DARK: Record<string, string> = {
+  "--sf-bg": "#080c0d",
+  "--sf-surface": "#0b1112",
+  "--sf-surface-sunk": "#0a0f10",
+  "--sf-text": "#e7efee",
+  "--sf-muted": "#9db0af",
+  "--sf-border": "rgba(157,176,175,0.45)",
+  "--sf-accent": "#5cc8cd",
+  "--sf-accent-soft": "#0c2224",
+  "--sf-accent-text": "#5cc8cd",
+  "--sf-on-accent": "#080c0d",
+  "--sf-done": "#8a9b9a",
+  "--sf-done-soft": "#0a0f10",
+  "--sf-focus": "#5cc8cd",
+  "--sf-added": "#7ee2a8",
+  "--sf-added-soft": "#0d2216",
+  "--sf-removed": "#f2a3a3",
+  "--sf-removed-soft": "#2a1414",
+  "--sf-primary": "#9db0af",
+  "--sf-primary-hover": "#b4c4c3",
+  "--sf-on-primary": "#080c0d",
+  "--sf-primary-soft": "#16201f",
+  "--sf-on-primary-soft": "#e7efee",
+  "--sf-progress": "#9ea7ba",
+  "--sf-chrome-border": "rgba(157,176,175,0.25)",
+  "--sf-needs-tint": "rgba(92,205,160,0.08)"
+};
+
+const LIGHT: Record<string, string> = {
+  "--sf-bg": "#e7efee",
+  "--sf-surface": "#f4f8f7",
+  "--sf-surface-sunk": "#dde7e6",
+  "--sf-text": "#0b1112",
+  "--sf-muted": "#3e5150",
+  "--sf-border": "rgba(11,17,18,0.3)",
+  "--sf-accent": "#0e7c82",
+  "--sf-accent-soft": "#d2eef0",
+  "--sf-accent-text": "#0a6368",
+  "--sf-on-accent": "#ffffff",
+  "--sf-primary": "#0b1112",
+  "--sf-primary-hover": "#22302f",
+  "--sf-on-primary": "#e7efee",
+  "--sf-primary-soft": "#d0dcdb",
+  "--sf-on-primary-soft": "#0b1112",
+  "--sf-progress": "#6b7488",
+  "--sf-done": "#4d5c5b",
+  "--sf-done-soft": "#e0e8e7",
+  "--sf-focus": "#0b1112",
+  "--sf-chrome-border": "rgba(11,17,18,0.2)",
+  "--sf-added": "#166534",
+  "--sf-added-soft": "#dcfce7",
+  "--sf-removed": "#b91c1c",
+  "--sf-removed-soft": "#fee2e2",
+  "--sf-needs-tint": "rgba(14,124,100,0.07)"
+};
+
+const compact = (v: string | undefined) => (v ?? "").replace(/\s+/g, "");
+
+describe("board_css_theme_tokens", () => {
+  it("dark_defaults_on_root_match_the_spec", () => {
+    const t = tokens(read("board.css"), ":root");
+    for (const [k, v] of Object.entries(DARK)) expect(compact(t[k]), k).toBe(compact(v));
+  });
+
+  it("light_block_on_root_data_theme_light_matches_the_spec", () => {
+    const t = tokens(read("board.css"), ':root[data-theme="light"]');
+    for (const [k, v] of Object.entries(LIGHT)) expect(compact(t[k]), k).toBe(compact(v));
+  });
+
+  it("no_prefers_color_scheme_anywhere_in_board_css", () => {
+    expect(read("board.css")).not.toContain("prefers-color-scheme");
+  });
+
+  it("radius_is_3px_and_type_tokens_set", () => {
     const css = read("board.css");
-    const dark = css.slice(css.indexOf("@media (prefers-color-scheme: dark)"));
-    expect(css).toContain("@media (prefers-color-scheme: dark)");
-    for (const token of ["--sf-bg", "--sf-surface", "--sf-text", "--sf-muted", "--sf-border", "--sf-accent", "--sf-done", "--sf-focus"]) {
-      expect(css, token).toMatch(new RegExp(`${token}:`));
-      expect(dark, `dark ${token}`).toMatch(new RegExp(`${token}:`));
-    }
-    expect(css).toMatch(/--sf-font:[^;]*system-ui/);
-    expect(css).toMatch(/--sf-mono:[^;]*monospace/);
-    expect(css).toMatch(/:focus-visible\s*\{[^}]*outline:[^}]*var\(--sf-focus\)/);
+    const t = tokens(css, ":root");
+    expect(t["--sf-radius"]).toBe("3px");
+    expect(t["--sf-size"]).toBe("16px");
+    expect(t["--sf-label-size"]).toBe("12px");
+    expect(t["--sf-label-line"]).toBe("16px");
+    expect(t["--sf-label-tracking"]).toBe("0.16em");
+    expect(t["--sf-mono"]).toMatch(/^SFMono-Regular/);
+    expect(tokens(css, "body")["line-height"]).toBe("24px");
+  });
+
+  it("label_class_uses_mono_label_tokens", () => {
+    const l = tokens(read("board.css"), ".sf-label");
+    expect(l["font-family"]).toBe("var(--sf-mono)");
+    expect(l["font-size"]).toBe("var(--sf-label-size)");
+    expect(l["line-height"]).toBe("var(--sf-label-line)");
+    expect(l["letter-spacing"]).toBe("var(--sf-label-tracking)");
+  });
+
+  it("body_background_is_dot_grid_over_glow_in_both_themes", () => {
+    const css = compact(read("board.css"));
+    for (const s of [
+      "rgba(157,176,175,0.045)",
+      "0.8px",
+      "16px16px",
+      "circleat63%42%,#0e1718,#0a0f10,#080c0d",
+      "rgba(11,17,18,0.035)",
+      "#e7efee",
+      "color-scheme:dark",
+      "color-scheme:light"
+    ])
+      expect(css, s).toContain(s);
+  });
+
+  it("accent_text_replaces_accent_for_paused_and_badge", () => {
+    const css = read("board.css");
+    expect(tokens(css, ".sf-paused").color).toBe("var(--sf-accent-text)");
+    expect(tokens(css, ".sf-badge").color).toBe("var(--sf-accent-text)");
   });
 });

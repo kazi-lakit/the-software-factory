@@ -66,6 +66,12 @@ afterEach(() => {
 });
 
 describe("AppShell", () => {
+  it("app_shell_does_not_render_a_theme_switch", () => {
+    renderShell("/");
+    expect(screen.queryByRole("group", { name: "Theme" })).toBeNull();
+    expect(screen.queryByLabelText("Light theme")).toBeNull();
+  });
+
   it("shows_the_project_the_three_views_the_user_and_sign_out", async () => {
     renderShell("/history");
     const views = screen.getByRole("navigation", { name: "Views" });
