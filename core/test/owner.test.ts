@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { ClaimError, Engine } from '../src/engine.js';
 import { FakeGitHub } from '../src/github.js';
 import {
-  answerTask, cancelTask, createTask, createTaskAsCore, decideGate, editTask, markReady, OwnerActionError, saveFactory, saveRepo, saveSettings,
+  answerTask, cancelTask, createTask, createTaskAsCore, decideGate, editTask, markReady, OwnerActionError, moveLegacySettings, resetRemovedRepoSettings, saveFactory, saveRepo, saveSettings,
   StaleDocError,
 } from '../src/owner.js';
 import { defFixture, repoFixture, seed, seedBlocksFactories } from './factoryFixtures.js';
@@ -660,5 +660,73 @@ describe.each([
     await saveRepo(s, now, null, repoFixture('delta', 'api'));
     await expect(createTask(s, now, { factoryId: 'delta', title: 't', description: '', repo: 'api' })).resolves.toMatchObject({ factoryId: 'delta' });
     await expect(createTask(s, now, { factoryId: 'delta', title: 't', description: '', repo: 'data' })).rejects.toThrow('repo data is not in factory delta');
+  });
+});
+
+describe.each(fixtures)('resetRemovedRepoSettings (%s)', (_name, make) => {
+  test('removes the scope of a repo that is gone, with an inherit event per key', async () => {
+    const { owner } = make();
+    await owner.updateSettingsScope('blocks/gone', undefined, { maxParallel: 3, gates: { pr: false } });
+    await saveSettings(owner, now, 'blocks/data', { maxParallel: 4 });
+    const s = await resetRemovedRepoSettings(owner, now, 'blocks', 'gone');
+    expect(s.factories.blocks!.repos).toEqual({ data: { maxParallel: 4 } });
+    expect((await owner.getSettings()).factories.blocks!.repos).toEqual({ data: { maxParallel: 4 } });
+    expect((await owner.listEvents('-')).map((e) => [e.field, e.from, e.to])).toEqual([
+      ['settings.blocks/data.maxParallel', null, '4'],
+      ['settings.blocks/gone.maxParallel', '3', 'inherit'],
+      ['settings.blocks/gone.gates', '{"pr":false}', 'inherit'],
+    ]);
+  });
+
+  test('refuses a repo that still exists, or a factory that does not', async () => {
+    const { owner } = make();
+    await saveSettings(owner, now, 'blocks/data', { maxParallel: 4 });
+    await expect(resetRemovedRepoSettings(owner, now, 'blocks', 'data')).rejects.toMatchObject({ code: 'invalid' });
+    await expect(resetRemovedRepoSettings(owner, now, 'nope', 'gone')).rejects.toMatchObject({ code: 'invalid' });
+    expect((await owner.getSettings()).factories.blocks!.repos.data).toEqual({ maxParallel: 4 });
+  });
+
+  test('a scope with nothing stored changes nothing', async () => {
+    const { owner } = make();
+    await resetRemovedRepoSettings(owner, now, 'blocks', 'gone');
+    expect(await owner.listEvents('-')).toEqual([]);
+  });
+});
+
+describe('moveLegacySettings', () => {
+  const legacy = () => {
+    const storage = newFakeStorage();
+    const ownerData = new FakeBlocksData('factory-owner', { storage });
+    seedBlocksFactories(ownerData, seed());
+    ownerData.seed('FactorySettings', { scope: 'global', json: JSON.stringify({ paused: true }), version: 1 });
+    ownerData.seed('FactorySettings', { scope: 'data', json: JSON.stringify({ maxParallel: 1 }), version: 1 });
+    ownerData.seed('FactorySettings', { scope: 'os', json: 'null', version: 1 });
+    return { owner: new BlocksStore(ownerData, 'owner'), data: ownerData };
+  };
+
+  test('writes the legacy values under blocks and blocks/<repo>, unchanged, so they can be retired', async () => {
+    const { owner, data } = legacy();
+    const before = await owner.getSettings();
+    expect(await moveLegacySettings(owner)).toEqual(['data', 'global']);
+    expect(await owner.getSettings()).toEqual(before);
+    const status = await owner.legacySettingsStatus();
+    expect({ unmoved: status.unmoved, unretired: [...status.unretired].sort() }).toEqual({ unmoved: [], unretired: ['data', 'global'] });
+    expect(data.rows('FactorySettings').filter((r) => String(r.scope).startsWith('blocks')).map((r) => r.scope).sort()).toEqual(['blocks', 'blocks/data']);
+    expect(await owner.retireLegacySettings()).toEqual({ retired: ['data', 'global'], remaining: [] });
+    expect(await owner.getSettings()).toEqual(before);
+    expect(await owner.listEvents('-')).toEqual([]);
+  });
+
+  test('is safe to repeat and does nothing without legacy rows', async () => {
+    const { owner } = legacy();
+    await moveLegacySettings(owner);
+    expect(await moveLegacySettings(owner)).toEqual([]);
+    expect(await moveLegacySettings(new MemoryStore({ factories: seed() }))).toEqual([]);
+  });
+
+  test('refuses while factory blocks does not exist', async () => {
+    const data = new FakeBlocksData('factory-owner');
+    data.seed('FactorySettings', { scope: 'global', json: JSON.stringify({ paused: true }), version: 1 });
+    await expect(moveLegacySettings(new BlocksStore(data, 'owner'))).rejects.toMatchObject({ code: 'invalid' });
   });
 });

@@ -303,6 +303,53 @@ export async function saveSettings(
   return updated;
 }
 
+/**
+ * Resets the settings of a repo that no longer exists (an orphaned `<factory>/<repo>` scope) so they are inherited from the
+ * factory again: the scope is removed and one event per key says `inherit`. A repo that still exists goes through saveSettings.
+ */
+export async function resetRemovedRepoSettings(store: BoardStore, now: () => Date, factoryId: string, repoId: string): Promise<StoredSettings> {
+  if (!isValidId(factoryId) || !isValidId(repoId)) invalid(`scope must be <factory id>/<repo id> (${REPO_ID_RULE})`);
+  await requireFactory(store, factoryId);
+  if ((await store.listFactoryRepos(factoryId)).some((r) => r.repoId === repoId)) invalid(`repo ${repoId} still exists in factory ${factoryId}; edit its settings instead`);
+  const stored = await store.getSettings();
+  const entry = stored.factories[factoryId];
+  const read = entry?.repos[repoId];
+  if (read === undefined) return stored;
+  const scope = `${factoryId}/${repoId}`;
+  const at = now().toISOString();
+  const events: FactoryEvent[] = SETTING_KEYS.filter((k) => read[k] !== undefined).map((k) => ({
+    taskId: '-', factoryId, actor: OWNER_ACTOR, action: 'set', field: `settings.${scope}.${k}`,
+    from: JSON.stringify(read[k]), to: INHERIT, reason: 'settings of a removed repo reset', at,
+  }));
+  await store.updateSettingsScope(scope, read, null);
+  await writeEvents(store, events);
+  const { [repoId]: _gone, ...repos } = entry!.repos;
+  return { factories: { ...stored.factories, [factoryId]: { ...entry!, repos } } };
+}
+
+/**
+ * Moves the settings rows from before factories (`global`, bare repo ids) to the `blocks` and `blocks/<repo>` scopes, which
+ * must belong to an existing factory `blocks`. Each moved value is written unchanged, so the effective settings do not
+ * change and no event is written. Returns the legacy names moved; empty when there is nothing to move (always, on stores
+ * that hold no legacy rows). Safe to repeat. The caller then retires the legacy rows (`retireLegacySettings`).
+ */
+export async function moveLegacySettings(store: BoardStore): Promise<string[]> {
+  const { unmoved } = await store.legacySettingsStatus();
+  if (unmoved.length === 0) return [];
+  await requireFactory(store, 'blocks');
+  const stored = (await store.getSettings()).factories.blocks;
+  // Repos first, so a half-done move never leaves the factory scope moved with its repos still legacy.
+  const ordered = [...unmoved.filter((n) => n !== 'global'), ...unmoved.filter((n) => n === 'global')];
+  for (const name of ordered) {
+    if (name === 'global') await store.updateSettingsScope('blocks', stored?.factory ?? DEFAULT_SETTINGS, stored?.factory ?? DEFAULT_SETTINGS);
+    else {
+      const value = stored?.repos[name];
+      if (value !== undefined) await store.updateSettingsScope(`blocks/${name}`, value, value);
+    }
+  }
+  return ordered;
+}
+
 /** A checked patch over `current`: undefined keeps, null removes, gates merge per gate. */
 function mergeSettings(current: RepoSettings, patch: RepoSettingsPatch): RepoSettings {
   const next: Record<string, unknown> = { ...current };
