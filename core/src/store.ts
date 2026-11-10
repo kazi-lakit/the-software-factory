@@ -73,7 +73,7 @@ export class MemoryStore implements BoardStore {
   }
 
   private coreOnly(method: string): void {
-    if (this.identity === 'owner') throw new OwnerOnlyError(`${method} is done by the factory core, not on the Board`);
+    if (this.identity === 'owner') throw new ForbiddenError(`${method} is done by the factory core, not on the Board`);
   }
 
   /** Runs a read against the current state. */
@@ -226,6 +226,12 @@ export class MemoryStore implements BoardStore {
       if (i < 0) this.state.health.push(clone(h));
       else this.state.health[i] = clone(h);
     });
+  }
+
+  /** A file or memory store converts the legacy shape on load: there is nothing to retire. */
+  async retireLegacySettings(): Promise<{ retired: string[] }> {
+    this.ownerOnly('retireLegacySettings');
+    return { retired: [] };
   }
 
   getSettings(): Promise<StoredSettings> {

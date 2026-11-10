@@ -270,21 +270,27 @@ export const STEPS: Step[] = [
     },
   },
   {
-    label: '13 FactoryDef and FactoryRepo: core insert and edit forbidden, owner insert and edit ok',
+    label: '13 FactoryDef and FactoryRepo: core insert and edit forbidden, core read ok, owner insert and edit ok',
     async run(d, c) {
-      // The ids start with GATE- and have capitals, which no real factory id has: the core skips these rows as invalid.
-      const factoryId = `GATE-${c.suffix}`;
-      const repoKey = `${factoryId}/gate`;
+      // Fixed ids, upserted, so repeated gate runs do not grow the tables. They start with GATE- and have capitals, which
+      // no real factory id has: the core skips these rows as invalid.
+      const factoryId = 'GATE-gate';
+      const repoKey = 'GATE-gate/gate';
       const defRow = { factoryId, name: 'gate', protectedBranches: '["main"]', gitName: '', gitEmail: '', docsPath: '', patAccount: 'gate', active: 0, version: 1, writeId: '' };
       const repoRow = { repoKey, factoryId, repoId: 'gate', remote: 'gate', baseBranch: 'dev', checks: '{}', version: 1, writeId: '' };
       for (const [schema, row, key, field] of [['FactoryDef', defRow, { factoryId }, 'name'], ['FactoryRepo', repoRow, { repoKey }, 'remote']] as const) {
+        const existed = (await d.owner.list(schema, key, ['version'])).length === 1;
         const denied = await d.core.insert(schema, row);
         expect(denied.kind === 'forbidden', `core insert of ${schema} answered ${denied.kind}`);
-        expect((await d.owner.list(schema, key, ['version'])).length === 0, `refused core insert of ${schema} left a row`);
+        expect((await d.owner.list(schema, key, ['version'])).length === (existed ? 1 : 0), `refused core insert of ${schema} changed the rows`);
         const ok = await d.owner.insert(schema, row);
-        expect(ok.kind === 'inserted', `owner insert of ${schema} answered ${ok.kind}`);
+        expect(ok.kind === 'inserted' || (existed && ok.kind === 'duplicate'), `owner insert of ${schema} answered ${ok.kind}`);
+        expect(await d.core.list(schema, key, ['version']).then((rows) => rows.length === 1, () => false), `core could not read ${schema}`);
         await expectDeniedUpdate(d.core, d.owner, schema, key, field, 'core');
-        const edit = await d.owner.update(schema, key, { [field]: 'gate owner', version: 2, writeId: `gate-${c.suffix}-${field}` });
+        const [cur] = await d.owner.list(schema, key, ['version']);
+        const version = Number(cur?.version);
+        expect(Number.isInteger(version), `${schema} row has no version`);
+        const edit = await d.owner.update(schema, { ...key, version }, { [field]: `gate owner ${c.suffix}`, version: version + 1, writeId: `gate-${c.suffix}-${field}` });
         expect(edit.kind === 'applied', `owner edit of ${schema} was ${edit.kind}`);
       }
     },
@@ -293,15 +299,19 @@ export const STEPS: Step[] = [
     label: '14 FactoryHealth: owner insert and edit forbidden, core insert and edit ok',
     async run(d, c) {
       const row = (factoryId: string) => ({ factoryId, patPresent: 0, checkedAt: new Date().toISOString(), version: 1, writeId: '' });
-      const ownerId = `GATE-${c.suffix}-owner`;
+      const ownerId = 'GATE-gate-owner';
       const denied = await d.owner.insert('FactoryHealth', row(ownerId));
       expect(denied.kind === 'forbidden', `owner insert of FactoryHealth answered ${denied.kind}`);
       expect((await d.core.list('FactoryHealth', { factoryId: ownerId }, ['version'])).length === 0, 'refused owner insert of FactoryHealth left a row');
-      const factoryId = `GATE-${c.suffix}`;
+      const factoryId = 'GATE-gate';
+      const existed = (await d.core.list('FactoryHealth', { factoryId }, ['version'])).length === 1;
       const ok = await d.core.insert('FactoryHealth', row(factoryId));
-      expect(ok.kind === 'inserted', `core insert of FactoryHealth answered ${ok.kind}`);
+      expect(ok.kind === 'inserted' || (existed && ok.kind === 'duplicate'), `core insert of FactoryHealth answered ${ok.kind}`);
       await expectDeniedUpdate(d.owner, d.owner, 'FactoryHealth', { factoryId }, 'checkedAt', 'owner');
-      const edit = await d.core.update('FactoryHealth', { factoryId }, { patPresent: 1, version: 2, writeId: `gate-${c.suffix}-h` });
+      const [cur] = await d.core.list('FactoryHealth', { factoryId }, ['version']);
+      const version = Number(cur?.version);
+      expect(Number.isInteger(version), 'FactoryHealth row has no version');
+      const edit = await d.core.update('FactoryHealth', { factoryId, version }, { patPresent: 1, checkedAt: new Date().toISOString(), version: version + 1, writeId: `gate-${c.suffix}-h` });
       expect(edit.kind === 'applied', `core edit of FactoryHealth was ${edit.kind}`);
     },
   },

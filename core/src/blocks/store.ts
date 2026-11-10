@@ -63,6 +63,15 @@ export const CLEARABLE_FIELDS: Partial<Record<SchemaName, readonly string[]>> = 
 const LEGACY_FACTORY = 'blocks';
 /** Settings rows written before plan 6: scope `global` is factory `blocks`, any other scope a repo of it. */
 const LEGACY_FACTORY_SCOPE = 'global';
+/** The repo ids that had a bare settings scope before plan 6. */
+const LEGACY_REPO_IDS: ReadonlySet<string> = new Set(['os', 'iam', 'monitor', 'logic', 'data', 'localization', 'release']);
+/** A stored settings json that holds an object (not null, not malformed). */
+const isLive = (json: Value | undefined): boolean => parseObject(json) !== undefined;
+/** A json that was not retired: anything but null or the text `null` (a malformed one still counts as a row). */
+const hasJson = (json: Value | undefined): boolean => json !== null && json !== undefined && String(json) !== 'null';
+/** The legacy rows count only while the raw `global` row holds a value; `retireLegacySettings` nulls it. */
+const legacyIsOn = (all: Row[]): boolean => all.some((r) => r.scope === LEGACY_FACTORY_SCOPE && hasJson(r.json));
+const isLegacyRepoRow = (r: Row, on: boolean): boolean => on && LEGACY_REPO_IDS.has(text(r.scope)) && hasJson(r.json);
 
 /** An update input with every clear as ''. A null for any other field (an Int, a required String) cannot be stored. */
 function encodeUpdate(schema: SchemaName, input: Record<string, Value>): Record<string, Value> {
@@ -98,7 +107,7 @@ function encodeTaskValue(key: keyof Task, value: Task[keyof Task]): Value {
 function decodeTask(r: Row): Task {
   return {
     taskId: text(r.taskId),
-    factoryId: opt(r.factoryId) ?? LEGACY_FACTORY,
+    factoryId: str(r.factoryId) ?? LEGACY_FACTORY,
     title: text(r.title),
     description: text(r.description),
     repo: text(r.repo) as RepoId,
@@ -136,7 +145,7 @@ const decodeRun = (r: Row): Run => ({
 });
 
 const decodeEvent = (r: Row): FactoryEvent => ({
-  taskId: text(r.taskId), factoryId: opt(r.factoryId) ?? LEGACY_FACTORY, actor: text(r.actor), action: text(r.action) as FactoryEvent['action'],
+  taskId: text(r.taskId), factoryId: str(r.factoryId) ?? LEGACY_FACTORY, actor: text(r.actor), action: text(r.action) as FactoryEvent['action'],
   field: str(r.field), from: str(r.from), to: str(r.to), reason: text(r.reason), at: text(r.at),
 });
 
@@ -403,6 +412,10 @@ export class BlocksStore implements BoardStore {
     const what = `factory ${after.factoryId}`;
     const fields = encodeDef(after);
     if (before === null) {
+      const all = await this.data.list('FactorySettings', {}, ['scope', 'json']);
+      if (all.some((r) => r.scope === after.factoryId && isLegacyRepoRow(r, legacyIsOn(all)))) {
+        throw new Error(`factory id ${after.factoryId} collides with legacy settings; run factory migrate first`);
+      }
       await this.insertVersioned('FactoryDef', { factoryId: after.factoryId }, { factoryId: after.factoryId, ...fields }, what);
       return { ...structuredClone(after), version: 1 };
     }
@@ -458,7 +471,7 @@ export class BlocksStore implements BoardStore {
   }
 
   async setFactoryHealth(h: FactoryHealth): Promise<void> {
-    if (this.identity !== 'core') throw new OwnerOnlyError('setFactoryHealth is done by the factory core');
+    if (this.identity !== 'core') throw new ForbiddenError('setFactoryHealth is done by the factory core, not on the Board');
     const fields: Record<string, Value> = { patPresent: h.patPresent ? 1 : 0, checkedAt: h.checkedAt };
     const key = { factoryId: h.factoryId };
     // The core is the only writer: an insert that finds the row (or an update that loses a race) is retried once against it.
@@ -482,28 +495,50 @@ export class BlocksStore implements BoardStore {
 
   /**
    * Every settings value by its current scope name (`<f>` or `<f>/<r>`), and the rows stored under those names.
-   * Until `migrate` runs, rows from before plan 6 count as factory `blocks`: `global` is its factory scope and any other
-   * scope without a slash is its repo, unless a factory has that id. A row under the current name wins over a legacy one.
+   * While the raw `global` row holds a value (until `retireLegacySettings`), rows from before plan 6 count as factory
+   * `blocks`: `global` is its factory scope and a bare legacy repo id (with a value) its repo. A row under the current
+   * name wins over a legacy one; a bare scope with a null json holds no value.
    */
   private async settingsView(): Promise<{ values: Map<string, Settings | RepoSettings | undefined>; rows: Map<string, Row> }> {
     const all = await this.data.list('FactorySettings', {}, ['scope', 'json', 'version']);
     const values = new Map<string, Settings | RepoSettings | undefined>();
     const rows = new Map<string, Row>();
-    const legacy = all.some((r) => r.scope === LEGACY_FACTORY_SCOPE);
-    const isLegacyRepoScope = (scope: string, ids: Set<string>) => legacy && !scope.includes('/') && scope !== LEGACY_FACTORY && !ids.has(scope);
-    const factoryIds = legacy ? new Set((await this.data.list('FactoryDef', {}, ['factoryId'])).map((r) => text(r.factoryId))) : new Set<string>();
+    const on = legacyIsOn(all);
     for (const r of all) {
       const scope = text(r.scope);
-      if (scope === LEGACY_FACTORY_SCOPE) values.set(LEGACY_FACTORY, scopeValue(true, r.json));
-      else if (isLegacyRepoScope(scope, factoryIds)) values.set(repoKey(LEGACY_FACTORY, scope), scopeValue(false, r.json));
+      if (scope === LEGACY_FACTORY_SCOPE) {
+        if (on) values.set(LEGACY_FACTORY, scopeValue(true, r.json));
+      } else if (isLegacyRepoRow(r, on)) values.set(repoKey(LEGACY_FACTORY, scope), scopeValue(false, r.json));
     }
     for (const r of all) {
       const scope = text(r.scope);
-      if (scope === LEGACY_FACTORY_SCOPE || isLegacyRepoScope(scope, factoryIds)) continue;
-      values.set(scope, scopeValue(!scope.includes('/'), r.json));
+      if (scope === LEGACY_FACTORY_SCOPE || isLegacyRepoRow(r, on)) continue;
       rows.set(scope, r);
+      if (scope.includes('/') || isLive(r.json)) values.set(scope, scopeValue(!scope.includes('/'), r.json));
     }
     return { values, rows };
+  }
+
+  async retireLegacySettings(): Promise<{ retired: string[] }> {
+    this.ownerOnly('retireLegacySettings');
+    const all = await this.data.list('FactorySettings', {}, ['scope', 'json', 'version']);
+    if (!legacyIsOn(all)) return { retired: [] };
+    const newRows = new Set(all.filter((r) => !isLegacyRepoRow(r, true) && r.scope !== LEGACY_FACTORY_SCOPE).map((r) => text(r.scope)));
+    const retired: string[] = [];
+    let remaining = 0;
+    // The repo rows first: nulling `global` first would make the rest read as factory scopes.
+    for (const r of all) {
+      if (!isLegacyRepoRow(r, true)) continue;
+      const scope = text(r.scope);
+      if (!newRows.has(repoKey(LEGACY_FACTORY, scope))) { remaining++; continue; }
+      await this.writeSettings(scope, 'null');
+      retired.push(scope);
+    }
+    if (remaining === 0 && newRows.has(LEGACY_FACTORY)) {
+      await this.writeSettings(LEGACY_FACTORY_SCOPE, 'null');
+      retired.push(LEGACY_FACTORY_SCOPE);
+    }
+    return { retired };
   }
 
   async getSettings(): Promise<StoredSettings> {

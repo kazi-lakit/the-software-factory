@@ -12,6 +12,7 @@ export const newFakeStorage = (): FakeStorage => ({ tables: new Map(), counter: 
 export class FakeBlocksData implements BlocksData {
   private readonly storage: FakeStorage;
   private readonly extra = new Set<string>();
+  private readonly revoked = new Set<string>();
   /** Pending lost replies: true for any table, or the one table named. */
   private failNext: Record<'insert' | 'update', SchemaName | boolean> = { insert: false, update: false };
 
@@ -41,6 +42,9 @@ export class FakeBlocksData implements BlocksData {
   /** Test setup: lets this role do `op` on `schema` although the access matrix says no (proves a gate can fail). */
   grant(schema: SchemaName, op: Operation): void { this.extra.add(`${schema}:${op}`); }
 
+  /** Test setup: takes `op` on `schema` away from this role although the access matrix gives it (proves a gate can fail). */
+  revoke(schema: SchemaName, op: Operation): void { this.revoked.add(`${schema}:${op}`); }
+
   /** The next `op` (on `schema`, if given) is done, but its reply is lost: insert throws, update answers unknown. */
   failNextReply(op: 'insert' | 'update', schema?: SchemaName): void { this.failNext[op] = schema ?? true; }
 
@@ -61,6 +65,7 @@ export class FakeBlocksData implements BlocksData {
   rows(schema: SchemaName): Row[] { return (this.storage.tables.get(schema) ?? []).map(r => ({ ...r })); }
 
   private allowed(schema: SchemaName, op: Operation): boolean {
+    if (this.revoked.has(`${schema}:${op}`)) return false;
     return this.role === 'any' || this.extra.has(`${schema}:${op}`) || (ACCESS[schema][op] ?? []).includes(this.role);
   }
   private table(schema: SchemaName): Row[] {

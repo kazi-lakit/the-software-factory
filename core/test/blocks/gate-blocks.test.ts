@@ -81,14 +81,32 @@ describe('runGate', () => {
   it('steps 13 to 15 leave only GATE- rows in the factory tables and nothing live', async () => {
     const { deps, owner, lines } = setup();
     expect(await runGate(deps)).toBe(true);
-    expect(lines).toContain('13 FactoryDef and FactoryRepo: core insert and edit forbidden, owner insert and edit ok: pass');
-    expect(owner.rows('FactoryDef')).toMatchObject([{ factoryId: 'GATE-abcd1234', name: 'gate owner', active: 0, version: 2 }]);
-    expect(owner.rows('FactoryRepo')).toMatchObject([{ repoKey: 'GATE-abcd1234/gate', remote: 'gate owner', version: 2 }]);
-    expect(owner.rows('FactoryHealth')).toMatchObject([{ factoryId: 'GATE-abcd1234', patPresent: 1, version: 2 }]);
+    expect(lines.some((l) => l.startsWith('13 ') && l.endsWith(': pass'))).toBe(true);
+    expect(owner.rows('FactoryDef')).toMatchObject([{ factoryId: 'GATE-gate', name: 'gate owner abcd1234', active: 0, version: 2 }]);
+    expect(owner.rows('FactoryRepo')).toMatchObject([{ repoKey: 'GATE-gate/gate', remote: 'gate owner abcd1234', version: 2 }]);
+    expect(owner.rows('FactoryHealth')).toMatchObject([{ factoryId: 'GATE-gate', patPresent: 1, version: 2 }]);
     expect(owner.rows('FactoryTask').find((r) => r.taskId === 'GATE-abcd1234-fid')).toMatchObject({ factoryId: 'blocks', status: 'cancelled', version: 1 });
-    // No real factory can have such an id, so the core skips the rows.
-    expect((await deps.coreStore.listFactoryDefs()).every((x) => x.factoryId.startsWith('GATE-'))).toBe(true);
-    expect((await new BlocksStore(deps.core, 'core').listFactoryDefs())[0]!.factoryId).toMatch(/^GATE-/);
+    // The def and repo rows carry GATE- ids no real factory has (capitals fail the id pattern), so the core skips them.
+    expect((await deps.coreStore.listFactoryDefs()).map((x) => x.factoryId)).toEqual(['GATE-gate']);
+  });
+
+  it('repeated gate runs reuse the fixed def, repo and health rows', async () => {
+    const { deps, owner } = setup();
+    expect(await runGate(deps)).toBe(true);
+    deps.suffix = () => 'ffff0000';
+    expect(await runGate(deps)).toBe(true);
+    expect(owner.rows('FactoryDef')).toMatchObject([{ version: 3, name: 'gate owner ffff0000' }]);
+    expect(owner.rows('FactoryRepo')).toHaveLength(1);
+    expect(owner.rows('FactoryHealth')).toMatchObject([{ version: 3 }]);
+  });
+
+  it('step 13 FAILs when the core cannot read FactoryDef', async () => {
+    const { deps, lines } = setup();
+    (deps.core as FakeBlocksData).revoke('FactoryDef', 'read');
+    expect(await runGate(deps)).toBe(false);
+    const failed = lines.filter((l) => l.includes('FAIL')).map((l) => l.split(' ')[0]);
+    expect(failed).toContain('13');
+    expect(lines.find((l) => l.startsWith('13 '))).toContain('core could not read FactoryDef');
   });
 
   it('step 13 FAILs when the core may insert a FactoryDef', async () => {

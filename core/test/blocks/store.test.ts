@@ -109,7 +109,7 @@ describe('BlocksStore factories', () => {
     await expect(core.saveFactoryRepo(null, repoFixture('delta', 'api'))).rejects.toBeInstanceOf(OwnerOnlyError);
     expect(data.calls).toBe(0);
     const owner = new BlocksStore(counting(new FakeBlocksData('factory-owner')), 'owner');
-    await expect(owner.setFactoryHealth({ factoryId: 'delta', patPresent: true, checkedAt: 't' })).rejects.toBeInstanceOf(OwnerOnlyError);
+    await expect(owner.setFactoryHealth({ factoryId: 'delta', patPresent: true, checkedAt: 't' })).rejects.toBeInstanceOf(ForbiddenError);
   });
 
   it('under the access rules the core reads defs and writes health, the owner writes defs and reads health', async () => {
@@ -183,10 +183,56 @@ describe('BlocksStore factories', () => {
       expect((await s.getSettings()).factories.blocks!.repos).toEqual({});
     });
 
-    it('a factory with that id makes the scope its factory scope, not a legacy repo', async () => {
+    it('a factory named like a legacy repo never gets that repo\'s settings', async () => {
       const { s, data } = legacy();
       seedBlocksFactories(data, { defs: [defFixture('data')], repos: [] });
-      expect((await s.getSettings()).factories).toMatchObject({ data: { factory: { ...DEFAULT_SETTINGS, maxParallel: 1 } }, blocks: { repos: {} } });
+      const got = (await s.getSettings()).factories;
+      expect(got.blocks!.repos).toEqual({ data: { maxParallel: 1 } });
+      expect(got.data).toBeUndefined();
+    });
+
+    it('creating a factory whose id is a live legacy repo scope is refused until the legacy rows are retired', async () => {
+      const { s, data } = legacy();
+      await expect(s.saveFactoryDef(null, defFixture('data'))).rejects.toThrow('factory id data collides with legacy settings; run factory migrate first');
+      expect(data.rows('FactoryDef')).toEqual([]);
+      // `os` has a null legacy row (removed): no collision. Ids that were never repos are free.
+      await s.saveFactoryDef(null, defFixture('os'));
+      await s.saveFactoryDef(null, defFixture('delta'));
+      await s.updateSettingsScope('blocks', { ...DEFAULT_SETTINGS, paused: true }, { ...DEFAULT_SETTINGS, paused: true });
+      await s.updateSettingsScope('blocks/data', { maxParallel: 1 }, { maxParallel: 1 });
+      await s.retireLegacySettings();
+      await expect(s.saveFactoryDef(null, defFixture('data'))).resolves.toMatchObject({ factoryId: 'data' });
+    });
+
+    it('retireLegacySettings nulls the raw rows whose value is now under the new scopes, and is idempotent', async () => {
+      const { s, data } = legacy();
+      expect(await s.retireLegacySettings()).toEqual({ retired: [] });
+      await s.updateSettingsScope('blocks/data', { maxParallel: 1 }, { maxParallel: 1 });
+      // The legacy repo row `data` has moved, but `global` has not: global stays (and so the reader's legacy mode).
+      expect(await s.retireLegacySettings()).toEqual({ retired: ['data'] });
+      expect(data.rows('FactorySettings').find((r) => r.scope === 'global')!.json).toBe('{"paused":true}');
+      await s.updateSettingsScope('blocks', { ...DEFAULT_SETTINGS, paused: true }, { ...DEFAULT_SETTINGS, paused: true });
+      expect(await s.retireLegacySettings()).toEqual({ retired: ['global'] });
+      expect(await s.retireLegacySettings()).toEqual({ retired: [] });
+      expect(data.rows('FactorySettings').map((r) => [r.scope, r.json])).toEqual([
+        ['global', 'null'], ['data', 'null'], ['os', 'null'], ['blocks/data', '{"maxParallel":1}'], ['blocks', JSON.stringify({ ...DEFAULT_SETTINGS, paused: true })],
+      ]);
+      // The nulled rows are ignored: no phantom factory `data`, and the new values still read.
+      expect(await s.getSettings()).toEqual({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: { data: { maxParallel: 1 } } } } });
+    });
+
+    it('retireLegacySettings keeps legacy mode while a repo row has not moved, and is the owner\'s', async () => {
+      const { s } = legacy();
+      await s.updateSettingsScope('blocks', { ...DEFAULT_SETTINGS, paused: true }, { ...DEFAULT_SETTINGS, paused: true });
+      expect(await s.retireLegacySettings()).toEqual({ retired: [] });
+      expect((await s.getSettings()).factories.blocks!.repos).toEqual({ data: { maxParallel: 1 } });
+      await expect(new BlocksStore(new FakeBlocksData('any'), 'core').retireLegacySettings()).rejects.toBeInstanceOf(OwnerOnlyError);
+    });
+
+    it('a stored empty factoryId stays empty; only an absent one means blocks', async () => {
+      const { s, data } = legacy();
+      data.seed('FactoryEvent', { eventId: 'e1', taskId: '-', factoryId: '', actor: 'x', action: 'move', reason: '', at: '2026-01-01T00:00:00.000Z' });
+      expect((await s.listEvents('-'))[0]!.factoryId).toBe('');
     });
 
     it('setSettings writes new scopes and hides legacy repo scopes that are left out', async () => {

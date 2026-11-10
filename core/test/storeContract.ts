@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { NotFoundError, OwnerOnlyError, VersionConflictError, type BoardStore, type StoreIdentity } from '../src/store.js';
+import { ForbiddenError, NotFoundError, OwnerOnlyError, VersionConflictError, type BoardStore, type StoreIdentity } from '../src/store.js';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
 
@@ -115,6 +115,10 @@ export function runStoreContract(
       expect(first).not.toHaveProperty('approvalId');
       expect(await s.addApproval(a)).toEqual(first);
       expect(await s.listApprovals('T-1')).toEqual([first]);
+    });
+    test('retireLegacySettings has nothing to retire on a fresh store, and is the owner\'s', async () => {
+      expect(await (await make('owner')).retireLegacySettings()).toEqual({ retired: [] });
+      await expect((await make('core')).retireLegacySettings()).rejects.toBeInstanceOf(OwnerOnlyError);
     });
     test('empty store settings are defaults', async () => {
       expect(await (await make()).getSettings()).toEqual({ factories: {} });
@@ -239,7 +243,7 @@ export function runStoreContract(
         await core.setFactoryHealth(h);
         await core.setFactoryHealth({ ...h, patPresent: false });
         expect(await core.listFactoryHealth()).toEqual([{ ...h, patPresent: false }]);
-        await expect((await make('owner')).setFactoryHealth(h)).rejects.toBeInstanceOf(OwnerOnlyError);
+        await expect((await make('owner')).setFactoryHealth(h)).rejects.toBeInstanceOf(ForbiddenError);
       });
       test('tasks in two factories with the same repo id keep their factoryId', async () => {
         const s = await make();
