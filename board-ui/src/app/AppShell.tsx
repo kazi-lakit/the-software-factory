@@ -1,9 +1,9 @@
 import type { MouseEvent, ReactNode } from "react";
 import { useAuth } from "./providers/AuthProvider";
 import { useCurrentUser, userDisplayName } from "../features/profile/useCurrentUser";
+import { useSelectedFactory } from "../features/factories/useFactories";
 import { useSettings } from "../features/settings/useSettings";
 import { clearAllUnsent } from "../lib/unsent";
-import { blocksSettings } from "../lib/blocksSettings";
 
 export const PROJECT_NAME = "the-software-factory";
 
@@ -26,10 +26,17 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
   const me = useCurrentUser();
   const settings = useSettings();
   const user = userDisplayName(me.data?.data);
-  const paused = (settings.data ? blocksSettings(settings.data).factory.paused : false) === true;
+  const [picked] = useSelectedFactory();
+  const stored = settings.data?.factories ?? {};
+  // One factory picked: its own pause. All: every factory that is paused, by id. A factory without stored settings is running.
+  const pausedIds = picked === "all"
+    ? Object.entries(stored).filter(([, entry]) => entry.factory.paused === true).map(([id]) => id)
+    : stored[picked]?.factory.paused === true ? [picked] : [];
+  const paused = pausedIds.length > 0;
   // Without settings the shell cannot say whether the factory runs; it says so rather than show nothing.
   const pauseUnknown = !settings.data && settings.isError;
-  const pauseText = paused ? "Factory paused" : pauseUnknown ? "Pause state unknown" : "";
+  const pausedText = picked === "all" ? `${pausedIds.length === 1 ? "Factory" : "Factories"} paused: ${pausedIds.join(", ")}` : "Factory paused";
+  const pauseText = paused ? pausedText : pauseUnknown ? "Pause state unknown" : "";
   const pauseClass = paused ? "sf-paused" : pauseUnknown ? "sf-paused-unknown" : "sf-paused-off";
 
   // A plain click stays in the app; a modified or middle click opens the link the browser's way.

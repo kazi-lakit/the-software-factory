@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FactoryEvent } from "@factory/core";
+import { blocksFactories, factory, merge } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard } from "../../test/fakeBoard";
 import { HistoryView } from "./HistoryView";
 
@@ -141,7 +142,7 @@ describe("HistoryView", () => {
     seedTaskRow("T-10");
     renderHistory();
     const select = await screen.findByLabelText("Task");
-    await waitFor(() => expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["All tasks", "Settings", "T-2", "T-10"]));
+    await waitFor(() => expect(within(select).getAllByRole("option").map((o) => o.textContent)).toEqual(["All tasks", "Settings and factories", "T-2", "T-10"]));
   });
 
   it("says_so_when_the_filters_match_nothing", async () => {
@@ -187,5 +188,42 @@ describe("HistoryView", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
     await screen.findByText("No history yet.");
     expect(listTasks).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("HistoryView factory filter", () => {
+  const forFactory = (factoryId: string, field: string, at: string, from: string | null, to: string): FactoryEvent => ({
+    action: "set", actor: "you", at, factoryId, field, from, reason: "saved", taskId: "-", to
+  });
+
+  beforeEach(() => {
+    resetFakeBoard(merge(blocksFactories(), factory("delta", ["api"], { name: "Delta" })));
+  });
+
+  it("filtering_by_delta_hides_blocks_events", async () => {
+    await addEvents(
+      forFactory("blocks", "settings.blocks.maxParallel", DAY1, "2", "3"),
+      forFactory("delta", "def.name", DAY2, "Delta", "Delta Two"),
+      forFactory("delta", "repo.api.checks", DAY3, '{"a":1}', '{"a":2}')
+    );
+    renderHistory();
+    await screen.findByRole("table", { name: "History" });
+    expect(fields()).toEqual(["repo.api.checks", "def.name", "settings.blocks.maxParallel"]);
+    const picker = screen.getByLabelText("Factory", { selector: "select" });
+    await waitFor(() => expect(picker.querySelector('option[value="delta"]')).not.toBeNull());
+    fireEvent.change(picker, { target: { value: "delta" } });
+    expect(fields()).toEqual(["repo.api.checks", "def.name"]);
+    fireEvent.change(picker, { target: { value: "blocks" } });
+    expect(fields()).toEqual(["settings.blocks.maxParallel"]);
+    fireEvent.change(picker, { target: { value: "all" } });
+    expect(fields()).toHaveLength(3);
+  });
+
+  it("shows_a_definition_events_field_old_and_new_values", async () => {
+    await addEvents(forFactory("delta", "def.name", DAY1, "Delta", "Delta Two"));
+    renderHistory();
+    const row = (await screen.findByText("def.name")).closest("tr")!;
+    expect(within(row).getByText("Factory")).toBeInTheDocument();
+    expect(within(row).getByText("Delta → Delta Two")).toBeInTheDocument();
   });
 });

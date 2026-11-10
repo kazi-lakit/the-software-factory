@@ -871,3 +871,88 @@ textarea.sf-input {
   color: var(--sf-muted);
   font-size: var(--sf-size-small);
 }
+
+/* Settings tabs and the Factories tab */
+.sf-tabs {
+  border-bottom: 1px solid var(--sf-border);
+  display: flex;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.sf-tab {
+  background: none;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--sf-muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 8px 12px;
+}
+
+.sf-tab[aria-selected="true"] {
+  border-bottom-color: var(--sf-accent);
+  color: inherit;
+}
+
+.sf-tab:focus-visible {
+  outline: 2px solid var(--sf-accent);
+  outline-offset: -2px;
+}
+
+.sf-plain-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sf-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.sf-chip {
+  align-items: center;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  display: inline-flex;
+  gap: 6px;
+  padding: 2px 8px;
+}
+
+.sf-chip-remove {
+  background: none;
+  border: 0;
+  color: var(--sf-muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0 2px;
+}
+
+.sf-checks-diff {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.sf-checks-diff pre {
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+}
+
+.sf-factory,
+.sf-skipped {
+  margin-top: 12px;
+}
+
+.sf-pat-missing {
+  font-weight: 600;
+}

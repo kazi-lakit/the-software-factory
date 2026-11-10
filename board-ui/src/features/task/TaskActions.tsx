@@ -5,8 +5,8 @@ import {
   canMove, cancelTask, editTask, EDITABLE_STATUSES, markReady, type RepoId, type Task, type TaskEdit
 } from "@factory/core";
 import { boardStore } from "../../lib/board";
-import { useFactories } from "../factories/useFactories";
 import { clearUnsent, hasUnsent, useUnsent } from "../../lib/unsent";
+import { useFactories } from "../factories/useFactories";
 import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "./writeOutcome";
 
 type Reload = () => unknown;

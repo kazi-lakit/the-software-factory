@@ -7,6 +7,7 @@ import { AuthProvider } from "../../app/providers/AuthProvider";
 import { blocksClient } from "../../lib/blocks/client";
 import { fetchSessionClaims } from "../../lib/blocks/auth";
 import { clearAllUnsent } from "../../lib/unsent";
+import { blocksFactories, factory, merge } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard } from "../../test/fakeBoard";
 import { SettingsView } from "./SettingsView";
 
@@ -27,15 +28,17 @@ function renderSettings() {
   return renderWithClient(<SettingsView />);
 }
 
-const globalForm = () => screen.getByRole("form", { name: "Global settings" });
+const globalForm = () => screen.getByRole("form", { name: "Factory defaults" });
 const repoRow = (repo: string) => screen.getByRole("row", { name: repo });
 
 beforeEach(() => {
   resetFakeBoard();
+  window.localStorage.setItem("factory-board:factory", "blocks");
 });
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   clearAllUnsent();
   vi.restoreAllMocks();
 });
@@ -43,7 +46,7 @@ afterEach(() => {
 describe("SettingsView", () => {
   it("shows_the_global_settings_and_the_pr_gate_note", async () => {
     renderSettings();
-    await screen.findByRole("form", { name: "Global settings" });
+    await screen.findByRole("form", { name: "Factory defaults" });
     const form = globalForm();
     expect(within(form).getByRole("switch", { name: "Spec gate" })).toBeChecked();
     expect(within(form).getByRole("switch", { name: "Plan gate" })).not.toBeChecked();
@@ -59,13 +62,13 @@ describe("SettingsView", () => {
 
   it("drops_unsaved_changes_when_the_view_unmounts", async () => {
     const first = renderSettings();
-    await screen.findByRole("form", { name: "Global settings" });
+    await screen.findByRole("form", { name: "Factory defaults" });
     fireEvent.click(within(globalForm()).getByRole("switch", { name: "Plan gate" }));
     expect(within(globalForm()).getByRole("switch", { name: "Plan gate" })).toBeChecked();
     first.unmount();
     expect(sessionStorage.length).toBe(0);
     renderSettings();
-    await screen.findByRole("form", { name: "Global settings" });
+    await screen.findByRole("form", { name: "Factory defaults" });
     expect(within(globalForm()).getByRole("switch", { name: "Plan gate" })).not.toBeChecked();
   });
 
@@ -90,9 +93,9 @@ describe("SettingsView", () => {
   it("refuses_max_parallel_0_with_the_validation_message", async () => {
     const write = vi.spyOn(fakeBoard().owner, "updateSettingsScope");
     renderSettings();
-    await screen.findByRole("form", { name: "Global settings" });
+    await screen.findByRole("form", { name: "Factory defaults" });
     fireEvent.change(within(globalForm()).getByLabelText("Max parallel tasks"), { target: { value: "0" } });
-    fireEvent.click(within(globalForm()).getByRole("button", { name: "Save global settings" }));
+    fireEvent.click(within(globalForm()).getByRole("button", { name: "Save factory defaults" }));
     expect(await within(globalForm()).findByRole("alert")).toHaveTextContent("maxParallel must be a whole number from 1 to 10");
     expect(write).not.toHaveBeenCalled();
     expect(within(globalForm()).getByLabelText("Max parallel tasks")).toHaveValue("0");
@@ -110,12 +113,12 @@ describe("SettingsView", () => {
   it("saves_the_global_scope_with_only_the_changed_keys", async () => {
     const write = vi.spyOn(fakeBoard().owner, "updateSettingsScope");
     renderSettings();
-    await screen.findByRole("form", { name: "Global settings" });
+    await screen.findByRole("form", { name: "Factory defaults" });
     fireEvent.click(within(globalForm()).getByRole("switch", { name: "Plan gate" }));
     fireEvent.change(within(globalForm()).getByLabelText("Max parallel tasks"), { target: { value: "4" } });
     fireEvent.change(within(globalForm()).getByLabelText("Cost limit per task (USD)"), { target: { value: "7.5" } });
-    fireEvent.click(within(globalForm()).getByRole("button", { name: "Save global settings" }));
-    await screen.findByText("Saved global settings.");
+    fireEvent.click(within(globalForm()).getByRole("button", { name: "Save factory defaults" }));
+    await screen.findByText("Saved factory defaults.");
     expect(write).toHaveBeenCalledTimes(1);
     expect(write.mock.calls[0]![0]).toBe("blocks");
     const stored = await fakeBoard().owner.getSettings();
@@ -162,19 +165,19 @@ describe("SettingsView", () => {
   it("keeps_unsaved_edits_through_a_conflict_and_reload", async () => {
     const owner = fakeBoard().owner;
     renderSettings();
-    await screen.findByRole("form", { name: "Global settings" });
+    await screen.findByRole("form", { name: "Factory defaults" });
     fireEvent.change(within(globalForm()).getByLabelText("Max parallel tasks"), { target: { value: "4" } });
     // Someone else saves the turn limit, and this save loses the race.
     await saveSettings(owner, now, "blocks", { maxTurnsPerStage: 80 });
     vi.spyOn(owner, "updateSettingsScope").mockRejectedValueOnce(new VersionConflictError("settings global", Number.NaN, Number.NaN, "changed"));
-    fireEvent.click(within(globalForm()).getByRole("button", { name: "Save global settings" }));
+    fireEvent.click(within(globalForm()).getByRole("button", { name: "Save factory defaults" }));
     expect(await within(globalForm()).findByRole("alert")).toHaveTextContent("Settings changed elsewhere. Reload to see the latest.");
     fireEvent.click(within(globalForm()).getByRole("button", { name: "Reload" }));
     await waitFor(() => expect(within(globalForm()).getByLabelText("Turn limit per stage")).toHaveValue("80"));
     expect(within(globalForm()).getByLabelText("Max parallel tasks")).toHaveValue("4");
     expect(within(globalForm()).queryByRole("alert")).not.toBeInTheDocument();
-    fireEvent.click(within(globalForm()).getByRole("button", { name: "Save global settings" }));
-    await screen.findByText("Saved global settings.");
+    fireEvent.click(within(globalForm()).getByRole("button", { name: "Save factory defaults" }));
+    await screen.findByText("Saved factory defaults.");
     const stored = await owner.getSettings();
     expect(stored.factories.blocks!.factory.maxParallel).toBe(4);
     expect(stored.factories.blocks!.factory.maxTurnsPerStage).toBe(80);
@@ -183,10 +186,10 @@ describe("SettingsView", () => {
   it("refreshes_settings_and_history_after_a_save", async () => {
     const { client } = renderSettings();
     client.setQueryData(["history", { showTest: false }], { events: [], taskIds: [] });
-    await screen.findByRole("form", { name: "Global settings" });
+    await screen.findByRole("form", { name: "Factory defaults" });
     fireEvent.change(within(globalForm()).getByLabelText("Turn limit per stage"), { target: { value: "70" } });
-    fireEvent.click(within(globalForm()).getByRole("button", { name: "Save global settings" }));
-    await screen.findByText("Saved global settings.");
+    fireEvent.click(within(globalForm()).getByRole("button", { name: "Save factory defaults" }));
+    await screen.findByText("Saved factory defaults.");
     expect(client.getQueryState(["history", { showTest: false }])?.isInvalidated).toBe(true);
     await waitFor(() => expect(client.getQueryData<StoredSettings>(["settings"])?.factories.blocks?.factory.maxTurnsPerStage).toBe(70));
   });
@@ -195,10 +198,77 @@ describe("SettingsView", () => {
     const getSettings = vi.spyOn(fakeBoard().owner, "getSettings").mockRejectedValueOnce(new Error("blocks: unavailable"));
     renderSettings();
     expect(await screen.findByText("Could not load the settings.")).toBeInTheDocument();
-    expect(screen.queryByRole("form", { name: "Global settings" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Factory defaults" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-    expect(await screen.findByRole("form", { name: "Global settings" })).toBeInTheDocument();
+    expect(await screen.findByRole("form", { name: "Factory defaults" })).toBeInTheDocument();
     expect(getSettings).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("Factory settings tab", () => {
+  it("asks_to_pick_a_factory_while_all_is_selected", async () => {
+    window.localStorage.clear();
+    renderSettings();
+    expect(await screen.findByText("Pick a factory to see its settings.")).toBeInTheDocument();
+    expect(screen.queryByRole("form", { name: "Factory defaults" })).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Factory", { selector: "select" }), { target: { value: "blocks" } });
+    expect(await screen.findByRole("form", { name: "Factory defaults" })).toBeInTheDocument();
+  });
+
+  it("updates_only_the_scope_of_the_selected_factorys_repo", async () => {
+    resetFakeBoard(merge(blocksFactories(), factory("delta", ["api", "ui"])));
+    window.localStorage.setItem("factory-board:factory", "delta");
+    const write = vi.spyOn(fakeBoard().owner, "updateSettingsScope");
+    renderSettings();
+    await screen.findByRole("table", { name: "Repo overrides" });
+    expect(screen.queryByRole("row", { name: "iam" })).not.toBeInTheDocument();
+    fireEvent.change(within(repoRow("api")).getByLabelText("api turn limit"), { target: { value: "25" } });
+    fireEvent.click(within(repoRow("api")).getByRole("button", { name: "Save api" }));
+    await screen.findByText("Saved api settings.");
+    expect(write.mock.calls.map((call) => call[0])).toEqual(["delta/api"]);
+    const stored = await fakeBoard().owner.getSettings();
+    expect(stored.factories.delta!.repos).toEqual({ api: { maxTurnsPerStage: 25 } });
+    expect(stored.factories.blocks).toBeUndefined();
+  });
+
+  it("saves_the_factory_defaults_and_the_pause_under_the_selected_factory", async () => {
+    resetFakeBoard(merge(blocksFactories(), factory("delta", ["api"])));
+    window.localStorage.setItem("factory-board:factory", "delta");
+    const write = vi.spyOn(fakeBoard().owner, "updateSettingsScope");
+    renderSettings();
+    await screen.findByRole("form", { name: "Factory defaults" });
+    fireEvent.change(within(globalForm()).getByLabelText("Max parallel tasks"), { target: { value: "5" } });
+    fireEvent.click(within(globalForm()).getByRole("button", { name: "Save factory defaults" }));
+    await screen.findByText("Saved factory defaults.");
+    fireEvent.click(screen.getByRole("switch", { name: "Pause factory" }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Pause factory" })).toBeChecked());
+    expect(write.mock.calls.map((call) => call[0])).toEqual(["delta", "delta"]);
+    const stored = await fakeBoard().owner.getSettings();
+    expect(stored.factories.delta!.factory).toMatchObject({ maxParallel: 5, paused: true });
+    expect(stored.factories.blocks).toBeUndefined();
+  });
+
+  it("lists_settings_of_removed_repos_and_resets_them_to_inherit", async () => {
+    await fakeBoard().owner.updateSettingsScope("blocks/gone", undefined, { gates: { pr: false }, maxParallel: 3 });
+    renderSettings();
+    const section = (await screen.findByRole("heading", { name: "Settings for removed repos" })).closest("section")!;
+    expect(within(section).getByText("gone")).toBeInTheDocument();
+    expect(within(section).getByText(/max parallel 3/)).toBeInTheDocument();
+    expect(screen.queryByRole("row", { name: "gone" })).not.toBeInTheDocument();
+    fireEvent.click(within(section).getByRole("button", { name: "Reset gone settings" }));
+    await screen.findByText("Reset gone settings.");
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Settings for removed repos" })).not.toBeInTheDocument());
+    expect((await fakeBoard().owner.getSettings()).factories.blocks?.repos.gone).toBeUndefined();
+    expect((await fakeBoard().owner.listEvents("-")).map((e) => [e.field, e.to])).toEqual([
+      ["settings.blocks/gone.maxParallel", "inherit"],
+      ["settings.blocks/gone.gates", "inherit"]
+    ]);
+  });
+
+  it("shows_no_removed_repo_section_when_every_scope_has_its_repo", async () => {
+    renderSettings();
+    await screen.findByRole("table", { name: "Repo overrides" });
+    expect(screen.queryByRole("heading", { name: "Settings for removed repos" })).not.toBeInTheDocument();
   });
 });
 

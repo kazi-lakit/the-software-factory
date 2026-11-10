@@ -299,7 +299,7 @@ describe("BoardView factories", () => {
 
   it("hides_factories_that_fail_validation_but_still_shows_their_tasks_under_all", async () => {
     resetFakeBoard(merge(two(), factory("GATE-gate", ["api"])));
-    const task = await seedTask({ factoryId: "alpha", repo: "api", title: "Normal" });
+    await seedTask({ factoryId: "alpha", repo: "api", title: "Normal" });
     fakeBoard().ownerData.seed("FactoryTask", {
       attempt: 0, baseBranch: "dev", costUsd: 0, description: "", factoryId: "ghost", gateOverrides: "{}", repo: "x", status: "inbox",
       taskId: "T-90", title: "Orphan", version: 1
@@ -307,7 +307,6 @@ describe("BoardView factories", () => {
     renderBoard();
     expect(await screen.findByText("Orphan")).toBeInTheDocument();
     expect(screen.getByText("ghost · T-90")).toBeInTheDocument();
-    expect(task.taskId).toBeTruthy();
     const names = within(screen.getByLabelText("Factory", { selector: "select" })).getAllByRole("option").map((o) => o.textContent);
     expect(names).toEqual(["All factories", "Alpha", "Delta"]);
     fireEvent.click(screen.getByRole("button", { name: "New task" }));
@@ -317,6 +316,19 @@ describe("BoardView factories", () => {
 });
 
 const openNewForm = () => screen.findByRole("form", { name: "New task" });
+
+describe("BoardView with a stored factory pick that is not usable", () => {
+  it.each([["ghost"], ["GATE-gate"]])("falls_back_to_all_for_the_stored_pick_%s_and_renders_the_tasks", async (stored) => {
+    resetFakeBoard(merge(two(), factory("GATE-gate", ["api"])));
+    await seedTask({ factoryId: "alpha", repo: "api", title: "Alpha work" });
+    await seedTask({ factoryId: "delta", repo: "api", title: "Delta work" });
+    window.localStorage.setItem("factory-board:factory", stored);
+    renderBoard();
+    expect(await screen.findByText("Alpha work")).toBeInTheDocument();
+    expect(screen.getByText("Delta work")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByLabelText("Factory", { selector: "select" })).toHaveValue("all"));
+  });
+});
 
 describe("BoardView waiting strip", () => {
   it("lists_a_blocked_task_of_another_factory_with_a_working_link", async () => {
@@ -448,5 +460,26 @@ describe("BoardView new-task link with factories", () => {
     expect(within(form).getByLabelText("Factory")).toHaveValue("delta");
     expect(within(form).getByLabelText("Repo")).toHaveValue("api");
     expect(screen.getByText('Unknown repo "web" in the link; pick one.')).toBeInTheDocument();
+  });
+});
+
+describe("a New task link that is not used before the form closes", () => {
+  it("is_dropped_when_the_form_closes_before_the_factories_load", async () => {
+    resetFakeBoard(two());
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const list = fakeBoard().owner.listFactoryDefs.bind(fakeBoard().owner);
+    vi.spyOn(fakeBoard().owner, "listFactoryDefs").mockImplementation(async () => { await gate; return list(); });
+    window.history.replaceState({}, "", "/?new=1&factory=delta&repo=ui");
+    renderBoard();
+    expect(await screen.findByText("Loading factories…")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    expect(screen.queryByText("Loading factories…")).not.toBeInTheDocument();
+    release();
+    await waitFor(() => expect(screen.getByLabelText("Factory", { selector: "select" })).toContainHTML("Delta"));
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    const form = await openNewForm();
+    expect(within(form).getByLabelText("Factory")).toHaveValue("alpha");
+    expect(within(form).getByLabelText("Repo")).toHaveValue("api");
   });
 });

@@ -98,15 +98,16 @@ export function localDate(iso: string): string | undefined {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export type HistoryFilters = { actor: ActorFilter; mode: ModeFilter; task: string; from: string; to: string };
+export type HistoryFilters = { actor: ActorFilter; factory: string; mode: ModeFilter; task: string; from: string; to: string };
 
-export const NO_FILTERS: HistoryFilters = { actor: "all", from: "", mode: "all", task: "", to: "" };
+export const NO_FILTERS: HistoryFilters = { actor: "all", factory: "", from: "", mode: "all", task: "", to: "" };
 
 /** The events that pass every filter; the date range is inclusive, in local dates. */
 export function filterEvents(events: readonly FactoryEvent[], filters: HistoryFilters): FactoryEvent[] {
   return events.filter((event) => {
     if (!actorMatches(event.actor, filters.actor)) return false;
     if (filters.mode !== "all" && actorMode(event.actor) !== filters.mode) return false;
+    if (filters.factory !== "" && event.factoryId !== filters.factory) return false;
     if (filters.task !== "" && event.taskId !== filters.task) return false;
     if (filters.from || filters.to) {
       const day = localDate(event.at);

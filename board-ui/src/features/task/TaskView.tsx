@@ -1,13 +1,13 @@
 import { useCallback, useId, useRef } from "react";
 import type { ReactNode } from "react";
 import { GATE_DOC, GATE_STATUS, NotFoundError, type FactoryEvent, type Gate, type Run, type Task } from "@factory/core";
-import { followInApp } from "../board/TaskCard";
 import { formatCost, NEEDS_YOU, STATUS_LABEL } from "../board/status";
+import { followInApp } from "../board/TaskCard";
+import { useFactories } from "../factories/useFactories";
 import { AnswerPanel } from "./AnswerPanel";
 import { DocVersions } from "./DocVersions";
 import { GatePanel } from "./GatePanel";
 import { TaskActions } from "./TaskActions";
-import { useFactories } from "../factories/useFactories";
 import { useTask } from "./useTask";
 
 const GITHUB = "https://github.com/";

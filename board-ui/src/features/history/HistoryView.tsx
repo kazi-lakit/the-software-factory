@@ -1,7 +1,9 @@
 import { useId, useState } from "react";
 import type { FactoryEvent } from "@factory/core";
+import { FactoryPicker } from "../board/FactoryPicker";
 import { taskPath } from "../board/status";
 import { followInApp } from "../board/TaskCard";
+import { useFactories } from "../factories/useFactories";
 import {
   ACTOR_FILTERS, filterEvents, NO_FILTERS, SETTINGS_TASK, useHistory, type ActorFilter, type HistoryFilters, type ModeFilter
 } from "./useHistory";
@@ -27,6 +29,7 @@ export function HistoryView({ onNavigate }: { onNavigate: Navigate }) {
   const [filters, setFilters] = useState<HistoryFilters>(NO_FILTERS);
   const [limit, setLimit] = useState(PAGE);
   const history = useHistory(showTest);
+  const factories = useFactories();
 
   function setFilter<K extends keyof HistoryFilters>(key: K, value: HistoryFilters[K]) {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -49,6 +52,7 @@ export function HistoryView({ onNavigate }: { onNavigate: Navigate }) {
         <h2>History</h2>
       </div>
       <div className="sf-toolbar sf-filters" role="group" aria-label="Filters">
+        <FactoryPicker defs={factories.defs} value={filters.factory === "" ? "all" : filters.factory} onChange={(value) => setFilter("factory", value === "all" ? "" : value)} />
         <label className="sf-inline-field" htmlFor={`${ids}-actor`}>
           <span>Actor</span>
           <select id={`${ids}-actor`} className="sf-select" value={filters.actor} onChange={(e) => setFilter("actor", e.target.value as ActorFilter)}>
@@ -69,7 +73,7 @@ export function HistoryView({ onNavigate }: { onNavigate: Navigate }) {
           <span>Task</span>
           <select id={`${ids}-task`} className="sf-select sf-mono" value={filters.task} onChange={(e) => setFilter("task", e.target.value)}>
             <option value="">All tasks</option>
-            <option value={SETTINGS_TASK}>Settings</option>
+            <option value={SETTINGS_TASK}>Settings and factories</option>
             {(history.data?.taskIds ?? []).map((id) => <option key={id} value={id}>{id}</option>)}
           </select>
         </label>
@@ -146,7 +150,7 @@ function EventRow({ event, onNavigate }: { event: FactoryEvent; onNavigate: Navi
       <td>{event.actor}</td>
       <td>
         {event.taskId === SETTINGS_TASK ? (
-          "Settings"
+          /^(def|repo)\./.test(event.field ?? "") ? "Factory" : "Settings"
         ) : (
           <a className="sf-mono" href={href} onClick={(e) => followInApp(e, href, onNavigate)}>{event.taskId}</a>
         )}

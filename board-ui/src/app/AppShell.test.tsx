@@ -1,10 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoredSettings } from "@factory/core";
 import { blocksClient } from "../lib/blocks/client";
 import { fetchSessionClaims, logout } from "../lib/blocks/auth";
 import { boardStore } from "../lib/board";
+import { useSelectedFactory } from "../features/factories/useFactories";
 import { AppShell } from "./AppShell";
 import { AuthProvider } from "./providers/AuthProvider";
 
@@ -22,20 +24,25 @@ vi.mock("../lib/board", () => ({ boardStore: { getSettings: vi.fn() } }));
 
 const getSettings = vi.mocked(boardStore.getSettings);
 
-function settings(paused: boolean): StoredSettings {
-  return {
-    factories: { blocks: { factory: { gates: { spec: true, plan: true, pr: true }, maxParallel: 2, maxTurnsPerStage: 40, maxCostPerTaskUsd: 5, paused }, repos: {} } }
-  };
+const entry = (paused: boolean) => ({ factory: { gates: { spec: true, plan: true, pr: true }, maxParallel: 2, maxTurnsPerStage: 40, maxCostPerTaskUsd: 5, paused }, repos: {} });
+
+function settings(paused: boolean, others: Record<string, boolean> = {}): StoredSettings {
+  return { factories: { blocks: entry(paused), ...Object.fromEntries(Object.entries(others).map(([id, p]) => [id, entry(p)])) } };
 }
 
-function renderShell(activePath = "/") {
+function Picker() {
+  const [, setPicked] = useSelectedFactory();
+  return <button type="button" onClick={() => setPicked("delta")}>Pick delta</button>;
+}
+
+function renderShell(activePath = "/", body: ReactNode = <h2>Page body</h2>) {
   const onNavigate = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <AuthProvider>
         <AppShell activePath={activePath} onNavigate={onNavigate}>
-          <h2>Page body</h2>
+          {body}
         </AppShell>
       </AuthProvider>
     </QueryClientProvider>
@@ -51,6 +58,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   vi.clearAllMocks();
 });
 
@@ -81,7 +89,44 @@ describe("AppShell", () => {
   it("shows_factory_paused_when_the_global_settings_pause_it", async () => {
     getSettings.mockResolvedValue(settings(true));
     renderShell();
+    expect(await screen.findByText("Factory paused: blocks")).toBeInTheDocument();
+  });
+
+  it("under_all_lists_every_paused_factory", async () => {
+    getSettings.mockResolvedValue(settings(true, { delta: true, mods: false }));
+    renderShell();
+    expect(await screen.findByText("Factories paused: blocks, delta")).toBeInTheDocument();
+  });
+
+  it("follows_the_selected_factory_and_ignores_the_others", async () => {
+    getSettings.mockResolvedValue(settings(false, { delta: true }));
+    window.localStorage.setItem("factory-board:factory", "blocks");
+    renderShell();
+    await waitFor(() => expect(getSettings).toHaveBeenCalled());
+    await screen.findByText("Kazi Rahman");
+    expect(screen.queryByText(/paused/)).not.toBeInTheDocument();
+    cleanup();
+    window.localStorage.setItem("factory-board:factory", "delta");
+    renderShell();
     expect(await screen.findByText("Factory paused")).toBeInTheDocument();
+  });
+
+  it("changes_the_indicator_when_a_view_changes_the_pick", async () => {
+    getSettings.mockResolvedValue(settings(false, { delta: true }));
+    window.localStorage.setItem("factory-board:factory", "blocks");
+    renderShell("/", <Picker />);
+    await screen.findByText("Kazi Rahman");
+    expect(screen.queryByText(/paused/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Pick delta" }));
+    expect(await screen.findByText("Factory paused")).toBeInTheDocument();
+  });
+
+  it("shows_a_running_state_for_a_selected_factory_that_has_no_stored_settings", async () => {
+    window.localStorage.setItem("factory-board:factory", "newbie");
+    renderShell();
+    await waitFor(() => expect(getSettings).toHaveBeenCalled());
+    await screen.findByText("Kazi Rahman");
+    expect(screen.queryByText(/paused/)).not.toBeInTheDocument();
   });
 
   it("shows_no_pause_indicator_while_the_factory_runs", async () => {

@@ -169,7 +169,11 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
           className="sf-button sf-toolbar-end"
           aria-expanded={creating}
           aria-controls={creating ? formId : undefined}
-          onClick={() => setCreating((open) => !open)}
+          onClick={() => {
+            // Closing the form drops a link it has not used yet, so a later open does not apply it.
+            if (creating) setLink(undefined);
+            setCreating(!creating);
+          }}
         >
           New task
         </button>
@@ -185,8 +189,12 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
           link={link}
           picked={factory}
           onLinkUsed={() => setLink(undefined)}
-          onClose={() => setCreating(false)}
+          onClose={() => {
+            setLink(undefined);
+            setCreating(false);
+          }}
           onCreated={(task) => {
+            setLink(undefined);
             setCreating(false);
             setRefocusNewTask(true);
             setNotice(`Created ${task.taskId}.`);
@@ -261,10 +269,12 @@ function NewTaskPanel({ entries, factoriesFailed, factoriesLoading, link, onClos
   // The note is state of its own: it clears on a factory or repo change and on close (the panel unmounts).
   const [note, setNote] = useState("");
   const [applied, setApplied] = useState(false);
-  if (ready && !applied) {
-    setApplied(true);
+  // Settles the link once, in an effect: applyLink writes the unsent text, which a render must not do. The form mounts after it.
+  useEffect(() => {
+    if (!ready || applied) return;
     if (link) setNote(applyLink(link, entries, picked));
-  }
+    setApplied(true);
+  }, [applied, entries, link, picked, ready]);
   useEffect(() => {
     if (applied && link) onLinkUsed();
   }, [applied, link, onLinkUsed]);
