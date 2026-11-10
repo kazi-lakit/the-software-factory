@@ -49,7 +49,7 @@ export function HistoryView({ onNavigate }: { onNavigate: Navigate }) {
   return (
     <div className="sf-view">
       <div className="sf-toolbar">
-        <h2>History</h2>
+        <h2 className="sf-page-title">History</h2>
       </div>
       <div className="sf-toolbar sf-filters" role="group" aria-label="Filters">
         <FactoryPicker defs={factories.defs} value={filters.factory === "" ? "all" : filters.factory} onChange={(value) => setFilter("factory", value === "all" ? "" : value)} />

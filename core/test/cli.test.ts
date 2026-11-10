@@ -437,7 +437,7 @@ describe('factories, status health and --factory', () => {
 describe('migrate', () => {
   const rootWithRepos = () => {
     const root = mkdtempSync(join(tmpdir(), 'factory-cli-migrate-'));
-    cpSync(join(__dirname, '..', '..', 'repos'), join(root, 'repos'), { recursive: true });
+    cpSync(join(__dirname, 'fixtures', 'repos'), join(root, 'repos'), { recursive: true });
     process.env.FACTORY_ROOT = root;
     return root;
   };

@@ -8,16 +8,45 @@ describe('readSecret', () => {
       calls.push([file, args]);
       return { code: 0, stdout: 'tok123\n', stderr: '' };
     };
-    expect(await readSecret('blocks-credential', exec)).toBe('tok123');
+    expect(await readSecret('blocks-credential', exec, 'darwin')).toBe('tok123');
     expect(calls).toEqual([['security', ['find-generic-password', '-s', 'the-software-factory', '-a', 'blocks-credential', '-w']]]);
   });
 
   test('non-zero exit rejects with the exact message and leaks no output', async () => {
     const exec: ExecFile = async () => ({ code: 44, stdout: 'SECRET-LEAK', stderr: 'SECRET-LEAK' });
-    const err = await readSecret('blocks-credential', exec).catch((e: unknown) => e);
+    const err = await readSecret('blocks-credential', exec, 'darwin').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(SecretMissingError);
     expect((err as Error).message).toBe('blocks-credential not found in Keychain (service the-software-factory)');
     expect((err as Error).message).not.toContain('SECRET-LEAK');
+  });
+});
+
+describe('readSecret on Linux', () => {
+  test('runs secret-tool lookup with the exact args and trims the trailing newline', async () => {
+    const calls: Array<[string, string[]]> = [];
+    const exec: ExecFile = async (file, args) => {
+      calls.push([file, args]);
+      return { code: 0, stdout: 'tok123\n', stderr: '' };
+    };
+    expect(await readSecret('blocks-credential', exec, 'linux')).toBe('tok123');
+    expect(calls).toEqual([['secret-tool', ['lookup', 'service', 'the-software-factory', 'account', 'blocks-credential']]]);
+  });
+
+  test('a failed or empty lookup rejects with the exact message and leaks no output', async () => {
+    for (const r of [{ code: 1, stdout: 'SECRET-LEAK', stderr: 'SECRET-LEAK' }, { code: 0, stdout: '', stderr: '' }]) {
+      const err = await readSecret('blocks-credential', async () => r, 'linux').catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(SecretMissingError);
+      expect((err as Error).message).toBe('blocks-credential not found in the keyring (service the-software-factory); save it with npm run blocks:save-credential');
+      expect((err as Error).message).not.toContain('SECRET-LEAK');
+    }
+  });
+
+  test('another platform rejects without running anything', async () => {
+    const calls: string[] = [];
+    const err = await readSecret('blocks-credential', async (file) => { calls.push(file); return { code: 0, stdout: 'x', stderr: '' }; }, 'win32').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(SecretMissingError);
+    expect((err as Error).message).toBe('blocks-credential: no secret store on win32 (macOS Keychain or Linux secret-tool only)');
+    expect(calls).toEqual([]);
   });
 });
 

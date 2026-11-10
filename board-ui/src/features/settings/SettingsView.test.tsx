@@ -373,3 +373,34 @@ describe("the pause switch", () => {
     expect(screen.getByRole("switch", { name: "Pause factory" })).not.toBeChecked();
   });
 });
+
+describe("SettingsView restyle", () => {
+  it("settings_title_uses_page_title_class_on_both_tabs", async () => {
+    renderSettings();
+    expect(screen.getByRole("heading", { name: "Settings" })).toHaveClass("sf-page-title");
+    fireEvent.click(screen.getByRole("tab", { name: "Factories" }));
+    expect(screen.getByRole("heading", { name: "Settings" })).toHaveClass("sf-page-title");
+  });
+
+  it("only_selected_tab_is_aria_selected_and_ids_unchanged", () => {
+    renderSettings();
+    const selected = () => screen.getAllByRole("tab").filter((t) => t.getAttribute("aria-selected") === "true");
+    expect(selected()).toHaveLength(1);
+    const first = screen.getByRole("tab", { name: "Factory settings" });
+    expect(first).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(first.id);
+    fireEvent.click(screen.getByRole("tab", { name: "Factories" }));
+    expect(selected()).toHaveLength(1);
+    const second = screen.getByRole("tab", { name: "Factories" });
+    expect(screen.getByRole("tabpanel").getAttribute("aria-labelledby")).toBe(second.id);
+    expect(second.getAttribute("aria-controls")).toBe(screen.getByRole("tabpanel").id);
+  });
+
+  it("repo_overrides_table_in_wrap_and_buttons_split_primary_and_outlined", async () => {
+    renderSettings();
+    await screen.findByRole("form", { name: "Factory defaults" });
+    expect(screen.getByRole("table", { name: "Repo overrides" }).closest(".sf-table-wrap")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Save factory defaults" })).toHaveClass("sf-button-primary");
+    expect(within(repoRow("data")).getByRole("button", { name: /^Save/ })).not.toHaveClass("sf-button-primary");
+  });
+});

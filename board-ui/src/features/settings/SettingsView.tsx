@@ -101,7 +101,7 @@ export function SettingsView() {
   const ids = useId();
   return (
     <div className="sf-view sf-settings">
-      <div className="sf-toolbar"><h2>Settings</h2></div>
+      <div className="sf-toolbar"><h2 className="sf-page-title">Settings</h2></div>
       <div className="sf-tabs" role="tablist" aria-label="Settings sections">
         {TABS.map(({ id, label }) => (
           <button

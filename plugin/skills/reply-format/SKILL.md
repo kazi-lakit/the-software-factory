@@ -61,7 +61,7 @@ Build (no doc):
 
 - `status`: `done`, `blocked` or `failed`.
 - `summary`: one or two sentences on what you did.
-- `question`: required when `status` is `blocked`; one question.
+- `question`: required when `status` is `blocked`; one question in the shape below.
 - `verdict`: `pass` or `fail` (verify); `approve` or `changes` (review). Required when done, for those two stages only.
 - Never put `doc` in the JSON. The `<factory-doc>` body becomes the doc.
 - Leave out `turns` and `costUsd`.
@@ -74,6 +74,24 @@ Build (no doc):
 | build | no | no |
 | verify | pass or fail | yes |
 | review | approve or changes | yes |
+
+## Question shape (blocked)
+
+A `blocked` reply still carries one question. Write it like a multiple-choice question:
+
+- One question line, then 2 to 4 lettered options (`A.` to `D.`), one per line, each with a short consequence.
+- Exactly one option is recommended. It ends with `(recommended)` and is listed first, as `A.`.
+- A last line says the owner can reply with an option letter or in their own words.
+
+Question example, as the `question` text:
+
+```text
+Which base branch should the work start from?
+A. main: matches the other tasks and needs no rebase (recommended)
+B. develop: includes unreleased work, so the diff may grow
+C. a branch you name: I will use it as given
+Reply with an option letter, or answer in your own words.
+```
 
 ## Rules
 

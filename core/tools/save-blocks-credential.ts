@@ -1,10 +1,10 @@
 // Pipe `blocks auth client-credentials save --json` into this tool:
 //   blocks auth client-credentials save ... --json | npm run blocks:save-credential -- --project-key <id> --api-url <url>
-// The secret goes to `security -i` on stdin only; it is never printed or put in argv.
+// The secret goes on stdin only, to `security -i` (macOS) or `secret-tool store` (Linux); it is never printed or put in argv.
 import { spawn as nodeSpawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import type { BlocksCredential } from '../src/blocks/credential.js';
-import { readSecret, realExecFile, type ExecFile } from '../src/secrets.js';
+import { noSecretStore, readSecret, realExecFile, secretToolAttrs, type ExecFile } from '../src/secrets.js';
 
 export type Spawner = (file: string, args: string[], stdin: string) => Promise<{ code: number }>;
 
@@ -58,19 +58,25 @@ const realSpawn: Spawner = (file, args, stdin) =>
     child.stdin.end(stdin);
   });
 
-export async function runSave(opts: { raw: string; argv: string[]; spawn?: Spawner; exec?: ExecFile }): Promise<{ code: number; stdout: string }> {
+export async function runSave(opts: { raw: string; argv: string[]; spawn?: Spawner; exec?: ExecFile; platform?: string }): Promise<{ code: number; stdout: string }> {
   const fail = (stdout: string) => ({ code: 1, stdout });
+  const platform = opts.platform ?? process.platform;
+  if (platform !== 'darwin' && platform !== 'linux') return fail(`error: ${noSecretStore(platform)}`);
   const projectKey = flag(opts.argv, '--project-key');
   const apiUrl = flag(opts.argv, '--api-url');
   if (!projectKey || /\s/.test(projectKey)) return fail('error: --project-key must be non-empty with no whitespace');
   if (!apiUrl || !httpsUrl(apiUrl)) return fail('error: --api-url must be an https URL');
   let cred: BlocksCredential;
   try { cred = buildCredential(JSON.parse(opts.raw), projectKey, apiUrl); } catch { return fail('error: could not save blocks-credential'); }
-  const { code } = await (opts.spawn ?? realSpawn)('security', ['-i'], `${keychainCommand(cred)}\n`);
+  const spawn = opts.spawn ?? realSpawn;
+  const { code } = platform === 'darwin'
+    ? await spawn('security', ['-i'], `${keychainCommand(cred)}\n`)
+    // secret-tool stores its standard input as it is, so no trailing newline.
+    : await spawn('secret-tool', ['store', '--label=the-software-factory blocks-credential', ...secretToolAttrs('blocks-credential')], JSON.stringify(cred));
   if (code !== 0) return fail('error: could not save blocks-credential');
   // Read back and compare exactly; neither value is ever printed.
   try {
-    const stored = await readSecret('blocks-credential', opts.exec ?? realExecFile);
+    const stored = await readSecret('blocks-credential', opts.exec ?? realExecFile, platform);
     if (stored.trim() !== JSON.stringify(cred)) return fail('error: could not save blocks-credential');
   } catch { return fail('error: could not save blocks-credential'); }
   return { code: 0, stdout: `saved blocks-credential (client ${cred.clientId})` };

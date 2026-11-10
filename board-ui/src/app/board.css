@@ -1,71 +1,140 @@
-/* The Board's design tokens and shell. Calm and dense: one neutral palette for
-   the queue, one accent for what needs the owner (spec_review, plan_review,
-   pr_open, blocked, and the paused factory), muted tones for done and
-   cancelled. Light and dark follow prefers-color-scheme through the tokens.
+/* The Board's design tokens and shell (BAK F2). Dark is the default on :root;
+   the light set applies when <html> carries data-theme="light" (set by
+   src/lib/theme.ts and the inline script in index.html). Calm and dense: one
+   accent for what needs the owner, muted tones for done and cancelled.
    Names are sf-* so they never meet the scaffold's tokens or Tailwind's
    utilities; never use .grid, .outline or a bare aside here (board.css.test.ts). */
 
 :root {
-  --sf-bg: #f2f3f5;
-  --sf-surface: #ffffff;
-  --sf-surface-sunk: #e9ebee;
-  --sf-text: #1b1f27;
-  --sf-muted: #5c6370;
-  --sf-border: #d9dce2;
-  --sf-accent: #5236c9;
-  --sf-accent-soft: #ece8fc;
-  --sf-on-accent: #ffffff;
-  --sf-done: #616773;
-  --sf-done-soft: #e6e8eb;
-  --sf-focus: #1b1f27;
+  color-scheme: dark;
+  --sf-bg: #080c0d;
+  --sf-surface: #0b1112;
+  --sf-surface-sunk: #0a0f10;
+  --sf-text: #e7efee;
+  --sf-muted: #9db0af;
+  --sf-border: rgba(157, 176, 175, 0.45);
+  --sf-chrome-border: rgba(157, 176, 175, 0.25);
+  --sf-accent: #5cc8cd;
+  --sf-accent-soft: #0c2224;
+  --sf-accent-text: #5cc8cd;
+  --sf-on-accent: #080c0d;
+  --sf-primary: #9db0af;
+  --sf-primary-hover: #b4c4c3;
+  --sf-on-primary: #080c0d;
+  --sf-primary-soft: #16201f;
+  --sf-on-primary-soft: #e7efee;
+  --sf-progress: #9ea7ba;
+  --sf-needs-tint: rgba(92, 205, 160, 0.08);
+  --sf-done: #8a9b9a;
+  --sf-done-soft: #0a0f10;
+  --sf-focus: #5cc8cd;
   /* Diff lines; the +/− prefix carries the meaning, these repeat it. */
-  --sf-added: #1d6b3a;
-  --sf-added-soft: #e3f3e8;
-  --sf-removed: #a1262b;
-  --sf-removed-soft: #fbe6e6;
+  --sf-added: #7ee2a8;
+  --sf-added-soft: #0d2216;
+  --sf-removed: #f2a3a3;
+  --sf-removed-soft: #2a1414;
 
   --sf-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --sf-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
-  --sf-size: 14px;
+  --sf-mono: SFMono-Regular, ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --sf-size: 16px;
   --sf-size-small: 12px;
-  --sf-radius: 6px;
-  --sf-bar-height: 44px;
+  --sf-label-size: 12px;
+  --sf-label-line: 16px;
+  --sf-label-tracking: 0.16em;
+  --sf-radius: 3px;
+  --sf-bar-height: 52px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --sf-bg: #121418;
-    --sf-surface: #1a1d23;
-    --sf-surface-sunk: #0e1013;
-    --sf-text: #e4e6eb;
-    --sf-muted: #9aa1ad;
-    --sf-border: #2c3038;
-    --sf-accent: #a797ff;
-    --sf-accent-soft: #29244a;
-    --sf-on-accent: #14111f;
-    --sf-done: #8a909b;
-    --sf-done-soft: #20232a;
-    --sf-focus: #e4e6eb;
-    --sf-added: #7fd49b;
-    --sf-added-soft: #16291d;
-    --sf-removed: #f19a9a;
-    --sf-removed-soft: #331a1c;
-  }
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
+:root[data-theme="light"] {
+  color-scheme: light;
+  --sf-bg: #e7efee;
+  --sf-surface: #f4f8f7;
+  --sf-surface-sunk: #dde7e6;
+  --sf-text: #0b1112;
+  --sf-muted: #3e5150;
+  --sf-border: rgba(11, 17, 18, 0.3);
+  --sf-chrome-border: rgba(11, 17, 18, 0.2);
+  --sf-accent: #0e7c82;
+  --sf-accent-soft: #d2eef0;
+  --sf-accent-text: #0a6368;
+  --sf-on-accent: #ffffff;
+  --sf-primary: #0b1112;
+  --sf-primary-hover: #22302f;
+  --sf-on-primary: #e7efee;
+  --sf-primary-soft: #d0dcdb;
+  --sf-on-primary-soft: #0b1112;
+  --sf-progress: #6b7488;
+  --sf-needs-tint: rgba(14, 124, 100, 0.07);
+  --sf-done: #4d5c5b;
+  --sf-done-soft: #e0e8e7;
+  --sf-focus: #0b1112;
+  --sf-added: #166534;
+  --sf-added-soft: #dcfce7;
+  --sf-removed: #b91c1c;
+  --sf-removed-soft: #fee2e2;
+}
+
+/* A faint 16px dot grid over a radial glow; fixed so it covers the viewport. */
 body {
-  background: var(--sf-bg);
+  background-attachment: fixed;
+  background-color: var(--sf-bg);
+  background-image: radial-gradient(rgba(157, 176, 175, 0.045) 0.8px, transparent 0.8px),
+    radial-gradient(circle at 63% 42%, #0e1718, #0a0f10, #080c0d);
+  background-size: 16px 16px, 100% 100%;
   color: var(--sf-text);
   font-family: var(--sf-font);
   font-size: var(--sf-size);
-  line-height: 1.45;
+  line-height: 24px;
+}
+
+:root[data-theme="light"] body {
+  background-color: #e7efee;
+  background-image: radial-gradient(rgba(11, 17, 18, 0.035) 0.8px, transparent 0.8px);
+  background-size: 16px 16px;
 }
 
 /* One ring for every interactive element, in both themes. */
 :focus-visible {
-  border-radius: 3px;
+  border-radius: var(--sf-radius);
   outline: 2px solid var(--sf-focus);
   outline-offset: 2px;
+}
+
+/* Small caps-style label type. */
+.sf-label {
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
+/* Sun/moon theme switch: two outlined icon buttons; the active one is filled. */
+.sf-theme-switch {
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  display: inline-flex;
+}
+
+.sf-theme-switch button {
+  align-items: center;
+  background: none;
+  border: 0;
+  border-radius: var(--sf-radius);
+  color: var(--sf-muted);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  padding: 0;
+  width: 28px;
+}
+
+.sf-theme-switch button[aria-pressed="true"] {
+  background: var(--sf-primary-soft);
+  color: var(--sf-on-primary-soft);
 }
 
 /* Ids, branches, versions and costs. */
@@ -84,8 +153,8 @@ body {
 
 .sf-topbar {
   align-items: center;
-  background: var(--sf-surface);
-  border-bottom: 1px solid var(--sf-border);
+  background: transparent;
+  border-bottom: 1px solid var(--sf-chrome-border);
   display: flex;
   flex-wrap: wrap;
   gap: 4px 20px;
@@ -97,9 +166,11 @@ body {
 }
 
 .sf-project {
+  color: var(--sf-text);
   font-family: var(--sf-mono);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   white-space: nowrap;
 }
 
@@ -115,19 +186,22 @@ body {
   border-bottom: 2px solid transparent;
   color: var(--sf-muted);
   display: flex;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   padding: 0 10px;
   text-decoration: none;
 }
 
 .sf-view-link:hover {
-  color: var(--sf-text);
+  text-decoration: underline;
 }
 
 /* The current view: text weight and a rule in the text colour, not the accent. */
 .sf-view-link[aria-current="page"] {
   border-bottom-color: var(--sf-text);
   color: var(--sf-text);
-  font-weight: 600;
 }
 
 .sf-view-link:focus-visible {
@@ -142,36 +216,78 @@ body {
 }
 
 .sf-paused {
-  background: var(--sf-accent-soft);
+  background: transparent;
   border: 1px solid var(--sf-accent);
   border-radius: var(--sf-radius);
-  color: var(--sf-accent);
-  font-size: var(--sf-size-small);
-  font-weight: 600;
+  color: var(--sf-accent-text);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   padding: 2px 8px;
   white-space: nowrap;
 }
 
-.sf-user {
-  color: var(--sf-muted);
-  max-width: 24ch;
+/* The account pill: outlined, initials in a circle, then the first name. 999px is a justified
+   exception to the single 3px radius: a pill and a circle are round by definition. */
+.sf-account {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--sf-border);
+  border-radius: 999px;
+  color: var(--sf-text);
+  display: inline-flex;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  gap: 8px;
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 4px 12px 4px 4px;
+  white-space: nowrap;
+}
+
+.sf-account:hover {
+  background: var(--sf-primary-soft);
+  color: var(--sf-on-primary-soft);
+  text-decoration: underline;
+}
+
+.sf-avatar {
+  align-items: center;
+  background: var(--sf-primary-soft);
+  border-radius: 999px;
+  color: var(--sf-on-primary-soft);
+  display: inline-flex;
+  flex: none;
+  font-size: var(--sf-label-size);
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.sf-account-name {
+  max-width: 16ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .sf-button {
-  background: var(--sf-surface);
+  background: transparent;
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   color: var(--sf-text);
-  font: inherit;
-  min-height: 28px;
-  padding: 0 10px;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 8px 14px;
 }
 
 .sf-button:hover:not(:disabled) {
-  background: var(--sf-surface-sunk);
+  background: var(--sf-primary-soft);
+  color: var(--sf-on-primary-soft);
+  text-decoration: underline;
 }
 
 .sf-button:disabled {
@@ -205,6 +321,31 @@ body {
   margin: 0;
 }
 
+/* Page title: 28px bold. The .sf-view heading rules are more specific than the bare class, so they are matched here. */
+.sf-page-title {
+  color: var(--sf-text);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.sf-view h2.sf-page-title {
+  color: var(--sf-text);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.sf-view h3.sf-page-title {
+  color: var(--sf-text);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
 .sf-view h3 {
   font-size: var(--sf-size);
   font-weight: 600;
@@ -221,26 +362,43 @@ body {
 }
 
 .sf-badge {
-  background: var(--sf-accent-soft);
+  background: transparent;
   border: 1px solid var(--sf-accent);
   border-radius: var(--sf-radius);
-  color: var(--sf-accent);
-  font-size: var(--sf-size-small);
-  font-weight: 600;
+  color: var(--sf-accent-text);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   margin-left: 6px;
   padding: 0 6px;
   white-space: nowrap;
 }
 
 .sf-button-primary {
-  background: var(--sf-text);
-  border-color: var(--sf-text);
-  color: var(--sf-surface);
+  background: var(--sf-primary);
+  border-color: var(--sf-primary);
+  color: var(--sf-on-primary);
 }
 
 .sf-button-primary:hover:not(:disabled) {
-  background: var(--sf-muted);
-  border-color: var(--sf-muted);
+  background: var(--sf-primary-hover);
+  border-color: var(--sf-primary-hover);
+  color: var(--sf-on-primary);
+  text-decoration: underline;
+}
+
+.sf-button-accent {
+  background: var(--sf-accent);
+  border-color: var(--sf-accent);
+  color: var(--sf-on-accent);
+}
+
+.sf-button-accent:hover:not(:disabled) {
+  background: var(--sf-accent);
+  border-color: var(--sf-accent);
+  color: var(--sf-on-accent);
+  text-decoration: underline;
 }
 
 .sf-button-danger {
@@ -248,9 +406,8 @@ body {
   color: var(--sf-removed);
 }
 
-.sf-input,
-.sf-select {
-  background: var(--sf-surface);
+.sf-input {
+  background: transparent;
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   color: var(--sf-text);
@@ -259,7 +416,43 @@ body {
   padding: 4px 8px;
 }
 
-.sf-input.sf-mono,
+.sf-input.sf-mono {
+  font-family: var(--sf-mono);
+}
+
+/* One style for every select: native, no platform arrow, one chevron. */
+.sf-select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: transparent;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 15px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 5px 5px;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  height: 34px;
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  min-height: 34px;
+  padding: 0 28px 0 10px;
+}
+
+.sf-select:hover:not(:disabled) {
+  background-color: var(--sf-primary-soft);
+}
+
+.sf-select option {
+  background-color: var(--sf-surface);
+  color: var(--sf-text);
+}
+
 .sf-select.sf-mono {
   font-family: var(--sf-mono);
 }
@@ -278,7 +471,14 @@ textarea.sf-input {
 
 .sf-field > span,
 .sf-inline-field > span,
-.sf-doc-controls label,
+.sf-doc-controls label {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
 .sf-facts dt {
   color: var(--sf-muted);
   font-size: var(--sf-size-small);
@@ -317,7 +517,7 @@ textarea.sf-input {
 
 /* A panel that waits for the owner (gate, answer) is the accent's other use. */
 .sf-panel-needs-you {
-  border-left: 3px solid var(--sf-accent);
+  border-color: var(--sf-accent);
 }
 
 .sf-panel-needs-you form {
@@ -366,14 +566,30 @@ textarea.sf-input {
 }
 
 .sf-column {
-  background: var(--sf-surface-sunk);
+  background: transparent;
+  border: 1px solid var(--sf-chrome-border);
   border-radius: var(--sf-radius);
   flex: 0 0 216px;
   padding: 8px;
 }
 
+.sf-column-needs-you {
+  background: var(--sf-needs-tint);
+  border-color: var(--sf-accent);
+}
+
 .sf-column-collapsed {
-  flex-basis: 132px;
+  flex-basis: 140px;
+}
+
+.sf-columns-hint {
+  color: var(--sf-muted);
+  font-size: var(--sf-size-small);
+  margin: 0 0 8px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .sf-column-head {
@@ -405,6 +621,68 @@ textarea.sf-input {
   color: var(--sf-done);
 }
 
+/* Lanes view */
+.sf-lanes {
+  align-items: start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  width: 100%;
+}
+
+.sf-lane {
+  background: transparent;
+  border: 1px solid var(--sf-chrome-border);
+  border-radius: var(--sf-radius);
+  min-width: 0;
+  padding: 8px;
+}
+
+.sf-lane-needs-you {
+  background: linear-gradient(to bottom, var(--sf-needs-tint), transparent 40%), var(--sf-needs-tint);
+  border-color: var(--sf-accent);
+}
+
+.sf-lane-head {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+}
+
+.sf-lane-name {
+  margin: 0;
+}
+
+.sf-lane-hint {
+  color: var(--sf-muted);
+  margin: 0 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sf-segmented {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.sf-segment {
+  background: transparent;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 8px 14px;
+}
+
+.sf-segment[aria-pressed="true"] {
+  background: var(--sf-primary-soft);
+  color: var(--sf-on-primary-soft);
+}
+
 .sf-card-list {
   display: flex;
   flex-direction: column;
@@ -421,7 +699,7 @@ textarea.sf-input {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 6px 8px;
+  padding: 8px;
   position: relative;
 }
 
@@ -430,7 +708,7 @@ textarea.sf-input {
 }
 
 .sf-card-needs-you {
-  border-left: 3px solid var(--sf-accent);
+  border-color: var(--sf-accent);
 }
 
 .sf-card-muted {
@@ -444,10 +722,21 @@ textarea.sf-input {
   justify-content: space-between;
 }
 
-.sf-card-id,
-.sf-card-meta {
+.sf-card-id {
   color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
+.sf-card-meta {
+  align-items: center;
+  color: var(--sf-muted);
+  display: flex;
+  flex-wrap: wrap;
   font-size: var(--sf-size-small);
+  gap: 2px 10px;
 }
 
 .sf-card-muted .sf-card-id,
@@ -455,10 +744,71 @@ textarea.sf-input {
   color: var(--sf-done);
 }
 
+.sf-card-status {
+  background: transparent;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 0 6px;
+  white-space: nowrap;
+}
+
+.sf-card-status-waiting {
+  border: 1px solid var(--sf-accent);
+  color: var(--sf-accent-text);
+}
+
+.sf-card-muted .sf-card-status {
+  border-color: var(--sf-done);
+  color: var(--sf-done);
+}
+
+.sf-steps {
+  align-items: center;
+  display: inline-flex;
+  gap: 2px;
+}
+
+.sf-step {
+  background: var(--sf-border);
+  display: inline-block;
+  height: 4px;
+  width: 14px;
+}
+
+.sf-step[data-state="done"] {
+  background: var(--sf-progress);
+}
+
+.sf-step[data-state="current"] {
+  background: var(--sf-muted);
+}
+
+.sf-step[data-state="waiting"] {
+  background: var(--sf-accent);
+}
+
+.sf-step[data-state="todo"] {
+  background: var(--sf-border);
+}
+
+.sf-card-muted .sf-step[data-state="done"] {
+  background: var(--sf-done);
+}
+
 .sf-card-link {
-  color: inherit;
+  color: var(--sf-text);
   font-weight: 500;
   overflow-wrap: anywhere;
+  text-decoration: none;
+}
+
+.sf-card-link:hover {
+  text-decoration: underline;
 }
 
 /* The title link covers the card, so the whole card is one target with one name. */
@@ -476,20 +826,39 @@ textarea.sf-input {
 
 .sf-card-link:focus-visible {
   outline: none;
-}
-
-.sf-card-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 10px;
+  text-decoration: underline;
 }
 
 .sf-card-question {
+  border: 1px dashed var(--sf-border);
+  border-radius: var(--sf-radius);
   font-size: var(--sf-size-small);
   margin: 2px 0 0;
   overflow: hidden;
+  padding: 2px 6px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sf-card-cta {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--sf-accent);
+  border-radius: var(--sf-radius);
+  color: var(--sf-accent-text);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  margin-top: 4px;
+  padding: 2px 8px;
+  position: relative;
+  text-decoration: none;
+  z-index: 1;
+}
+
+.sf-card-cta:hover {
+  text-decoration: underline;
 }
 
 /* Task */
@@ -510,6 +879,99 @@ textarea.sf-input {
   display: flex;
   flex-direction: column;
   gap: 10px;
+}
+
+.sf-task-header h2 {
+  color: var(--sf-text);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.sf-task-meta {
+  align-items: baseline;
+  color: var(--sf-muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+}
+
+.sf-stepper {
+  display: flex;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sf-stepper-item {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.sf-stepper .sf-step {
+  width: 100%;
+}
+
+.sf-stepper-label {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
+.sf-stepper-item-waiting .sf-stepper-label {
+  color: var(--sf-accent-text);
+  font-weight: 700;
+}
+
+.sf-task-body {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.sf-task-body > * {
+  min-width: 0;
+}
+
+.sf-task-docs {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sf-details {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  padding: 12px;
+}
+
+.sf-details dl {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+}
+
+.sf-details dt {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
+.sf-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .sf-facts {
@@ -599,24 +1061,40 @@ textarea.sf-input {
 }
 
 .sf-table-wrap {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
   overflow-x: auto;
 }
 
 .sf-table {
+  border-collapse: collapse;
   font-size: 13px;
   min-width: 0;
 }
 
-.sf-table th,
 .sf-table td {
-  padding: 4px 10px 4px 0;
+  padding: 8px 12px;
 }
 
 .sf-table th {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--sf-chrome-border);
   color: var(--sf-muted);
-  font-size: var(--sf-size-small);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
   font-weight: 600;
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   text-transform: none;
+}
+
+.sf-table tbody tr {
+  border-bottom: 1px solid var(--sf-chrome-border);
+}
+
+.sf-table tbody tr:last-child {
+  border-bottom: 0;
 }
 
 .sf-table tbody tr:hover {
@@ -666,10 +1144,14 @@ textarea.sf-input {
 
 /* Settings could not be read: the shell says the pause state is unknown. */
 .sf-paused-unknown {
+  background: transparent;
   border: 1px dashed var(--sf-border);
   border-radius: var(--sf-radius);
   color: var(--sf-muted);
-  font-size: var(--sf-size-small);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   padding: 2px 8px;
   white-space: nowrap;
 }
@@ -731,14 +1213,20 @@ textarea.sf-input {
 
 .sf-fieldset legend {
   color: var(--sf-muted);
-  font-size: var(--sf-size-small);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   margin-bottom: 4px;
   padding: 0;
 }
 
 .sf-field-label {
   color: var(--sf-muted);
-  font-size: var(--sf-size-small);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
 }
 
 .sf-limit {
@@ -755,7 +1243,7 @@ textarea.sf-input {
   padding-left: 38px;
 }
 
-/* A checkbox drawn as a switch: the text colour when on, never the accent (that is for what needs you). */
+/* A checkbox drawn as a switch: the primary colour when on, never the accent (that is for what needs you). */
 .sf-switch {
   align-items: center;
   cursor: pointer;
@@ -790,11 +1278,13 @@ textarea.sf-input {
 }
 
 .sf-switch input:checked {
-  background: var(--sf-text);
-  border-color: var(--sf-text);
+  background: var(--sf-primary);
+  border-color: var(--sf-primary);
 }
 
 .sf-switch input:checked::before {
+  background: var(--sf-on-primary);
+  border-color: var(--sf-on-primary);
   transform: translateX(12px);
 }
 
@@ -806,6 +1296,27 @@ textarea.sf-input {
 @media (prefers-reduced-motion: reduce) {
   .sf-switch input::before {
     transition: none;
+  }
+}
+
+/* Colour changes on the shared controls last 150ms and stop on request. */
+.sf-button,
+.sf-select,
+.sf-input,
+.sf-chip,
+.sf-badge,
+.sf-card-status,
+.sf-view-link,
+.sf-account,
+.sf-tab {
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0s !important;
   }
 }
 
@@ -842,6 +1353,23 @@ textarea.sf-input {
   }
 }
 
+/* Lanes wrap to two columns below 1100px and to one below 640px. */
+@media (max-width: 1099px) {
+  .sf-lanes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sf-task-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 639px) {
+  .sf-lanes {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Waiting for you */
 .sf-strip {
   background: var(--sf-accent-soft);
@@ -874,7 +1402,7 @@ textarea.sf-input {
 
 /* Settings tabs and the Factories tab */
 .sf-tabs {
-  border-bottom: 1px solid var(--sf-border);
+  border-bottom: 1px solid var(--sf-chrome-border);
   display: flex;
   gap: 4px;
   margin-bottom: 12px;
@@ -886,17 +1414,24 @@ textarea.sf-input {
   border-bottom: 2px solid transparent;
   color: var(--sf-muted);
   cursor: pointer;
-  font: inherit;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   padding: 8px 12px;
 }
 
+.sf-tab:hover {
+  text-decoration: underline;
+}
+
 .sf-tab[aria-selected="true"] {
-  border-bottom-color: var(--sf-accent);
-  color: inherit;
+  border-bottom-color: var(--sf-text);
+  color: var(--sf-text);
 }
 
 .sf-tab:focus-visible {
-  outline: 2px solid var(--sf-accent);
+  outline: 2px solid var(--sf-focus);
   outline-offset: -2px;
 }
 
@@ -920,9 +1455,14 @@ textarea.sf-input {
 
 .sf-chip {
   align-items: center;
+  background: transparent;
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   display: inline-flex;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   gap: 6px;
   padding: 2px 8px;
 }

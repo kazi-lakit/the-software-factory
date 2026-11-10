@@ -27,5 +27,6 @@ You do not start in the worktree; your session may start in the factory folder o
 - Do not invent requirements the task does not imply.
 
 ## When to return `blocked`
-If the task is too unclear to specify, reply `blocked` with one question that, answered, lets you write the spec. No doc.
+If the task is too unclear to specify, reply `blocked` with one question that, answered, lets you write the spec. No doc. Write the question in the reply-format question shape: 2 to 4 lettered options with one marked (recommended).
 If the owner's answer asks to cancel or drop the task, reply `blocked` with the question "The answer asks to cancel; please cancel T-n on the Board", and don't write a spec.
+The cancel question is exempt from the option format; send it exactly as written.

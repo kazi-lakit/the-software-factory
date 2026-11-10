@@ -1,14 +1,16 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { createTask, isMainRef, type FactoryRepo, type Status, type Task } from "@factory/core";
+import { createTask, isMainRef, markReady, type FactoryRepo, type Status, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { clearUnsent, hasUnsent, keepUnsent, useUnsent } from "../../lib/unsent";
 import { useFactories, useSelectedFactory, type FactoryEntry } from "../factories/useFactories";
 import { describeWriteError, NEVER_MAIN_BASE, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 import { FactoryPicker } from "./FactoryPicker";
-import { COLUMNS, isTestTask, MUTED, STATUS_LABEL } from "./status";
+import { laneOf, LANES, type LaneId } from "./lanes";
+import { COLUMNS, isTestTask, MUTED, NEEDS_YOU, STATUS_LABEL } from "./status";
 import { TaskCard } from "./TaskCard";
 import { useBoard } from "./useBoard";
+import { useBoardView } from "./useBoardView";
 import { WaitingStrip } from "./WaitingStrip";
 
 type Navigate = (path: string) => void;
@@ -90,8 +92,13 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const formId = useId();
   const [picked, setPicked] = useSelectedFactory();
   const [repo, setRepo] = useState("");
+  const [view, setView] = useBoardView();
   const [showTest, setShowTest] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<Status>>(new Set());
+  // Expansion is not remembered: leaving All stages collapses Done and Cancelled again.
+  useEffect(() => {
+    if (view !== "stages") setExpanded((current) => (current.size === 0 ? current : new Set()));
+  }, [view]);
   // A New task link wins over unsent text; otherwise reopens on unsent text, e.g. after the session ended mid-form.
   const [prefill] = useState(readLinkPrefill);
   const [link, setLink] = useState(prefill.choice);
@@ -107,6 +114,8 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, [prefill]);
   const [notice, setNotice] = useState("");
+  // Set when a task was created but could not be marked ready; the form is gone by then, so the Board shows it.
+  const [readyProblem, setReadyProblem] = useState<WriteProblem>();
   const newTaskButton = useRef<HTMLButtonElement>(null);
   // After a create the form is gone: focus returns to the button that opened it.
   const [refocusNewTask, setRefocusNewTask] = useState(false);
@@ -127,6 +136,10 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const waiting = inFactory.filter((task) => showTest || !isTestTask(task));
   const byStatus = new Map<Status, Task[]>(COLUMNS.map((status) => [status, []]));
   for (const task of visible) byStatus.get(task.status)?.push(task);
+  // Lanes keep today's per-status order inside a lane; a status outside COLUMNS (runtime safety net) lands in Working.
+  const byLane = new Map<LaneId, Task[]>(LANES.map((lane) => [lane.id, []]));
+  for (const status of COLUMNS) byLane.get(laneOf(status))?.push(...(byStatus.get(status) ?? []));
+  for (const task of visible) if (!byStatus.has(task.status)) byLane.get(laneOf(task.status))?.push(task);
 
   function toggle(status: Status) {
     setExpanded((current) => {
@@ -163,15 +176,20 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
           <input type="checkbox" checked={showTest} onChange={(event) => setShowTest(event.target.checked)} />
           <span>Show test tasks</span>
         </label>
+        <div role="group" aria-label="Board view" className="sf-segmented">
+          <button type="button" className="sf-segment" aria-pressed={view === "lanes"} onClick={() => setView("lanes")}>Lanes</button>
+          <button type="button" className="sf-segment" aria-pressed={view === "stages"} onClick={() => setView("stages")}>All stages</button>
+        </div>
         <button
           ref={newTaskButton}
           type="button"
-          className="sf-button sf-toolbar-end"
+          className={`sf-button sf-toolbar-end${creating ? "" : " sf-button-primary"}`}
           aria-expanded={creating}
           aria-controls={creating ? formId : undefined}
           onClick={() => {
             // Closing the form drops a link it has not used yet, so a later open does not apply it.
             if (creating) setLink(undefined);
+            setReadyProblem(undefined);
             setCreating(!creating);
           }}
         >
@@ -179,6 +197,12 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
         </button>
       </div>
       <p className="sf-visually-hidden" role="status">{notice}</p>
+      {readyProblem ? (
+        <>
+          <WriteProblemNotice problem={readyProblem} />
+          <p className="sf-problem" role="alert">The task was created but not marked ready.</p>
+        </>
+      ) : null}
 
       {creating ? (
         <NewTaskPanel
@@ -193,7 +217,8 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             setLink(undefined);
             setCreating(false);
           }}
-          onCreated={(task) => {
+          onCreated={(task, problem) => {
+            setReadyProblem(problem);
             setLink(undefined);
             setCreating(false);
             setRefocusNewTask(true);
@@ -212,7 +237,33 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
 
       {board.data ? <WaitingStrip tasks={waiting} showFactory={all} onNavigate={onNavigate} /> : null}
 
-      {board.data ? (
+      {board.data && view === "lanes" ? (
+        <div className="sf-lanes">
+          {LANES.map((lane) => {
+            const tasks = byLane.get(lane.id) ?? [];
+            return (
+              <section key={lane.id} className={`sf-lane${lane.id === "needs-you" ? " sf-lane-needs-you" : ""}`} aria-label={lane.name}>
+                <div className="sf-lane-head">
+                  <h3 className="sf-label sf-lane-name">{lane.name}</h3>
+                  <span className="sf-count sf-mono">{tasks.length}</span>
+                </div>
+                <p className="sf-lane-hint">{lane.hint}</p>
+                {tasks.length > 0 ? (
+                  <ul className="sf-card-list">
+                    {tasks.map((task) => (
+                      <li key={task.taskId}><TaskCard task={task} showFactory={all} onNavigate={onNavigate} /></li>
+                    ))}
+                  </ul>
+                ) : null}
+              </section>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {board.data && view === "stages" ? (
+        <>
+        <p className="sf-columns-hint">Every status as its own column. Outlined columns wait for you. Scroll sideways for Review, PR open, Done, Blocked and Cancelled</p>
         <div className="sf-columns">
           {COLUMNS.map((status) => {
             const tasks = byStatus.get(status) ?? [];
@@ -222,7 +273,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             const listId = `${formId}-${status}`;
             const tone = collapsible ? " sf-column-muted" : "";
             return (
-              <section key={status} className={`sf-column${tone}${open ? "" : " sf-column-collapsed"}`} aria-label={STATUS_LABEL[status]}>
+              <section key={status} className={`sf-column${tone}${NEEDS_YOU.has(status) ? " sf-column-needs-you" : ""}${open ? "" : " sf-column-collapsed"}`} aria-label={STATUS_LABEL[status]}>
                 <h3 className="sf-column-head">
                   {collapsible ? (
                     <button type="button" className="sf-column-toggle" aria-expanded={open} aria-controls={listed ? listId : undefined} onClick={() => toggle(status)}>
@@ -246,6 +297,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             );
           })}
         </div>
+        </>
       ) : null}
     </div>
   );
@@ -258,7 +310,7 @@ type PanelProps = {
   id: string;
   link: LinkChoice | undefined;
   onClose: () => void;
-  onCreated: (task: Task) => void;
+  onCreated: (task: Task, readyProblem?: WriteProblem) => void;
   onLinkUsed: () => void;
   picked: string;
 };
@@ -300,6 +352,8 @@ function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start
   const [problem, setProblem] = useState<WriteProblem>();
   const [baseProblem, setBaseProblem] = useState("");
   const [busy, setBusy] = useState(false);
+  // Plain state, not unsent text: a refresh drops it.
+  const [readyNow, setReadyNow] = useState(false);
   const invalidate = useInvalidateAfterWrite();
 
   /** The base follows the repo's own base branch until the owner types another. */
@@ -324,14 +378,23 @@ function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start
     setBaseProblem("");
     setBusy(true);
     try {
-      const task = await createTask(boardStore, now, { baseBranch: base, description, factoryId: entry.def.factoryId, repo: repo.repoId, title });
+      let task = await createTask(boardStore, now, { baseBranch: base, description, factoryId: entry.def.factoryId, repo: repo.repoId, title });
+      // The task exists now. If it cannot be marked ready it stays in the inbox, and the Board says so once the form is gone.
+      let readyProblem: WriteProblem | undefined;
+      if (readyNow) {
+        try {
+          task = await markReady(boardStore, now, task.taskId);
+        } catch (error) {
+          readyProblem = describeWriteError(error);
+        }
+      }
       clearTitle();
       clearDescription();
       clearFactory();
       clearRepo();
       clearBase();
       void invalidate();
-      onCreated(task);
+      onCreated(task, readyProblem);
     } catch (error) {
       setProblem(describeWriteError(error));
     } finally {
@@ -341,6 +404,7 @@ function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start
 
   return (
     <form id={id} className="sf-form sf-panel" aria-label="New task" onSubmit={(event) => void submit(event)}>
+      <h3 className="sf-page-title">New task</h3>
       <label className="sf-field" htmlFor={`${id}-title`}>
         <span>Title</span>
         <input id={`${id}-title`} className="sf-input" autoFocus value={title} onChange={(event) => setTitle(event.target.value)} />
@@ -376,6 +440,10 @@ function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start
           />
         </label>
       </div>
+      <label className="sf-switch">
+        <input type="checkbox" role="switch" checked={readyNow} onChange={(event) => setReadyNow(event.target.checked)} />
+        <span>Mark ready now</span>
+      </label>
       {note ? <p role="status">{note}</p> : null}
       {baseProblem ? <p className="sf-problem" role="alert">{baseProblem}</p> : null}
       <WriteProblemNotice problem={problem} />

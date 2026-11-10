@@ -28,4 +28,4 @@ The worktree path, the spec, the plan, the repo's check commands, and possibly f
 - Do not do work the spec and plan do not call for.
 
 ## When to return `blocked`
-If you cannot proceed without a decision only the user can make, reply `blocked` with one question. Commit what is safe first. If the checks cannot pass after real effort, reply `failed` with the failing output summarized.
+If you cannot proceed without a decision only the user can make, reply `blocked` with one question. Write the question in the reply-format question shape: 2 to 4 lettered options with one marked (recommended). Commit what is safe first. If the checks cannot pass after real effort, reply `failed` with the failing output summarized.

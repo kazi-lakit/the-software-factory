@@ -1,12 +1,13 @@
 import { useCallback, useId, useRef } from "react";
 import type { ReactNode } from "react";
 import { GATE_DOC, GATE_STATUS, NotFoundError, type FactoryEvent, type Gate, type Run, type Task } from "@factory/core";
-import { formatCost, NEEDS_YOU, STATUS_LABEL } from "../board/status";
+import { ageOf, formatCost, NEEDS_YOU, STATUS_LABEL } from "../board/status";
 import { followInApp } from "../board/TaskCard";
 import { useFactories } from "../factories/useFactories";
 import { AnswerPanel } from "./AnswerPanel";
 import { DocVersions } from "./DocVersions";
 import { GatePanel } from "./GatePanel";
+import { Stepper } from "./Stepper";
 import { TaskActions } from "./TaskActions";
 import { useTask } from "./useTask";
 
@@ -88,13 +89,18 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
         <BackToBoard label="Board" onNavigate={onNavigate} />
       </nav>
       {query.isError ? <p className="sf-problem" role="alert">Could not refresh this task; showing what was loaded last.</p> : null}
-      <TaskHeader task={task} onReload={reload} />
+      <TaskHeader task={task} events={events} onReload={reload} />
 
       <Section title="Description">
         {task.description.trim() ? <pre className="sf-doc-body">{task.description}</pre> : <p className="sf-empty">No description.</p>}
       </Section>
-      <Section title="Spec"><DocVersions label="Spec" docs={docs.spec} /></Section>
-      <Section title="Plan"><DocVersions label="Plan" docs={docs.plan} /></Section>
+      <div className="sf-task-body">
+        <div className="sf-task-docs">
+          <Section title="Spec"><DocVersions label="Spec" docs={docs.spec} /></Section>
+          <Section title="Plan"><DocVersions label="Plan" docs={docs.plan} /></Section>
+        </div>
+        <Details task={task} events={events} />
+      </div>
       <Section title="Verify report"><DocVersions label="Verify report" docs={docs.verify} /></Section>
       <Section title="Review report"><DocVersions label="Review report" docs={docs.review} /></Section>
 
@@ -109,7 +115,24 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
   );
 }
 
-function TaskHeader({ onReload, task }: { onReload: () => Promise<Task | undefined>; task: Task }) {
+function Details({ events, task }: { events: readonly FactoryEvent[]; task: Task }) {
+  const last = events.at(-1);
+  return (
+    <aside className="sf-details" aria-label="Details">
+      <dl>
+        <div><dt>Branch</dt><dd className="sf-mono">{task.branch ?? "—"}</dd></div>
+        <div><dt>Cost</dt><dd className="sf-mono">{formatCost(task.costUsd)}</dd></div>
+        <div>
+          <dt>Last event</dt>
+          <dd>{last ? `${last.field ?? last.action}: ${short(last.to)} · ${formatTime(last.at)}` : "—"}</dd>
+        </div>
+      </dl>
+    </aside>
+  );
+}
+
+function TaskHeader({ events, onReload, task }: { events: readonly FactoryEvent[]; onReload: () => Promise<Task | undefined>; task: Task }) {
+  const age = ageOf(events.find((event) => event.action === "create")?.at);
   const prUrl = githubUrl(task.prUrl);
   // The factory's name when it is visible, else its id.
   const factoryName = useFactories().byId.get(task.factoryId)?.def.name ?? task.factoryId;
@@ -118,12 +141,21 @@ function TaskHeader({ onReload, task }: { onReload: () => Promise<Task | undefin
   return (
     <section className="sf-task-header" aria-label="Task details">
       <h2 ref={heading} tabIndex={-1}>{task.title}</h2>
+      <p className="sf-task-meta">
+        <span>{task.repo}</span>
+        <span aria-hidden="true">·</span>
+        <span className="sf-mono">{task.baseBranch}</span>
+        {age ? (
+          <>
+            <span aria-hidden="true">·</span>
+            <span>{age}</span>
+          </>
+        ) : null}
+      </p>
+      <Stepper status={task.status} stage={task.stage} />
       <dl className="sf-facts">
         <div><dt>Task</dt><dd className="sf-mono">{task.taskId}</dd></div>
         <div><dt>Factory</dt><dd>{factoryName}</dd></div>
-        <div><dt>Repo</dt><dd>{task.repo}</dd></div>
-        <div><dt>Base</dt><dd className="sf-mono">{task.baseBranch}</dd></div>
-        <div><dt>Branch</dt><dd className="sf-mono">{task.branch ?? "—"}</dd></div>
         <div>
           <dt>PR</dt>
           <dd>
@@ -144,7 +176,6 @@ function TaskHeader({ onReload, task }: { onReload: () => Promise<Task | undefin
         </div>
         <div><dt>Stage</dt><dd>{task.stage ?? "—"}</dd></div>
         <div><dt>Attempt</dt><dd className="sf-mono">{task.attempt}</dd></div>
-        <div><dt>Cost</dt><dd className="sf-mono">{formatCost(task.costUsd)}</dd></div>
       </dl>
       <TaskActions key={task.taskId} task={task} onReload={onReload} onCancelled={() => heading.current?.focus()} />
     </section>

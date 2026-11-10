@@ -38,11 +38,31 @@ export class GhLoginMissingError extends SecretMissingError {
 export const KEYCHAIN_SERVICE = 'the-software-factory';
 const SERVICE = KEYCHAIN_SERVICE;
 
-/** Reads a secret from the macOS Keychain; `name` is the account (`blocks-credential`). Error messages never include command output. */
-export async function readSecret(name: string, exec: ExecFile = realExecFile): Promise<string> {
-  const { code, stdout } = await exec('security', ['find-generic-password', '-s', SERVICE, '-a', name, '-w']);
-  if (code !== 0) throw new SecretMissingError(`${name} not found in Keychain (service ${SERVICE})`);
-  return stdout.replace(/\r?\n$/, '');
+/** The message for a platform with no supported secret store. */
+export const noSecretStore = (platform: string): string => `no secret store on ${platform} (macOS Keychain or Linux secret-tool only)`;
+
+/** The `secret-tool` attributes of a factory secret on Linux (the same service and account names as the Keychain). */
+export const secretToolAttrs = (name: string): string[] => ['service', SERVICE, 'account', name];
+
+/**
+ * Reads a secret; `name` is the account (`blocks-credential`). macOS reads the Keychain (`security`), Linux the Secret
+ * Service keyring (`secret-tool`, from libsecret-tools; it needs an unlocked desktop keyring). Error messages never
+ * include command output.
+ */
+export async function readSecret(name: string, exec: ExecFile = realExecFile, platform: string = process.platform): Promise<string> {
+  if (platform === 'darwin') {
+    const { code, stdout } = await exec('security', ['find-generic-password', '-s', SERVICE, '-a', name, '-w']);
+    if (code !== 0) throw new SecretMissingError(`${name} not found in Keychain (service ${SERVICE})`);
+    return stdout.replace(/\r?\n$/, '');
+  }
+  if (platform === 'linux') {
+    const { code, stdout } = await exec('secret-tool', ['lookup', ...secretToolAttrs(name)]);
+    if (code !== 0 || stdout === '') {
+      throw new SecretMissingError(`${name} not found in the keyring (service ${SERVICE}); save it with npm run blocks:save-credential`);
+    }
+    return stdout.replace(/\r?\n$/, '');
+  }
+  throw new SecretMissingError(`${name}: ${noSecretStore(platform)}`);
 }
 
 /** Reads the GitHub token of a gh CLI login (`gh auth token`). Error messages never include command output. */

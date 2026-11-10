@@ -227,3 +227,40 @@ describe("HistoryView factory filter", () => {
     expect(within(row).getByText("Delta → Delta Two")).toBeInTheDocument();
   });
 });
+
+describe("HistoryView restyle", () => {
+  it("history_title_uses_page_title_class", async () => {
+    renderHistory();
+    expect(await screen.findByRole("heading", { name: "History" })).toHaveClass("sf-page-title");
+  });
+
+  it("history_table_sits_in_wrap", async () => {
+    seedTaskRow("T-1");
+    await addEvents(event("T-1", "you", "status", DAY1));
+    renderHistory();
+    const table = await screen.findByRole("table", { name: "History" });
+    expect(table.closest(".sf-table-wrap")).not.toBeNull();
+  });
+
+  it("history_loading_error_empty_show_no_panel", async () => {
+    const { container } = renderHistory();
+    await screen.findByText("No history yet.");
+    expect(container.querySelector(".sf-table-wrap")).toBeNull();
+  });
+
+  it("history_filters_use_shared_controls", async () => {
+    renderHistory();
+    await screen.findByText("No history yet.");
+    for (const name of ["Actor", "Mode", "Task"]) {
+      const control = screen.getByLabelText(name);
+      expect(control.tagName, name).toBe("SELECT");
+      expect(control, name).toHaveClass("sf-select");
+      expect(control.closest(".sf-inline-field"), name).not.toBeNull();
+    }
+    for (const name of ["From", "To"]) {
+      const control = screen.getByLabelText(name);
+      expect(control, name).toHaveClass("sf-input");
+      expect(control.closest(".sf-inline-field"), name).not.toBeNull();
+    }
+  });
+});

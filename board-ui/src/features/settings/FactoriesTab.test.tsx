@@ -255,3 +255,50 @@ describe("Factories tab", () => {
     expect(screen.getByLabelText("Remote")).toHaveValue("git@github.com:org/api2.git");
   });
 });
+
+describe("Factories tab restyle", () => {
+  it("form_labels_and_inputs_follow_the_design", async () => {
+    await openFactoriesTab();
+    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
+    const form = await screen.findByRole("form", { name: "Add factory" });
+    const labels = Array.from(form.querySelectorAll("label.sf-field-label"));
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) {
+      const control = form.querySelector(`#${CSS.escape(label.getAttribute("for") ?? "")}`);
+      expect(control, label.textContent ?? "").not.toBeNull();
+      if (control?.tagName === "INPUT" || control?.tagName === "TEXTAREA") expect(control, label.textContent ?? "").toHaveClass("sf-input");
+    }
+    expect(within(form).getByRole("button", { name: "Create factory" })).toHaveClass("sf-button-primary");
+    expect(within(form).getByRole("button", { name: "Cancel" })).not.toHaveClass("sf-button-primary");
+  });
+
+  it("repo_form_inputs_are_outlined_and_actions_split", async () => {
+    await openFactoriesTab();
+    fireEvent.click(await screen.findByRole("button", { name: "Add repo to delta" }));
+    const form = await screen.findByRole("form", { name: "Add repo to delta" });
+    for (const name of ["Repo id", "Remote", "Base branch", "Checks (JSON)"]) expect(within(form).getByLabelText(name), name).toHaveClass("sf-input");
+    expect(within(form).getByRole("button", { name: "Add repo" })).toHaveClass("sf-button-primary");
+    expect(within(form).getByRole("button", { name: "Cancel" })).not.toHaveClass("sf-button-primary");
+  });
+
+  it("edit_save_is_primary", async () => {
+    await openFactoriesTab();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit factory delta" }));
+    const form = await screen.findByRole("form", { name: /Edit factory/ });
+    expect(within(form).getByRole("button", { name: "Save factory" })).toHaveClass("sf-button-primary");
+  });
+
+  it("checks_change_stops_at_review_and_only_confirm_and_save_are_primary", async () => {
+    const save = vi.spyOn(owner(), "saveFactoryRepo");
+    await openFactoriesTab();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/api" }));
+    const form = await screen.findByRole("form", { name: "Edit repo api" });
+    const checks = JSON.parse((within(form).getByLabelText("Checks (JSON)") as HTMLTextAreaElement).value) as typeof checksFixtureForTests;
+    changeField("Checks (JSON)", JSON.stringify({ ...checks, server: { ...checks.server, test: "x" } }));
+    fireEvent.click(within(form).getByRole("button", { name: "Save repo" }));
+    await within(form).findByRole("region", { name: "Checks change" });
+    expect(save).not.toHaveBeenCalled();
+    const primary = within(form).getAllByRole("button").filter((b) => b.classList.contains("sf-button-primary")).map((b) => b.textContent);
+    expect(primary.sort()).toEqual(["Confirm change", "Save repo"]);
+  });
+});

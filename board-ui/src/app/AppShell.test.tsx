@@ -8,6 +8,7 @@ import { fetchSessionClaims, logout } from "../lib/blocks/auth";
 import { boardStore } from "../lib/board";
 import { defFixture } from "../test/factories";
 import { resetSelectedFactoryForTests, useSelectedFactory } from "../features/factories/useFactories";
+import type { Task } from "@factory/core";
 import { AppShell } from "./AppShell";
 import { AuthProvider } from "./providers/AuthProvider";
 
@@ -21,7 +22,9 @@ vi.mock("../lib/blocks/auth", () => ({
   startLogin: vi.fn(async () => undefined)
 }));
 
-vi.mock("../lib/board", () => ({ boardStore: { getSettings: vi.fn(), listFactoryDefs: vi.fn(), listFactoryRepos: vi.fn() } }));
+vi.mock("../lib/board", () => ({ boardStore: { getSettings: vi.fn(), listFactoryDefs: vi.fn(), listFactoryRepos: vi.fn(), listTasks: vi.fn() } }));
+
+const task = (id: string, status: string, factoryId = "blocks") => ({ taskId: id, status, factoryId, title: id }) as unknown as Task;
 
 const getSettings = vi.mocked(boardStore.getSettings);
 
@@ -57,15 +60,34 @@ beforeEach(() => {
   getSettings.mockResolvedValue(settings(false));
   vi.mocked(boardStore.listFactoryDefs).mockResolvedValue(["blocks", "delta", "mods"].map((id) => defFixture(id)));
   vi.mocked(boardStore.listFactoryRepos).mockResolvedValue([]);
+  vi.mocked(boardStore.listTasks).mockResolvedValue([]);
 });
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
+  document.documentElement.removeAttribute("data-theme");
   window.localStorage.clear();
   vi.clearAllMocks();
 });
 
 describe("AppShell", () => {
+  it("app_shell_renders_the_theme_switch_first_in_the_right_group", () => {
+    renderShell("/");
+    const group = screen.getByRole("group", { name: "Theme" });
+    const end = document.querySelector(".sf-topbar-end");
+    expect(end).toContainElement(group);
+    expect(end?.firstElementChild).toBe(group);
+    fireEvent.click(within(group).getByRole("button", { name: "Dark theme" }));
+    expect(within(group).getByRole("button", { name: "Dark theme" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(group).getByRole("button", { name: "Light theme" })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("project_name_carries_the_label_class", () => {
+    renderShell("/");
+    expect(screen.getByText("the-software-factory")).toHaveClass("sf-label");
+  });
+
   it("shows_the_project_the_three_views_the_user_and_sign_out", async () => {
     renderShell("/history");
     const views = screen.getByRole("navigation", { name: "Views" });
@@ -78,15 +100,16 @@ describe("AppShell", () => {
     expect(history).toHaveAttribute("aria-current", "page");
     expect(board).not.toHaveAttribute("aria-current");
     expect(screen.getByText("the-software-factory")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
     expect(screen.getByRole("main")).toContainElement(screen.getByRole("heading", { name: "Page body" }));
-    expect(await screen.findByText("Kazi Rahman")).toBeInTheDocument();
+    const pill = await screen.findByRole("button", { name: "Sign out (Kazi)" });
+    expect(pill).toHaveTextContent("KR");
+    expect(pill).toHaveTextContent("Kazi");
   });
 
   it("shows_the_email_when_the_profile_has_no_name", async () => {
     vi.mocked(blocksClient.iam.me).mockResolvedValue({ data: { email: "kazi@example.test", roles: ["factory-owner"] } } as never);
     renderShell();
-    expect(await screen.findByText("kazi@example.test")).toBeInTheDocument();
+    expect(await screen.findByText("kazi@example.test")).toHaveClass("sf-account-name");
   });
 
   it("shows_factory_paused_when_the_global_settings_pause_it", async () => {
@@ -105,7 +128,7 @@ describe("AppShell", () => {
     getSettings.mockResolvedValue(settings(false, { ghost: true }));
     renderShell();
     await waitFor(() => expect(getSettings).toHaveBeenCalled());
-    await screen.findByText("Kazi Rahman");
+    await screen.findByRole("button", { name: /^Sign out \(/ });
     await waitFor(() => expect(screen.queryByText(/paused/)).not.toBeInTheDocument());
   });
 
@@ -135,7 +158,7 @@ describe("AppShell", () => {
     window.localStorage.setItem("factory-board:factory", "blocks");
     renderShell();
     await waitFor(() => expect(getSettings).toHaveBeenCalled());
-    await screen.findByText("Kazi Rahman");
+    await screen.findByRole("button", { name: /^Sign out \(/ });
     expect(screen.queryByText(/paused/)).not.toBeInTheDocument();
     cleanup();
     resetSelectedFactoryForTests();
@@ -148,7 +171,7 @@ describe("AppShell", () => {
     getSettings.mockResolvedValue(settings(false, { delta: true }));
     window.localStorage.setItem("factory-board:factory", "blocks");
     renderShell("/", <Picker />);
-    await screen.findByText("Kazi Rahman");
+    await screen.findByRole("button", { name: /^Sign out \(/ });
     expect(screen.queryByText(/paused/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Pick delta" }));
     expect(await screen.findByText("Factory paused")).toBeInTheDocument();
@@ -158,14 +181,14 @@ describe("AppShell", () => {
     window.localStorage.setItem("factory-board:factory", "newbie");
     renderShell();
     await waitFor(() => expect(getSettings).toHaveBeenCalled());
-    await screen.findByText("Kazi Rahman");
+    await screen.findByRole("button", { name: /^Sign out \(/ });
     expect(screen.queryByText(/paused/)).not.toBeInTheDocument();
   });
 
   it("shows_no_pause_indicator_while_the_factory_runs", async () => {
     renderShell();
     await waitFor(() => expect(getSettings).toHaveBeenCalled());
-    await screen.findByText("Kazi Rahman");
+    await screen.findByRole("button", { name: /^Sign out \(/ });
     expect(screen.queryByText("Factory paused")).not.toBeInTheDocument();
   });
 
@@ -205,28 +228,152 @@ describe("AppShell", () => {
 
   it("titles_the_user_text_so_a_truncated_name_can_be_read", async () => {
     renderShell();
-    expect(await screen.findByText("Kazi Rahman")).toHaveAttribute("title", "Kazi Rahman");
+    expect(await screen.findByRole("button", { name: "Sign out (Kazi)" })).toHaveAttribute("title", "Kazi Rahman");
   });
 
   it("goes_to_login_even_when_sign_out_fails", async () => {
     vi.mocked(logout).mockRejectedValueOnce(new Error("network"));
     const { onNavigate } = renderShell();
-    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sign out (Kazi)" }));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("/login"));
   });
 
   it("drops_unsent_text_on_sign_out", async () => {
     sessionStorage.setItem("factory-board:unsent:answer:T-1", "draft");
     const { onNavigate } = renderShell();
-    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sign out (Kazi)" }));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("/login"));
     expect(sessionStorage.getItem("factory-board:unsent:answer:T-1")).toBeNull();
   });
 
   it("signs_out_and_goes_to_login", async () => {
     const { onNavigate } = renderShell();
-    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Sign out (Kazi)" }));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("/login"));
     expect(logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("ctrl_shift_alt_and_middle_clicks_do_not_navigate", () => {
+    const { onNavigate } = renderShell();
+    for (const init of [{ ctrlKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }]) {
+      document.addEventListener("click", (event) => event.preventDefault(), { once: true });
+      fireEvent.click(screen.getByRole("link", { name: "History" }), init);
+    }
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+});
+
+describe("AppShell waiting badge", () => {
+  const badgeText = () => document.querySelector(".sf-topbar")?.textContent ?? "";
+
+  it("shows_a_waiting_badge_counting_tasks_that_need_you", async () => {
+    vi.mocked(boardStore.listTasks).mockResolvedValue([task("a", "spec_review"), task("b", "spec_review"), task("c", "blocked"), task("d", "build")]);
+    renderShell();
+    const badge = await screen.findByText("3 waiting for you");
+    expect(badge).toHaveClass("sf-badge");
+    expect(document.querySelector(".sf-topbar-end")).toContainElement(badge);
+  });
+
+  it("counts_plan_review_and_pr_open_too", async () => {
+    vi.mocked(boardStore.listTasks).mockResolvedValue([task("a", "plan_review"), task("b", "pr_open")]);
+    renderShell();
+    expect(await screen.findByText("2 waiting for you")).toBeInTheDocument();
+  });
+
+  it("shows_no_badge_when_nothing_waits", async () => {
+    vi.mocked(boardStore.listTasks).mockResolvedValue([task("a", "build"), task("b", "done")]);
+    renderShell();
+    await waitFor(() => expect(boardStore.listTasks).toHaveBeenCalled());
+    await screen.findByRole("button", { name: "Sign out (Kazi)" });
+    expect(screen.queryByText(/waiting for you/)).toBeNull();
+  });
+
+  it("shows_no_badge_and_no_error_while_tasks_load", async () => {
+    vi.mocked(boardStore.listTasks).mockReturnValue(new Promise(() => undefined));
+    renderShell();
+    await screen.findByRole("button", { name: "Sign out (Kazi)" });
+    expect(screen.queryByText(/waiting for you/)).toBeNull();
+    expect(badgeText()).not.toMatch(/error|failed/i);
+  });
+
+  it("shows_no_badge_and_no_error_when_tasks_fail", async () => {
+    vi.mocked(boardStore.listTasks).mockRejectedValue(new Error("boom"));
+    renderShell();
+    await waitFor(() => expect(boardStore.listTasks).toHaveBeenCalled());
+    await screen.findByRole("button", { name: "Sign out (Kazi)" });
+    expect(screen.queryByText(/waiting for you/)).toBeNull();
+    expect(badgeText()).not.toMatch(/error|failed|boom/i);
+  });
+
+  it("counts_only_the_picked_factory", async () => {
+    window.localStorage.setItem("factory-board:factory", "delta");
+    vi.mocked(boardStore.listTasks).mockResolvedValue([task("a", "blocked", "delta"), task("b", "blocked"), task("c", "pr_open")]);
+    renderShell();
+    expect(await screen.findByText("1 waiting for you")).toBeInTheDocument();
+  });
+
+  it("badge_changes_do_not_reorder_the_bar", async () => {
+    vi.mocked(boardStore.listTasks).mockResolvedValue([task("a", "blocked")]);
+    renderShell();
+    const project = screen.getByText("the-software-factory");
+    const nav = screen.getByRole("navigation", { name: "Views" });
+    const parent = project.parentElement;
+    const badge = await screen.findByText("1 waiting for you");
+    expect(project.parentElement).toBe(parent);
+    expect(nav.parentElement).toBe(parent);
+    expect(nav.nextElementSibling).toBe(document.querySelector(".sf-topbar-end"));
+    expect(nav).not.toContainElement(badge);
+  });
+
+  it("lists_tasks_once_per_poll_interval", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    renderShell();
+    await waitFor(() => expect(boardStore.listTasks).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(30_000);
+    await waitFor(() => expect(boardStore.listTasks).toHaveBeenCalledTimes(2));
+    expect(boardStore.listTasks).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("AppShell account pill", () => {
+  it("pill_shows_initials_in_a_circle_and_the_first_name", async () => {
+    renderShell();
+    const pill = await screen.findByRole("button", { name: "Sign out (Kazi)" });
+    expect(pill).toHaveClass("sf-account");
+    expect(pill).toHaveAttribute("type", "button");
+    expect(pill).toHaveAttribute("title", "Kazi Rahman");
+    expect(pill.querySelector(".sf-avatar")).toHaveTextContent("KR");
+    expect(pill.querySelector(".sf-account-name")).toHaveTextContent("Kazi");
+  });
+
+  it("pill_falls_back_to_the_email_when_there_is_no_first_name", async () => {
+    vi.mocked(blocksClient.iam.me).mockResolvedValue({ data: { email: "kazi@example.test", roles: [] } } as never);
+    renderShell();
+    const pill = await screen.findByRole("button", { name: "Sign out (kazi@example.test)" });
+    expect(pill.querySelector(".sf-avatar")).toHaveTextContent("K");
+    expect(pill.querySelector(".sf-account-name")).toHaveTextContent("kazi@example.test");
+  });
+
+  it("pill_shows_a_question_mark_before_a_profile_exists", async () => {
+    vi.mocked(blocksClient.iam.me).mockRejectedValue(new Error("nope"));
+    renderShell();
+    const pill = await screen.findByRole("button", { name: "Sign out" });
+    expect(pill.querySelector(".sf-avatar")).toHaveTextContent("?");
+  });
+
+  it("long_first_name_is_truncated_by_css_with_the_full_name_in_title", async () => {
+    const long = "A".repeat(40);
+    vi.mocked(blocksClient.iam.me).mockResolvedValue({ data: { firstName: long, lastName: "Rahman", roles: [] } } as never);
+    renderShell();
+    const pill = await screen.findByRole("button", { name: `Sign out (${long})` });
+    expect(pill.querySelector(".sf-account-name")).toHaveTextContent(long);
+    expect(pill).toHaveAttribute("title", `${long} Rahman`);
+  });
+
+  it("no_separate_sign_out_button_or_user_text", async () => {
+    renderShell();
+    await screen.findByRole("button", { name: "Sign out (Kazi)" });
+    expect(screen.getAllByRole("button", { name: /Sign out/ })).toHaveLength(1);
+    expect(document.querySelector(".sf-user")).toBeNull();
   });
 });

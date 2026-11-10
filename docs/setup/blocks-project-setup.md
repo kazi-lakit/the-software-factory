@@ -30,10 +30,12 @@ There are 10 tables: `FactoryTask`, `FactoryDoc`, `FactoryApproval`, `FactorySet
 
 **Warning:** a new table is open to any signed-in project user until step 4 deploys its rules. `FactoryRepo.checks` holds shell commands that the core runs on the owner's Mac. Run step 4 in the same sitting, straight after this step, before anything else touches the project.
 
+A project set up from scratch creates all 10 tables. For each table, create its schema, its fields and its unique index from the table below. A project set up before plan 6 only creates `FactoryDef`, `FactoryRepo` and `FactoryHealth` (its other 7 tables already exist, see "Existing tables" below).
+
 For each new table, create the schema, then its fields:
 
 ```bash
-S=FactoryDef     # then FactoryRepo, then FactoryHealth
+S=FactoryTask     # repeat for each of the 10 tables: FactoryTask, FactoryDoc, FactoryApproval, FactorySettings, FactoryRun, FactoryEvent, FactorySpike, FactoryDef, FactoryRepo, FactoryHealth
 blocks data schema info save --schema-name $S --collection-name ${S}s --schema-type 1 --dry-run   # then --yes; note the schema id it prints
 blocks data schema fields --schema-id <id> --file blocks/data/factory/$S.fields.json --dry-run    # then --yes
 ```
@@ -57,7 +59,7 @@ Each table has one unique index:
 blocks data schema indexes create --schema-id <id> --fields <field> --unique --name <index name> --dry-run   # then --yes
 ```
 
-For the three new tables:
+For the three plan-6 tables, the index commands are shown as examples. A fresh project runs the generic command above for every table in the index table; a project set up before plan 6 runs only these three:
 
 ```bash
 blocks data schema indexes create --schema-id <FactoryDef id>    --fields factoryId --unique --name factory_def_factoryid_unique --dry-run     # then --yes
@@ -96,7 +98,7 @@ blocks iam users update-access <userId> --roles factory-owner --dry-run   # then
 
 If `update-access` refuses the flags, run `blocks iam users update-access --help` and adjust.
 
-## 6. The factory's machine login (the secret goes straight into the Keychain)
+## 6. The factory's machine login (the secret goes straight into the Keychain, or the keyring on Linux)
 
 ```bash
 cd ~/scratchpad/selise/the-software-factory
@@ -105,6 +107,8 @@ blocks auth client-credentials save --name factory-core --roles factory-core --a
 ```
 
 It should print only `saved blocks-credential (client …)`. If it prints an error, nothing was saved. Run the command again: `-U` replaces the item.
+
+**On Linux (Ubuntu)** the same command saves into the desktop keyring with `secret-tool`, under the same service and account names (`the-software-factory`, `blocks-credential`); saving again replaces it. Install it first with `sudo apt install libsecret-tools`. The keyring must be unlocked, which it is in a normal desktop login; over plain SSH with no desktop session there is no keyring, and the Blocks store can't load. Each machine gets its own machine login this way: run the command once per machine instead of copying the secret between them.
 
 ## 7. Tell Claude
 

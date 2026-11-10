@@ -10,12 +10,12 @@ const schema = z.object({
 
 export type BlocksCredential = z.infer<typeof schema>;
 
-/** Reads the factory's Blocks client credential from the Keychain. Errors never include the stored value. */
-export async function loadBlocksCredential(exec?: ExecFile): Promise<BlocksCredential> {
-  const raw = await readSecret('blocks-credential', exec);
+/** Reads the factory's Blocks client credential from the Keychain (macOS) or keyring (Linux). Errors never include the stored value. */
+export async function loadBlocksCredential(exec?: ExecFile, platform?: string): Promise<BlocksCredential> {
+  const raw = await readSecret('blocks-credential', exec, platform);
   let parsed: unknown;
   try { parsed = JSON.parse(raw); } catch { parsed = undefined; }
   const result = schema.safeParse(parsed);
-  if (!result.success) throw new Error('blocks-credential in Keychain is not valid JSON {clientId, clientSecret, projectKey, apiUrl}');
+  if (!result.success) throw new Error('blocks-credential is not valid JSON {clientId, clientSecret, projectKey, apiUrl}');
   return result.data;
 }

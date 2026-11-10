@@ -31,6 +31,14 @@ describe("AnswerPanel", () => {
     expect(screen.getByText("agent asked")).toBeInTheDocument();
   });
 
+  it("send_answer_uses_the_accent_fill", async () => {
+    const task = await blockedTask();
+    renderWithClient(<AnswerPanel task={task} onReload={vi.fn()} />);
+    const send = screen.getByRole("button", { name: "Send answer" });
+    expect(send).toHaveClass("sf-button-accent");
+    expect(send).not.toHaveClass("sf-button-primary");
+  });
+
   it("needs_non_blank_text", async () => {
     const task = await blockedTask();
     renderWithClient(<AnswerPanel task={task} onReload={vi.fn()} />);
@@ -70,5 +78,13 @@ describe("AnswerPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send answer" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("This task changed while you were looking. Reload to see the latest.");
     expect(answerBox()).toHaveValue("Use dev.");
+  });
+});
+
+describe("AnswerPanel styling", () => {
+  it("answer_panel_is_a_needs_you_panel", async () => {
+    const task = await blockedTask();
+    renderWithClient(<AnswerPanel task={task} onReload={vi.fn()} />);
+    expect(screen.getByRole("region")).toHaveClass("sf-panel", "sf-panel-needs-you");
   });
 });

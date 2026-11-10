@@ -35,6 +35,18 @@ afterEach(() => {
 });
 
 describe("GatePanel", () => {
+  it("approve_button_uses_the_accent_fill", async () => {
+    const seeded = await atSpecGate();
+    task = seeded.task;
+    renderPanel(seeded.docs);
+    const approve = screen.getByRole("button", { name: "Approve" });
+    expect(approve).toHaveClass("sf-button-accent");
+    expect(approve).not.toHaveClass("sf-button-primary");
+    const changes = screen.getByRole("button", { name: "Request changes" });
+    expect(changes).not.toHaveClass("sf-button-accent");
+    expect(changes).not.toHaveClass("sf-button-primary");
+  });
+
   it("approves_the_version_shown", async () => {
     const seeded = await atSpecGate();
     task = seeded.task;
@@ -280,5 +292,24 @@ describe("GatePanel", () => {
       expect(await screen.findByText(/Merge the PR on GitHub to finish this task/)).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
     });
+  });
+});
+
+describe("GatePanel styling", () => {
+  it("decision_panel_is_a_needs_you_surface_panel", async () => {
+    const seeded = await atSpecGate();
+    task = seeded.task;
+    renderPanel(seeded.docs);
+    const panel = screen.getByRole("region", { name: /Your decision/ });
+    expect(panel).toHaveClass("sf-panel", "sf-panel-needs-you");
+  });
+
+  it("request_changes_is_outlined_not_filled", async () => {
+    const seeded = await atSpecGate();
+    task = seeded.task;
+    renderPanel(seeded.docs);
+    const changes = screen.getByRole("button", { name: "Request changes" });
+    expect(changes).toHaveClass("sf-button");
+    for (const filled of ["sf-button-accent", "sf-button-primary", "sf-button-danger"]) expect(changes).not.toHaveClass(filled);
   });
 });

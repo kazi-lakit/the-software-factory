@@ -56,7 +56,7 @@ export function AnswerPanel({ onReload, task }: { onReload: () => unknown; task:
         </label>
         <WriteProblemNotice problem={problem} onReload={() => void onReload()} />
         <div className="sf-actions">
-          <button type="submit" className="sf-button sf-button-primary" disabled={busy}>Send answer</button>
+          <button type="submit" className="sf-button sf-button-accent" disabled={busy}>Send answer</button>
         </div>
       </form>
     </section>

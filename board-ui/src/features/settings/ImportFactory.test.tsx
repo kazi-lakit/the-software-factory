@@ -151,3 +151,13 @@ describe("Import factory", () => {
     expect(await screen.findByRole("region", { name: "Import result" })).toHaveTextContent("Factory: kept (differs from the file).");
   });
 });
+
+describe("Import restyle", () => {
+  it("import_textarea_is_outlined_review_is_primary_cancel_is_not", async () => {
+    await openImport();
+    expect(screen.getByLabelText("Or paste the JSON")).toHaveClass("sf-input");
+    expect(screen.getByLabelText("Import file")).not.toHaveClass("sf-input");
+    expect(screen.getByRole("button", { name: "Review import" })).toHaveClass("sf-button-primary");
+    expect(screen.getByRole("button", { name: "Cancel" })).not.toHaveClass("sf-button-primary");
+  });
+});
