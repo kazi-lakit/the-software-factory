@@ -517,6 +517,27 @@ describe('complete', () => {
     );
   });
 
+  test('a claim renewed between the first read and the apply does not break complete', async () => {
+    // A detached renewal (plugin renew.mjs) can land while complete writes the doc and finishes the run.
+    const hook = { onFinish: async () => {} };
+    class RenewingStore extends MemoryStore {
+      override async finishRun(runId: string, p: { result: string; turns: number | null; costUsd: number | null }) {
+        await super.finishRun(runId, p);
+        await hook.onFinish();
+      }
+    }
+    const { store, engine } = setup({ store: () => new RenewingStore() });
+    await put(store, { status: 'ready' });
+    await engine.next();
+    const before = (await store.getTask('T-1')).version;
+    hook.onFinish = async () => {
+      await engine.renew('T-1');
+    };
+    const t = await engine.complete('T-1', 'spec', result({ status: 'done', summary: 's', doc: '# Spec' }));
+    expect(t).toMatchObject({ status: 'spec_review', stage: null, claimBy: null });
+    expect(t.version).toBeGreaterThan(before + 1);
+  });
+
   test('accepts a lapsed claim nobody re-claimed', async () => {
     const { store, engine, clock } = setup();
     await put(store, { status: 'ready' });

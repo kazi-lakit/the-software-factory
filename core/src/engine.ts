@@ -157,7 +157,7 @@ export class Engine {
 
   async completeWith(taskId: string, step: AgentStep, parsed: AgentResult): Promise<Task> {
     const { store, mode } = this.deps;
-    const task = await this.claimedAt(taskId, step);
+    await this.claimedAt(taskId, step);
     let result = parsed;
     const run = await retry(() => store.openRun(taskId, step));
     if (!run) throw new Error(`no open ${step} run for ${taskId}`);
@@ -177,6 +177,8 @@ export class Engine {
       store.finishRun(run.runId, { result: result.status, turns: result.turns ?? null, costUsd: result.costUsd ?? null }),
     );
 
+    // A detached renewal may have bumped the task version while the doc and run were written: decide on the fresh task.
+    const task = await this.claimedAt(taskId, step);
     const costUsd = task.costUsd + (result.costUsd ?? 0);
     const settings = this.settingsFor(await retry(() => store.getSettings()), task);
     const input: Input =
