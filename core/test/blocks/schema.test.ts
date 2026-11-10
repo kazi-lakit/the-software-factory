@@ -35,6 +35,10 @@ describe('blocks schema', () => {
     expect(generateFields('FactoryTask').fields).toContainEqual(expect.objectContaining({ name: 'dependsOn', type: 'String' }));
   });
 
+  it('FactoryDef has the agentModels String column', () => {
+    expect(generateFields('FactoryDef').fields).toContainEqual(expect.objectContaining({ name: 'agentModels', type: 'String' }));
+  });
+
   it('rules: no delete policy except FactorySpike, every row-level policy has empty fieldNames', () => {
     const rules = generateRules() as Rules;
     const deletes = rules.policies.filter(p => p.operation === 3).map(p => p.schemaName);
