@@ -539,3 +539,60 @@ describe("board_css_task_card", () => {
     expect(t(".sf-card-meta")["flex-wrap"]).toBe("wrap");
   });
 });
+
+describe("board_css_lanes", () => {
+  const css = () => read("board.css");
+  it("lanes_grid_is_five_equal_columns_full_width", () => {
+    const t = tokens(css(), ".sf-lanes");
+    expect(t["display"]).toBe("grid");
+    expect(t["grid-template-columns"]).toBe("repeat(5, minmax(0, 1fr))");
+    expect(t["gap"]).toBe("10px");
+    expect(t["align-items"]).toBe("start");
+  });
+  it("lane_frame_is_1px_chrome_border_transparent_8px_3px", () => {
+    const t = tokens(css(), ".sf-lane");
+    expect(t["border"]).toBe("1px solid var(--sf-chrome-border)");
+    expect(t["background"]).toBe("transparent");
+    expect(t["padding"]).toBe("8px");
+    expect(t["border-radius"]).toBe("var(--sf-radius)");
+    expect(t["min-width"]).toBe("0");
+    expect(t["box-shadow"]).toBeUndefined();
+  });
+  it("needs_you_lane_has_accent_border_and_a_stronger_top_wash", () => {
+    const t = tokens(css(), ".sf-lane-needs-you");
+    expect(t["border-color"]).toBe("var(--sf-accent)");
+    expect(t["background"]).toContain("linear-gradient(to bottom");
+    expect((t["background"]?.match(/var\(--sf-needs-tint\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(t["background"]).not.toMatch(/#|rgb/);
+  });
+  it("lane_name_hint_count_styles", () => {
+    const hint = tokens(css(), ".sf-lane-hint");
+    expect(hint["color"]).toBe("var(--sf-muted)");
+    expect(hint["white-space"]).toBe("nowrap");
+    expect(hint["overflow"]).toBe("hidden");
+    expect(hint["text-overflow"]).toBe("ellipsis");
+    expect(tokens(css(), ".sf-lane-name")["margin"]).toBe("0");
+  });
+  it("segmented_switch_styles", () => {
+    const t = tokens(css(), ".sf-segment");
+    expect(t["border"]).toBe("1px solid var(--sf-border)");
+    expect(t["border-radius"]).toBe("var(--sf-radius)");
+    expect(t["background"]).toBe("transparent");
+    expect(t["font-family"]).toBe("var(--sf-mono)");
+    expect(t["font-size"]).toBe("var(--sf-label-size)");
+    expect(t["letter-spacing"]).toBe("var(--sf-label-tracking)");
+    const on = tokens(css(), '.sf-segment[aria-pressed="true"]');
+    expect(on["background"]).toBe("var(--sf-primary-soft)");
+    expect(on["color"]).toBe("var(--sf-on-primary-soft)");
+  });
+  it("lanes_wrap_to_two_columns_below_1100px_and_one_below_640px", () => {
+    const raw = css();
+    const two = raw.indexOf("@media (max-width: 1099px)");
+    const one = raw.indexOf("@media (max-width: 639px)");
+    expect(two).toBeGreaterThan(-1);
+    expect(one).toBeGreaterThan(two);
+    expect(raw.slice(two, one)).toMatch(/\.sf-lanes\s*\{[^}]*repeat\(2,/);
+    expect(raw.slice(one, one + 300)).toMatch(/\.sf-lanes\s*\{[^}]*1fr/);
+    expect(raw).toMatch(/@media \(max-width: 1023px\)\s*\{\s*\.sf-columns/);
+  });
+});

@@ -5,6 +5,7 @@ import { clearAllUnsent, keepUnsent } from "../../lib/unsent";
 import { factory, merge } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
 import { BoardView } from "./BoardView";
+import { BOARD_VIEW_KEY, resetBoardViewForTests } from "./useBoardView";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
 
@@ -17,8 +18,12 @@ function renderBoard() {
 
 const column = (name: string) => screen.getByRole("region", { name });
 
+/** The 13-column tests run in All stages; Lanes is the default. */
+const showStages = () => window.localStorage.setItem(BOARD_VIEW_KEY, "stages");
+
 beforeEach(() => {
   resetFakeBoard();
+  resetBoardViewForTests();
 });
 
 afterEach(() => {
@@ -27,9 +32,11 @@ afterEach(() => {
   window.history.replaceState({}, "", "/");
   clearAllUnsent();
   vi.restoreAllMocks();
+  resetBoardViewForTests();
 });
 
 describe("BoardView", () => {
+  beforeEach(showStages);
   it("renders_a_column_per_status_in_spec_order", async () => {
     await seedTask({ title: "First" });
     renderBoard();
@@ -158,6 +165,7 @@ describe("BoardView", () => {
 });
 
 describe("BoardView new-task link", () => {
+  beforeEach(showStages);
   const link = (query: string) => window.history.replaceState({}, "", `/?${query}`);
   const params = (values: Record<string, string>) => new URLSearchParams({ new: "1", ...values }).toString();
   const openForm = () => screen.findByRole("form", { name: "New task" });
@@ -271,6 +279,7 @@ async function pickFactory(value: string) {
 }
 
 describe("BoardView factories", () => {
+  beforeEach(showStages);
   it("persists_the_picked_factory_and_restores_it", async () => {
     resetFakeBoard(two());
     await seedTask({ factoryId: "alpha", repo: "api", title: "Alpha work" });
@@ -328,6 +337,7 @@ describe("BoardView factories", () => {
 const openNewForm = () => screen.findByRole("form", { name: "New task" });
 
 describe("BoardView with a stored factory pick that is not usable", () => {
+  beforeEach(showStages);
   it.each([["ghost"], ["GATE-gate"]])("falls_back_to_all_for_the_stored_pick_%s_and_renders_the_tasks", async (stored) => {
     resetFakeBoard(merge(two(), factory("GATE-gate", ["api"])));
     await seedTask({ factoryId: "alpha", repo: "api", title: "Alpha work" });
@@ -341,6 +351,7 @@ describe("BoardView with a stored factory pick that is not usable", () => {
 });
 
 describe("BoardView waiting strip", () => {
+  beforeEach(showStages);
   it("lists_a_blocked_task_of_another_factory_with_a_working_link", async () => {
     resetFakeBoard(two());
     await seedTask({ factoryId: "alpha", repo: "api", title: "Quiet" });
@@ -375,6 +386,7 @@ describe("BoardView waiting strip", () => {
 });
 
 describe("BoardView New task with several factories", () => {
+  beforeEach(showStages);
   it("lists_only_the_chosen_factorys_repos_and_creates_in_that_factory", async () => {
     resetFakeBoard(two());
     renderBoard();
@@ -439,6 +451,7 @@ describe("BoardView New task with several factories", () => {
 });
 
 describe("BoardView new-task link with factories", () => {
+  beforeEach(showStages);
   const link = (query: string) => window.history.replaceState({}, "", `/?${new URLSearchParams({ new: "1", ...Object.fromEntries(new URLSearchParams(query)) })}`);
 
   it("prefills_the_factory_and_then_its_repo", async () => {
@@ -474,6 +487,7 @@ describe("BoardView new-task link with factories", () => {
 });
 
 describe("a New task link that is not used before the form closes", () => {
+  beforeEach(showStages);
   it("is_dropped_when_the_form_closes_before_the_factories_load", async () => {
     resetFakeBoard(two());
     let release: () => void = () => undefined;
@@ -493,3 +507,197 @@ describe("a New task link that is not used before the form closes", () => {
     expect(within(form).getByLabelText("Repo")).toHaveValue("api");
   });
 });
+
+describe("BoardView lanes", () => {
+  const LANE_NAMES = ["Needs you", "Queued", "Working", "Done", "Stopped"];
+  const lane = (name: string) => screen.getByRole("region", { name });
+  const regionNames = () => screen.getAllByRole("region").map((region) => region.getAttribute("aria-label"));
+  const seedAll = async () => {
+    await seedTask({ title: "Spec rev" }, "spec_review", { stage: "spec" });
+    await seedTask({ title: "PR task" }, "pr_open");
+    await seedTask({ title: "Stuck" }, "blocked");
+    await seedTask({ title: "In inbox" });
+    await seedTask({ title: "Is ready" }, "ready");
+    await seedTask({ title: "Building" }, "build");
+    await seedTask({ title: "Shipped" }, "done");
+    await seedTask({ title: "Dropped" }, "cancelled");
+  };
+
+  it("opens_in_lanes_by_default_with_five_named_lanes", async () => {
+    await seedTask({ title: "First" });
+    renderBoard();
+    await screen.findByText("First");
+    expect(regionNames()).toEqual(LANE_NAMES);
+  });
+
+  it("places_tasks_in_the_lane_for_their_status", async () => {
+    await seedAll();
+    renderBoard();
+    await within(await screen.findByRole("region", { name: "Needs you" })).findByText("Stuck");
+    for (const title of ["Spec rev", "PR task", "Stuck"]) expect(within(lane("Needs you")).getByText(title)).toBeInTheDocument();
+    for (const title of ["In inbox", "Is ready"]) expect(within(lane("Queued")).getByText(title)).toBeInTheDocument();
+    expect(within(lane("Working")).getByText("Building")).toBeInTheDocument();
+    expect(within(lane("Done")).getByText("Shipped")).toBeInTheDocument();
+    expect(within(lane("Stopped")).getByText("Dropped")).toBeInTheDocument();
+    expect(lane("Needs you").querySelector(".sf-count")).toHaveTextContent("3");
+    expect(lane("Queued").querySelector(".sf-count")).toHaveTextContent("2");
+  });
+
+  it("a_task_created_from_the_form_lands_in_queued", async () => {
+    renderBoard();
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    const form = screen.getByRole("form", { name: "New task" });
+    fireEvent.change(within(form).getByLabelText("Title"), { target: { value: "Fresh" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Create task" }));
+    expect(await within(lane("Queued")).findByText("Fresh")).toBeInTheDocument();
+  });
+
+  it("each_lane_shows_name_count_and_hint", async () => {
+    await seedAll();
+    renderBoard();
+    await within(await screen.findByRole("region", { name: "Needs you" })).findByText("Stuck");
+    const needs = lane("Needs you");
+    expect(within(needs).getByText("Waiting for your review or answer")).toBeInTheDocument();
+    const name = needs.querySelector("h3");
+    expect(name).toHaveClass("sf-label");
+    expect(name).toHaveTextContent("Needs you");
+    expect(needs.querySelector(".sf-count")).toHaveTextContent("3");
+  });
+
+  it("an_empty_lane_still_shows_name_count_and_hint", async () => {
+    await seedTask({ title: "Only one" });
+    renderBoard();
+    await screen.findByText("Only one");
+    const stopped = lane("Stopped");
+    expect(stopped.querySelector(".sf-count")).toHaveTextContent("0");
+    expect(within(stopped).getByText("Cancelled tasks")).toBeInTheDocument();
+    expect(stopped.querySelector("li")).toBeNull();
+  });
+
+  it("done_lane_lists_every_done_task_newest_first_and_is_not_collapsible", async () => {
+    for (const title of ["D1", "D2", "D3"]) await seedTask({ title }, "done");
+    renderBoard();
+    await screen.findByText("D1");
+    const titles = (region: HTMLElement) => within(region).getAllByRole("listitem").map((li) => li.textContent ?? "");
+    const inLanes = titles(lane("Done"));
+    expect(inLanes).toHaveLength(3);
+    expect(within(lane("Done")).queryByRole("button", { expanded: false })).toBeNull();
+    expect(lane("Done").querySelector("[aria-expanded]")).toBeNull();
+    expect(lane("Stopped").querySelector("[aria-expanded]")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "All stages" }));
+    fireEvent.click(screen.getByRole("button", { name: "Done (3)" }));
+    const inColumn = titles(column("Done"));
+    expect(inLanes.map((t) => D(t))).toEqual(inColumn.map((t) => D(t)));
+  });
+
+  it("shows_a_task_with_an_unknown_status_in_working", async () => {
+    fakeBoard().ownerData.seed("FactoryTask", {
+      attempt: 0, baseBranch: "dev", costUsd: 0, description: "", gateOverrides: "{}", repo: "data", status: "paused",
+      taskId: "T-900", title: "Odd one", version: 1
+    });
+    renderBoard();
+    expect(await within(await screen.findByRole("region", { name: "Working" })).findByText("Odd one")).toBeInTheDocument();
+  });
+
+  it("shows_loading_and_no_lanes_while_pending", () => {
+    renderBoard();
+    expect(screen.getByText("Loading tasks…")).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Needs you" })).toBeNull();
+  });
+
+  it("factory_repo_and_test_task_filters_apply_in_lanes", async () => {
+    resetFakeBoard(two());
+    await seedTask({ factoryId: "alpha", repo: "api", title: "Alpha work" });
+    await seedTask({ factoryId: "alpha", repo: "web", title: "Alpha web" });
+    await seedTask({ factoryId: "delta", repo: "api", title: "Delta work" });
+    fakeBoard().ownerData.seed("FactoryTask", {
+      attempt: 0, baseBranch: "dev", costUsd: 0, description: "", factoryId: "alpha", gateOverrides: "{}", repo: "api", status: "inbox",
+      taskId: "GATE-1a2b3c4d", title: "Gate probe", version: 1
+    });
+    renderBoard();
+    await screen.findByText("Alpha work");
+    await pickFactory("delta");
+    expect(screen.queryByText("Alpha work")).toBeNull();
+    expect(within(lane("Queued")).getByText("Delta work")).toBeInTheDocument();
+    await pickFactory("alpha");
+    fireEvent.change(screen.getByLabelText("Repo"), { target: { value: "web" } });
+    expect(screen.queryByText("Alpha work")).toBeNull();
+    expect(within(lane("Queued")).getByText("Alpha web")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Repo"), { target: { value: "api" } });
+    expect(screen.queryByText("Gate probe")).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show test tasks" }));
+    expect(within(lane("Queued")).getByText("Gate probe")).toBeInTheDocument();
+  });
+
+  it("toolbar_has_a_lanes_all_stages_group_with_lanes_pressed_by_default", async () => {
+    renderBoard();
+    const group = await screen.findByRole("group", { name: "Board view" });
+    expect(within(group).getByRole("button", { name: "Lanes" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(group).getByRole("button", { name: "All stages" })).toHaveAttribute("aria-pressed", "false");
+    expect(group.querySelectorAll('[aria-pressed="true"]')).toHaveLength(1);
+  });
+
+  it("clicking_all_stages_shows_the_13_columns_and_stores_stages", async () => {
+    await seedTask({ title: "First" });
+    renderBoard();
+    await screen.findByText("First");
+    fireEvent.click(screen.getByRole("button", { name: "All stages" }));
+    expect(regionNames()).toEqual(ORDER);
+    expect(window.localStorage.getItem("factory-board:view")).toBe("stages");
+    expect(screen.getByRole("button", { name: "All stages" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Done (0)" })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Cancelled (0)" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("restores_the_stored_view_on_reload", async () => {
+    renderBoard();
+    fireEvent.click(await screen.findByRole("button", { name: "All stages" }));
+    cleanup();
+    resetBoardViewForTests();
+    renderBoard();
+    await screen.findByRole("region", { name: "Inbox" });
+    expect(screen.getByRole("button", { name: "All stages" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("garbage_stored_value_opens_lanes_without_error", async () => {
+    window.localStorage.setItem(BOARD_VIEW_KEY, "garbage");
+    renderBoard();
+    expect(await screen.findByRole("region", { name: "Needs you" })).toBeInTheDocument();
+  });
+
+  it("a_throwing_storage_still_switches_views", async () => {
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("blocked");
+    });
+    renderBoard();
+    fireEvent.click(await screen.findByRole("button", { name: "All stages" }));
+    expect(regionNames()).toEqual(ORDER);
+  });
+
+  it("switching_views_does_not_refetch_or_reset_state", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Needs you" });
+    const spy = vi.spyOn(fakeBoard().owner, "listTasks");
+    fireEvent.change(screen.getByLabelText("Repo"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Show test tasks" }));
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "All stages" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lanes" }));
+    expect(spy).not.toHaveBeenCalled();
+    expect(screen.getByRole("checkbox", { name: "Show test tasks" })).toBeChecked();
+    expect(screen.getByLabelText("Title")).toHaveValue("Draft");
+  });
+
+  it("switch_buttons_are_native_buttons", async () => {
+    renderBoard();
+    const group = await screen.findByRole("group", { name: "Board view" });
+    for (const button of within(group).getAllByRole("button")) {
+      expect(button.tagName).toBe("BUTTON");
+      expect(button).toHaveAttribute("type", "button");
+    }
+  });
+});
+
+/** A card's text without its volatile parts: the title is what orders the list. */
+const D = (text: string) => /D\d/.exec(text)?.[0] ?? text;

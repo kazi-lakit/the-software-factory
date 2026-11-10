@@ -580,6 +580,68 @@ textarea.sf-input {
   color: var(--sf-done);
 }
 
+/* Lanes view */
+.sf-lanes {
+  align-items: start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  width: 100%;
+}
+
+.sf-lane {
+  background: transparent;
+  border: 1px solid var(--sf-chrome-border);
+  border-radius: var(--sf-radius);
+  min-width: 0;
+  padding: 8px;
+}
+
+.sf-lane-needs-you {
+  background: linear-gradient(to bottom, var(--sf-needs-tint), transparent 40%), var(--sf-needs-tint);
+  border-color: var(--sf-accent);
+}
+
+.sf-lane-head {
+  align-items: baseline;
+  display: flex;
+  justify-content: space-between;
+}
+
+.sf-lane-name {
+  margin: 0;
+}
+
+.sf-lane-hint {
+  color: var(--sf-muted);
+  margin: 0 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sf-segmented {
+  display: inline-flex;
+  gap: 4px;
+}
+
+.sf-segment {
+  background: transparent;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 8px 14px;
+}
+
+.sf-segment[aria-pressed="true"] {
+  background: var(--sf-primary-soft);
+  color: var(--sf-on-primary-soft);
+}
+
 .sf-card-list {
   display: flex;
   flex-direction: column;
@@ -1133,6 +1195,19 @@ textarea.sf-input {
   .sf-column-collapsed {
     flex-basis: auto;
     width: 100%;
+  }
+}
+
+/* Lanes wrap to two columns below 1100px and to one below 640px. */
+@media (max-width: 1099px) {
+  .sf-lanes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 639px) {
+  .sf-lanes {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -6,9 +6,11 @@ import { clearUnsent, hasUnsent, keepUnsent, useUnsent } from "../../lib/unsent"
 import { useFactories, useSelectedFactory, type FactoryEntry } from "../factories/useFactories";
 import { describeWriteError, NEVER_MAIN_BASE, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 import { FactoryPicker } from "./FactoryPicker";
+import { laneOf, LANES, type LaneId } from "./lanes";
 import { COLUMNS, isTestTask, MUTED, STATUS_LABEL } from "./status";
 import { TaskCard } from "./TaskCard";
 import { useBoard } from "./useBoard";
+import { useBoardView } from "./useBoardView";
 import { WaitingStrip } from "./WaitingStrip";
 
 type Navigate = (path: string) => void;
@@ -90,6 +92,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const formId = useId();
   const [picked, setPicked] = useSelectedFactory();
   const [repo, setRepo] = useState("");
+  const [view, setView] = useBoardView();
   const [showTest, setShowTest] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<Status>>(new Set());
   // A New task link wins over unsent text; otherwise reopens on unsent text, e.g. after the session ended mid-form.
@@ -127,6 +130,10 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const waiting = inFactory.filter((task) => showTest || !isTestTask(task));
   const byStatus = new Map<Status, Task[]>(COLUMNS.map((status) => [status, []]));
   for (const task of visible) byStatus.get(task.status)?.push(task);
+  // Lanes keep today's per-status order inside a lane; a status outside COLUMNS (runtime safety net) lands in Working.
+  const byLane = new Map<LaneId, Task[]>(LANES.map((lane) => [lane.id, []]));
+  for (const status of COLUMNS) byLane.get(laneOf(status))?.push(...(byStatus.get(status) ?? []));
+  for (const task of visible) if (!byStatus.has(task.status)) byLane.get(laneOf(task.status))?.push(task);
 
   function toggle(status: Status) {
     setExpanded((current) => {
@@ -163,6 +170,10 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
           <input type="checkbox" checked={showTest} onChange={(event) => setShowTest(event.target.checked)} />
           <span>Show test tasks</span>
         </label>
+        <div role="group" aria-label="Board view" className="sf-segmented">
+          <button type="button" className="sf-segment" aria-pressed={view === "lanes"} onClick={() => setView("lanes")}>Lanes</button>
+          <button type="button" className="sf-segment" aria-pressed={view === "stages"} onClick={() => setView("stages")}>All stages</button>
+        </div>
         <button
           ref={newTaskButton}
           type="button"
@@ -212,7 +223,31 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
 
       {board.data ? <WaitingStrip tasks={waiting} showFactory={all} onNavigate={onNavigate} /> : null}
 
-      {board.data ? (
+      {board.data && view === "lanes" ? (
+        <div className="sf-lanes">
+          {LANES.map((lane) => {
+            const tasks = byLane.get(lane.id) ?? [];
+            return (
+              <section key={lane.id} className={`sf-lane${lane.id === "needs-you" ? " sf-lane-needs-you" : ""}`} aria-label={lane.name}>
+                <div className="sf-lane-head">
+                  <h3 className="sf-label sf-lane-name">{lane.name}</h3>
+                  <span className="sf-count sf-mono">{tasks.length}</span>
+                </div>
+                <p className="sf-lane-hint">{lane.hint}</p>
+                {tasks.length > 0 ? (
+                  <ul className="sf-card-list">
+                    {tasks.map((task) => (
+                      <li key={task.taskId}><TaskCard task={task} showFactory={all} onNavigate={onNavigate} /></li>
+                    ))}
+                  </ul>
+                ) : null}
+              </section>
+            );
+          })}
+        </div>
+      ) : null}
+
+      {board.data && view === "stages" ? (
         <div className="sf-columns">
           {COLUMNS.map((status) => {
             const tasks = byStatus.get(status) ?? [];
