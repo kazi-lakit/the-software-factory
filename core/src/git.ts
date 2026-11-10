@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { HOOK_PATH, assertPushAllowed } from './branchGuard.js';
@@ -43,6 +43,19 @@ async function commonDirOf(worktreePath: string): Promise<string> {
   return isAbsolute(common) ? common : resolve(worktreePath, common);
 }
 
+/** A reused worktree folder must be a worktree root of its own: an empty folder inside some other repo would otherwise resolve to that repo. */
+async function assertWorktree(path: string): Promise<void> {
+  const invalid = new Error(`worktree ${path} is not a valid worktree`);
+  if (!existsSync(join(path, '.git'))) throw invalid;
+  let top: string;
+  try {
+    top = realpathSync((await git(path, ['rev-parse', '--show-toplevel'])).trim());
+  } catch {
+    throw invalid;
+  }
+  if (top !== realpathSync(path)) throw invalid;
+}
+
 async function branchExists(clone: string, branch: string): Promise<boolean> {
   try {
     await execFileP('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { cwd: clone });
@@ -76,6 +89,7 @@ export class LocalGitRepos implements GitRepos {
   async worktree(factoryId: string, repo: FactoryRepo, taskId: string, branch: string, protectedBranches: string[], identity?: GitIdentity): Promise<string> {
     const path = join(this.root, '.clones', 'worktrees', taskId);
     if (existsSync(path)) {
+      await assertWorktree(path);
       // The clone the worktree really belongs to (an old-layout clone is not at .clones/<factory>/<repo>).
       writeProtectedList(await commonDirOf(path), protectedBranches);
       await this.setIdentity(path, identity);

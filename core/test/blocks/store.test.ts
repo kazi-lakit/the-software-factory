@@ -206,14 +206,14 @@ describe('BlocksStore factories', () => {
 
     it('retireLegacySettings nulls the raw rows whose value is now under the new scopes, and is idempotent', async () => {
       const { s, data } = legacy();
-      expect(await s.retireLegacySettings()).toEqual({ retired: [] });
+      expect(await s.retireLegacySettings()).toEqual({ retired: [], remaining: ['data', 'global'] });
       await s.updateSettingsScope('blocks/data', { maxParallel: 1 }, { maxParallel: 1 });
       // The legacy repo row `data` has moved, but `global` has not: global stays (and so the reader's legacy mode).
-      expect(await s.retireLegacySettings()).toEqual({ retired: ['data'] });
+      expect(await s.retireLegacySettings()).toEqual({ retired: ['data'], remaining: ['global'] });
       expect(data.rows('FactorySettings').find((r) => r.scope === 'global')!.json).toBe('{"paused":true}');
       await s.updateSettingsScope('blocks', { ...DEFAULT_SETTINGS, paused: true }, { ...DEFAULT_SETTINGS, paused: true });
-      expect(await s.retireLegacySettings()).toEqual({ retired: ['global'] });
-      expect(await s.retireLegacySettings()).toEqual({ retired: [] });
+      expect(await s.retireLegacySettings()).toEqual({ retired: ['global'], remaining: [] });
+      expect(await s.retireLegacySettings()).toEqual({ retired: [], remaining: [] });
       expect(data.rows('FactorySettings').map((r) => [r.scope, r.json])).toEqual([
         ['global', 'null'], ['data', 'null'], ['os', 'null'], ['blocks/data', '{"maxParallel":1}'], ['blocks', JSON.stringify({ ...DEFAULT_SETTINGS, paused: true })],
       ]);
@@ -224,9 +224,20 @@ describe('BlocksStore factories', () => {
     it('retireLegacySettings keeps legacy mode while a repo row has not moved, and is the owner\'s', async () => {
       const { s } = legacy();
       await s.updateSettingsScope('blocks', { ...DEFAULT_SETTINGS, paused: true }, { ...DEFAULT_SETTINGS, paused: true });
-      expect(await s.retireLegacySettings()).toEqual({ retired: [] });
+      expect(await s.retireLegacySettings()).toEqual({ retired: [], remaining: ['data', 'global'] });
       expect((await s.getSettings()).factories.blocks!.repos).toEqual({ data: { maxParallel: 1 } });
       await expect(new BlocksStore(new FakeBlocksData('any'), 'core').retireLegacySettings()).rejects.toBeInstanceOf(OwnerOnlyError);
+    });
+
+    it('retireLegacySettings keeps `global` while the `blocks` row is null or malformed, and reports it as remaining', async () => {
+      for (const json of ['null', '{not json']) {
+        const data = new FakeBlocksData('any');
+        data.seed('FactorySettings', { scope: 'global', json: JSON.stringify({ paused: true }), version: 1 });
+        data.seed('FactorySettings', { scope: 'blocks', json, version: 1 });
+        const s = new BlocksStore(data, 'owner');
+        expect(await s.retireLegacySettings()).toEqual({ retired: [], remaining: ['global'] });
+        expect(data.rows('FactorySettings').find((r) => r.scope === 'global')!.json).toBe('{"paused":true}');
+      }
     });
 
     it('a stored empty factoryId stays empty; only an absent one means blocks', async () => {

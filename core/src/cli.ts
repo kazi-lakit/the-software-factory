@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { Command, CommanderError } from 'commander';
 import { parseAgentReply } from './agentReply.js';
 import type { Engine } from './engine.js';
 import { GATE_DOC } from './gates.js';
 import * as owner from './owner.js';
+import { isReservedPatAccount, readSecret, realExecFile, type ExecFile } from './secrets.js';
 import { isValidId } from './factories.js';
+import { migrate } from './migrate.js';
+import { ForbiddenError, OwnerOnlyError } from './boardStore.js';
 import type { BoardStore } from './store.js';
 import type { AgentStep, Gate, Mode, RepoId } from './types.js';
 import { findRoot, wire, type WireOptions } from './wire.js';
@@ -47,6 +51,14 @@ function repoId(what: string, value: string): RepoId {
   return value;
 }
 
+/** `--factory` as given, or the only active factory; otherwise exit 1 naming the active ones. */
+async function pickFactory(store: BoardStore, given: string | undefined): Promise<string> {
+  if (given !== undefined) return factoryId(given);
+  const active = (await store.listFactoryDefs()).filter((d) => d.active).map((d) => d.factoryId);
+  if (active.length === 1) return active[0]!;
+  throw new CliExit(`--factory is required (active: ${active.join(', ') || 'none'})`, 1);
+}
+
 const collect = (v: string, prev: string[] | undefined): string[] => [...(prev ?? []), v];
 
 function factoryFilter(ids: string[] | undefined): string[] | undefined {
@@ -54,7 +66,14 @@ function factoryFilter(ids: string[] | undefined): string[] | undefined {
   return ids.map(factoryId);
 }
 
-export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) => wire(o)): Promise<number> {
+export interface CliDeps {
+  /** Runs `security` (Keychain reads for `status`, the PAT copy of `migrate`). Tests pass a fake. */
+  exec?: ExecFile;
+  home?: string;
+}
+
+export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) => wire(o), deps: CliDeps = {}): Promise<number> {
+  const exec = deps.exec ?? realExecFile;
   const program = new Command();
   program
     .name('factory')
@@ -137,13 +156,25 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .option('--factory <id>', 'only this factory (repeat for several)', collect, undefined)
     .option('--json', 'print JSON')
     .action(async (o: { json?: boolean; factory?: string[] }, cmd: Command) => {
-      const { engine } = await open(cmd);
+      const { engine, store } = await open(cmd);
       const s = await engine.status(factoryFilter(o.factory));
+      // Check each factory's PAT entry (the value is read and dropped) and record it for the Board page.
+      const present = new Map<string, boolean>();
+      for (const d of await store.listFactoryDefs()) {
+        if (o.factory && !o.factory.includes(d.factoryId)) continue;
+        const ok = !isReservedPatAccount(d.patAccount) && (await readSecret(d.patAccount, exec).then(() => true, () => false));
+        present.set(d.factoryId, ok);
+        try {
+          await store.setFactoryHealth({ factoryId: d.factoryId, patPresent: ok, checkedAt: new Date().toISOString() });
+        } catch (e) {
+          io.err(`health of ${d.factoryId} not written: ${(e instanceof Error ? e.message : String(e)).split('\n')[0]}`);
+        }
+      }
+      for (const f of s.factories) f.patPresent = present.get(f.factoryId) ?? f.patPresent;
       if (o.json) return printJson(s);
       io.out(`paused: ${s.paused}`);
       for (const f of s.factories) {
-        const flags = [f.active ? '' : 'inactive', f.paused ? 'paused' : '', f.patPresent === false ? 'no PAT' : ''].filter(Boolean).join(', ');
-        io.out(`factory: ${f.factoryId} (${f.name})${flags ? ` ${flags}` : ''}`);
+        io.out(`factory ${f.factoryId}: ${f.active ? 'active' : 'inactive'}, paused ${f.paused}, PAT ${f.patPresent === true ? 'present' : 'missing'}`);
       }
       for (const [status, n] of Object.entries(s.counts)) io.out(`${status}: ${n}`);
       for (const a of s.active) io.out(`active: ${a.taskId} ${a.step ?? '-'} by ${a.claimBy ?? '-'} until ${a.claimUntil ?? '-'}`);
@@ -156,7 +187,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   program
     .command('new')
     .description('create a task in the Board (run by the owner from their session; inbox unless --ready)')
-    .option('--factory <id>', 'factory id', 'blocks')
+    .option('--factory <id>', 'factory id (required unless exactly one factory is active)')
     .requiredOption('--repo <id>', 'repo id')
     .requiredOption('--title <title>', 'task title')
     .option('--description <text>', 'task description')
@@ -164,7 +195,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .option('--base <branch>', 'base branch (default dev; never main)')
     .option('--ready', 'start in ready instead of inbox')
     .option('--json', 'print the task as JSON')
-    .action(async (o: { factory: string; repo: string; title: string; description?: string; descriptionFile?: string; base?: string; ready?: boolean; json?: boolean }, cmd: Command) => {
+    .action(async (o: { factory?: string; repo: string; title: string; description?: string; descriptionFile?: string; base?: string; ready?: boolean; json?: boolean }, cmd: Command) => {
       if ((o.description === undefined) === (o.descriptionFile === undefined)) {
         throw new CliExit('pass exactly one of --description or --description-file', 1);
       }
@@ -179,10 +210,45 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       }
       const { store } = await open(cmd);
       const t = await owner.createTaskAsCore(store, () => new Date(), {
-        factoryId: factoryId(o.factory), title: o.title, description, repo, ...(o.base ? { baseBranch: o.base } : {}), ready: o.ready === true,
+        factoryId: await pickFactory(store, o.factory), title: o.title, description, repo, ...(o.base ? { baseBranch: o.base } : {}), ready: o.ready === true,
       });
       if (o.json) return printJson(t);
       io.out(`${t.taskId} created in ${t.status}`);
+    });
+
+  program
+    .command('factories')
+    .description('list the factories and their repos (no secrets)')
+    .option('--json', 'print JSON')
+    .action(async (o: { json?: boolean }, cmd: Command) => {
+      const { store } = await open(cmd);
+      const [defs, repos] = await Promise.all([store.listFactoryDefs(), store.listFactoryRepos()]);
+      const list = defs.map((d) => ({ ...d, repos: repos.filter((r) => r.factoryId === d.factoryId).map(({ factoryId: _f, ...r }) => r) }));
+      if (o.json) return printJson({ factories: list });
+      for (const f of list) {
+        io.out(`${f.factoryId} (${f.name}) ${f.active ? 'active' : 'inactive'}: ${f.repos.map((r) => r.repoId).join(', ') || 'no repos'}`);
+      }
+    });
+
+  program
+    .command('migrate')
+    .description('one-time move of today\'s work into factory blocks (re-runnable; run by the owner)')
+    .option('--dry-run', 'print the steps without taking them')
+    .option('--yes', 'take the steps')
+    .action(async (o: { dryRun?: boolean; yes?: boolean }, cmd: Command) => {
+      if (o.dryRun !== true && o.yes !== true) throw new CliExit('migrate changes the Board: pass --dry-run to preview or --yes to run', 1);
+      const { store } = await open(cmd);
+      const line = (s: { name: string; done: string; detail: string }) => io.out(`${s.name}: ${s.done} - ${s.detail}`);
+      try {
+        const report = await migrate(store, findRoot(), deps.home ?? homedir(), exec, { dryRun: o.dryRun === true, onStep: line });
+        for (const n of report.notes) io.out(`note: ${n}`);
+      } catch (e) {
+        // The Blocks store with the core's credential refuses owner-only writes (factory definitions, settings, task factoryId).
+        if (e instanceof OwnerOnlyError || e instanceof ForbiddenError) {
+          throw new CliExit(`migrate writes owner-only rows, which the factory core's Blocks credential cannot: ${e.message}. Use --store file, or have the owner run the Board steps`, 1);
+        }
+        throw e;
+      }
     });
 
   const dev = program.command('dev').description('stand-ins for the Board page (file store only)');
@@ -194,16 +260,16 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
 
   dev
     .command('add')
-    .option('--factory <id>', 'factory id', 'blocks')
+    .option('--factory <id>', 'factory id (required unless exactly one factory is active)')
     .requiredOption('--repo <id>', 'repo id')
     .requiredOption('--title <title>', 'task title')
     .option('--description <text>', 'task description', '')
     .option('--base <branch>', 'base branch')
-    .action(async (o: { factory: string; repo: string; title: string; description: string; base?: string }, cmd: Command) => {
+    .action(async (o: { factory?: string; repo: string; title: string; description: string; base?: string }, cmd: Command) => {
       const repo = repoId('--repo', o.repo);
       const store = await openDev(cmd);
       const t = await owner.createTask(store, now, {
-        factoryId: factoryId(o.factory), title: o.title, description: o.description, repo, ...(o.base ? { baseBranch: o.base } : {}),
+        factoryId: await pickFactory(store, o.factory), title: o.title, description: o.description, repo, ...(o.base ? { baseBranch: o.base } : {}),
       });
       io.out(t.taskId);
     });

@@ -229,9 +229,9 @@ export class MemoryStore implements BoardStore {
   }
 
   /** A file or memory store converts the legacy shape on load: there is nothing to retire. */
-  async retireLegacySettings(): Promise<{ retired: string[] }> {
+  async retireLegacySettings(): Promise<{ retired: string[]; remaining: string[] }> {
     this.ownerOnly('retireLegacySettings');
-    return { retired: [] };
+    return { retired: [], remaining: [] };
   }
 
   getSettings(): Promise<StoredSettings> {

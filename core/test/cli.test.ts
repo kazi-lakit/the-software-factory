@@ -1,10 +1,11 @@
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
-import { seed, seedBlocksFactories } from './factoryFixtures.js';
+import { defFixture, repoFixture, seed, seedBlocksFactories } from './factoryFixtures.js';
 import type { Exec } from '../src/checks.js';
+import type { ExecFile } from '../src/secrets.js';
 import { run, type WireOptions } from '../src/cli.js';
 import { Engine } from '../src/engine.js';
 import { FactoryConfig } from '../src/factories.js';
@@ -23,11 +24,23 @@ const git: GitRepos = {
   isClean: async () => true,
 };
 
-function setup() {
-  const store = new MemoryStore({ factories: seed() });
+/** A fake `security`: only the listed accounts exist (value `secret`). It never touches the real Keychain. */
+const fakeSecurity = (initial: string[] = ['github-pat:blocks']): ExecFile => {
+  const accounts = new Set(initial);
+  return async (_file, args, stdin) => {
+    if (args[0] === '-i') {
+      accounts.add(/ -a (\S+) /.exec(stdin ?? '')?.[1] ?? '');
+      return { code: 0, stdout: '', stderr: '' };
+    }
+    return accounts.has(args[args.indexOf('-a') + 1] ?? '') ? { code: 0, stdout: 'secret\n', stderr: '' } : { code: 44, stdout: '', stderr: '' };
+  };
+};
+
+function setup(factories = seed(), accounts?: string[]) {
+  const store = new MemoryStore({ factories });
   const exec: Exec = async () => ({ code: 0, output: '' });
   const engine = new Engine({
-    store, git, githubFor: () => new FakeGitHub(), factories: async () => new FactoryConfig(seed().defs, seed().repos),
+    store, git, githubFor: () => new FakeGitHub(), factories: async () => new FactoryConfig(factories.defs, factories.repos),
     exec, now: () => new Date(), mode: 'session', claimant: 'me',
   });
   const wired: WireOptions[] = [];
@@ -37,7 +50,7 @@ function setup() {
   };
   const out: string[] = [];
   const err: string[] = [];
-  const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine);
+  const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine, { exec: fakeSecurity(accounts) });
   return { store, out, err, go, wired };
 }
 
@@ -288,9 +301,115 @@ describe('factory cli', () => {
     const json = JSON.parse(out[0]!);
     expect(json.counts).toEqual({ ready: 1 });
     expect(json.tasks).toMatchObject([{ taskId: 'T-1', status: 'ready' }]);
-    expect(json.factories).toMatchObject([{ factoryId: 'blocks', name: 'blocks', active: true, paused: false, counts: { ready: 1 }, patPresent: null }]);
+    expect(json.factories).toMatchObject([{ factoryId: 'blocks', name: 'blocks', active: true, paused: false, counts: { ready: 1 }, patPresent: true }]);
     await go('status');
-    expect(out.slice(1).join('\n')).toMatch(/ready: 1/);
+    expect(out.slice(1).join('\n')).toMatch(/factory blocks: active, paused false, PAT present\n.*ready: 1/s);
+  });
+});
+
+describe('factories, status health and --factory', () => {
+  const two = () => ({ defs: [defFixture('blocks'), defFixture('delta')], repos: [repoFixture('blocks', 'data'), repoFixture('delta', 'api')] });
+
+  test('next --factory delta prints paused for a paused delta', async () => {
+    const { store, out, go } = setup(two());
+    await store.setSettings({ factories: { delta: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } });
+    const t = await store.createTask({ factoryId: 'delta', title: 'x', description: '', repo: 'api', status: 'ready' });
+    expect(t.status).toBe('ready');
+    expect(await go('next', '--factory', 'delta')).toBe(0);
+    expect(out).toEqual(['paused']);
+  });
+
+  test('factories --json lists defs and repos and has no PAT value', async () => {
+    const { out, go } = setup(two());
+    expect(await go('factories', '--json')).toBe(0);
+    const json = JSON.parse(out.join('\n'));
+    expect(json.factories.map((f: { factoryId: string }) => f.factoryId)).toEqual(['blocks', 'delta']);
+    expect(json.factories[1].repos).toMatchObject([{ repoId: 'api' }]);
+    expect(out.join('\n')).not.toMatch(/secret/);
+    expect(Object.keys(json.factories[0])).not.toContain('pat');
+    await go('factories');
+    expect(out.at(-1)).toBe('delta (delta) active: api');
+  });
+
+  test('new without --factory exits 1 with two active factories, and works with one', async () => {
+    const two2 = setup(two());
+    expect(await two2.go('new', '--repo', 'data', '--title', 'X', '--description', 'd')).toBe(1);
+    expect(two2.err).toEqual(['error: --factory is required (active: blocks, delta)']);
+    expect(await two2.store.listTasks()).toEqual([]);
+    expect(await two2.go('new', '--factory', 'delta', '--repo', 'api', '--title', 'X', '--description', 'd')).toBe(0);
+    expect(await two2.store.getTask('T-1')).toMatchObject({ factoryId: 'delta' });
+    // An inactive factory does not count.
+    const one = setup({ defs: [defFixture('blocks'), defFixture('delta', { active: false })], repos: two().repos });
+    expect(await one.go('new', '--repo', 'data', '--title', 'X', '--description', 'd')).toBe(0);
+    expect(await one.store.getTask('T-1')).toMatchObject({ factoryId: 'blocks' });
+  });
+
+  test('dev add needs --factory with two active factories', async () => {
+    const { err, go } = setup(two());
+    expect(await go('dev', 'add', '--repo', 'data', '--title', 'X')).toBe(1);
+    expect(err).toEqual(['error: --factory is required (active: blocks, delta)']);
+  });
+
+  test('status writes a health row per factory and prints the PAT state', async () => {
+    const { store, out, go } = setup(two(), ['github-pat:blocks']);
+    expect(await go('status')).toBe(0);
+    expect(out).toContain('factory blocks: active, paused false, PAT present');
+    expect(out).toContain('factory delta: active, paused false, PAT missing');
+    const health = await store.listFactoryHealth();
+    expect(health.map((h) => [h.factoryId, h.patPresent])).toEqual([['blocks', true], ['delta', false]]);
+    expect(JSON.stringify(health)).not.toMatch(/secret/);
+  });
+
+  test('a health write failure is logged and status still succeeds', async () => {
+    const { store, out, err, go } = setup();
+    store.setFactoryHealth = async () => { throw new Error('refused'); };
+    expect(await go('status')).toBe(0);
+    expect(err).toEqual(['health of blocks not written: refused']);
+    expect(out[1]).toBe('factory blocks: active, paused false, PAT present');
+  });
+
+  test('status --factory limits the health check to the named factories', async () => {
+    const { store, go } = setup(two());
+    expect(await go('status', '--factory', 'delta')).toBe(0);
+    expect((await store.listFactoryHealth()).map((h) => h.factoryId)).toEqual(['delta']);
+  });
+});
+
+describe('migrate', () => {
+  const rootWithRepos = () => {
+    const root = mkdtempSync(join(tmpdir(), 'factory-cli-migrate-'));
+    cpSync(join(__dirname, '..', '..', 'repos'), join(root, 'repos'), { recursive: true });
+    process.env.FACTORY_ROOT = root;
+    return root;
+  };
+  afterEach(() => { delete process.env.FACTORY_ROOT; });
+
+  test('needs --dry-run or --yes', async () => {
+    const { err, go } = setup({ defs: [], repos: [] });
+    expect(await go('migrate')).toBe(1);
+    expect(err[0]).toMatch(/pass --dry-run to preview or --yes/);
+  });
+
+  test('--yes runs the steps on the store and prints one line per step', async () => {
+    rootWithRepos();
+    const { store, out, err, go } = setup({ defs: [], repos: [] }, ['github-pat']);
+    expect(await go('migrate', '--yes'), err.join()).toBe(0);
+    expect(out.map((l) => l.split(':')[0])).toEqual(['create-factory', 'tag-tasks', 'move-settings', 'copy-pat', 'read-back', 'repos-folder']);
+    expect((await store.listFactoryDefs()).map((d) => d.factoryId)).toEqual(['blocks']);
+    out.length = 0;
+    expect(await go('migrate', '--dry-run')).toBe(0);
+    expect(out[0]).toBe('create-factory: already - factory blocks exists');
+  });
+
+  test('on the Blocks store with the core credential it exits 1 and names the owner-only problem', async () => {
+    rootWithRepos();
+    const store = new BlocksStore(new FakeBlocksData('factory-core'), 'core');
+    const err: string[] = [];
+    const engine = {} as Engine;
+    const code = await run(['--store', 'blocks', 'migrate', '--yes'], { out: () => {}, err: (s) => err.push(s) }, async () => ({ engine, store }), { exec: fakeSecurity([]) });
+    expect(code).toBe(1);
+    expect(err[0]).toMatch(/owner-only rows/);
+    expect(await store.listFactoryDefs()).toEqual([]);
   });
 });
 

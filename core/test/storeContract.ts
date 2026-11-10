@@ -117,7 +117,7 @@ export function runStoreContract(
       expect(await s.listApprovals('T-1')).toEqual([first]);
     });
     test('retireLegacySettings has nothing to retire on a fresh store, and is the owner\'s', async () => {
-      expect(await (await make('owner')).retireLegacySettings()).toEqual({ retired: [] });
+      expect(await (await make('owner')).retireLegacySettings()).toEqual({ retired: [], remaining: [] });
       await expect((await make('core')).retireLegacySettings()).rejects.toBeInstanceOf(OwnerOnlyError);
     });
     test('empty store settings are defaults', async () => {

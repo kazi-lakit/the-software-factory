@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -68,6 +68,16 @@ describe('LocalGitRepos', () => {
     expect(git(wt, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(branch);
     expect(git(wt, 'rev-parse', 'HEAD').trim()).toBe(git(wt, 'rev-parse', 'origin/dev').trim());
     expect(await repos.worktree('blocks', cfg, 'T-1', branch, ['dev', 'main'])).toBe(wt);
+  });
+
+  test('a reused worktree folder that is empty, even inside another repo, is refused before any write', async () => {
+    const outer = join(tmp, 'outer');
+    git(tmp, 'init', outer);
+    const wtDir = join(outer, '.clones', 'worktrees', 'T-9');
+    mkdirSync(wtDir, { recursive: true });
+    const r = new LocalGitRepos(outer);
+    await expect(r.worktree('blocks', cfg, 'T-9', 'factory/T-9-z', ['dev', 'main'])).rejects.toThrow(`worktree ${wtDir} is not a valid worktree`);
+    expect(existsSync(join(outer, '.git', 'factory-protected-branches'))).toBe(false);
   });
 
   test('worktree reuses an existing local branch when its worktree folder is gone', async () => {

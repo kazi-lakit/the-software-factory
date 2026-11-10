@@ -140,9 +140,11 @@ export interface BoardStore {
   /**
    * Owner only. BlocksStore reads settings rows written before factories (`global`, bare repo ids) as factory `blocks`.
    * This nulls each such raw row whose value now exists under `blocks` / `blocks/<repo>`, so those rows stop counting.
-   * Idempotent. `factory migrate` calls it after moving the settings. Memory and file stores hold no such rows.
+   * `global` is nulled only when a live (not null, not malformed) `blocks` row exists. `remaining` lists legacy rows that
+   * could not be retired (a repo row with no new value, `global` without a live `blocks` row). Idempotent.
+   * `factory migrate` calls it after moving the settings. Memory and file stores hold no such rows.
    */
-  retireLegacySettings(): Promise<{ retired: string[] }>;
+  retireLegacySettings(): Promise<{ retired: string[]; remaining: string[] }>;
   startRun(r: { taskId: string; step: Step; mode: Mode; agent: string }): Promise<Run>;
   openRun(taskId: string, step: Step): Promise<Run | undefined>;
   finishRun(runId: string, p: { result: string; turns: number | null; costUsd: number | null }): Promise<void>;

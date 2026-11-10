@@ -519,26 +519,30 @@ export class BlocksStore implements BoardStore {
     return { values, rows };
   }
 
-  async retireLegacySettings(): Promise<{ retired: string[] }> {
+  async retireLegacySettings(): Promise<{ retired: string[]; remaining: string[] }> {
     this.ownerOnly('retireLegacySettings');
     const all = await this.data.list('FactorySettings', {}, ['scope', 'json', 'version']);
-    if (!legacyIsOn(all)) return { retired: [] };
+    if (!legacyIsOn(all)) return { retired: [], remaining: [] };
     const newRows = new Set(all.filter((r) => !isLegacyRepoRow(r, true) && r.scope !== LEGACY_FACTORY_SCOPE).map((r) => text(r.scope)));
+    // `global` goes only once a LIVE `blocks` row holds its value: a null or malformed one would leave the factory with defaults.
+    const liveBlocks = all.some((r) => text(r.scope) === LEGACY_FACTORY && isLive(r.json));
     const retired: string[] = [];
-    let remaining = 0;
+    const remaining: string[] = [];
     // The repo rows first: nulling `global` first would make the rest read as factory scopes.
     for (const r of all) {
       if (!isLegacyRepoRow(r, true)) continue;
       const scope = text(r.scope);
-      if (!newRows.has(repoKey(LEGACY_FACTORY, scope))) { remaining++; continue; }
+      if (!newRows.has(repoKey(LEGACY_FACTORY, scope))) { remaining.push(scope); continue; }
       await this.writeSettings(scope, 'null');
       retired.push(scope);
     }
-    if (remaining === 0 && newRows.has(LEGACY_FACTORY)) {
+    if (remaining.length === 0 && liveBlocks) {
       await this.writeSettings(LEGACY_FACTORY_SCOPE, 'null');
       retired.push(LEGACY_FACTORY_SCOPE);
+    } else {
+      remaining.push(LEGACY_FACTORY_SCOPE);
     }
-    return { retired };
+    return { retired, remaining };
   }
 
   async getSettings(): Promise<StoredSettings> {
