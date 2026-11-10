@@ -98,7 +98,7 @@ blocks iam users update-access <userId> --roles factory-owner --dry-run   # then
 
 If `update-access` refuses the flags, run `blocks iam users update-access --help` and adjust.
 
-## 6. The factory's machine login (the secret goes straight into the Keychain)
+## 6. The factory's machine login (the secret goes straight into the Keychain, or the keyring on Linux)
 
 ```bash
 cd ~/scratchpad/selise/the-software-factory
@@ -107,6 +107,8 @@ blocks auth client-credentials save --name factory-core --roles factory-core --a
 ```
 
 It should print only `saved blocks-credential (client …)`. If it prints an error, nothing was saved. Run the command again: `-U` replaces the item.
+
+**On Linux (Ubuntu)** the same command saves into the desktop keyring with `secret-tool`, under the same service and account names (`the-software-factory`, `blocks-credential`); saving again replaces it. Install it first with `sudo apt install libsecret-tools`. The keyring must be unlocked, which it is in a normal desktop login; over plain SSH with no desktop session there is no keyring, and the Blocks store can't load. Each machine gets its own machine login this way: run the command once per machine instead of copying the secret between them.
 
 ## 7. Tell Claude
 

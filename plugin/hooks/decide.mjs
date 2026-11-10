@@ -9,6 +9,9 @@ const BASH_DENY = [
   // `security`, any flags, then a Keychain subcommand; `grep -r security` stays allowed (R6).
   [new RegExp(`\\bsecurity(?:\\s+-\\S+)*\\s+${KEYCHAIN_SUB}`), 'Keychain access'],
   [/find-(generic|internet)-password|dump-keychain/, 'Keychain access'],
+  // Linux: `secret-tool` (any flags) then a subcommand, and the Secret Service over D-Bus; `grep secret-tool` stays allowed.
+  [/\bsecret-tool(?:\s+-\S+)*\s+(?:lookup|search|store|clear|lock|unlock)\b/, 'keyring access'],
+  [/org\.freedesktop\.secrets/, 'keyring access'],
   [/(^|[\s;&|(])gh\s/, 'gh CLI'],
   [new RegExp(`${G}push`), 'git push'],
   [new RegExp(`${G}remote\\s+(add|set-url|remove|rename)`), 'git remote change'],
