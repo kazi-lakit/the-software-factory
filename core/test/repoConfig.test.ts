@@ -6,7 +6,7 @@ import { describe, expect, test } from 'vitest';
 import { RepoConfigError, loadRepoConfig } from '../src/repoConfig.js';
 
 const REPO_IDS = ['os', 'iam', 'monitor', 'logic', 'data', 'localization', 'release'];
-const reposDir = fileURLToPath(new URL('../../repos', import.meta.url));
+const reposDir = fileURLToPath(new URL('./fixtures/repos', import.meta.url));
 
 function tempDir(files: Record<string, string>): string {
   const dir = mkdtempSync(join(tmpdir(), 'repocfg-'));

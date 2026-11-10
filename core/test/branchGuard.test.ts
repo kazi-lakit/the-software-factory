@@ -15,7 +15,7 @@ import {
 } from '../src/branchGuard.js';
 import { loadRepoConfig } from '../src/repoConfig.js';
 
-const REPOS = fileURLToPath(new URL('../../repos', import.meta.url));
+const REPOS = fileURLToPath(new URL('./fixtures/repos', import.meta.url));
 
 describe('branch guard', () => {
   test.each(['os', 'iam', 'monitor', 'logic', 'data', 'localization', 'release'].map((id) => loadRepoConfig(REPOS, id)))('$repo: protected branches refused', (cfg) => {

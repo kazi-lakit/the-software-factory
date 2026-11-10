@@ -8,7 +8,7 @@ import { validateImportFile } from '../src/importFile.js';
 import type { ExecFile } from '../src/secrets.js';
 import { FileStore, MemoryStore, type BoardStore } from '../src/store.js';
 
-const REPOS = join(__dirname, '..', '..', 'repos');
+const REPOS = join(__dirname, 'fixtures', 'repos');
 
 /** A Memory store holding the pre-factories shape: untagged tasks and `{ global, repos }` settings. */
 class LegacyMemory extends MemoryStore {
