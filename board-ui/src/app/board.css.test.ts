@@ -766,3 +766,23 @@ describe("board_css_t16_forms_tables_tabs", () => {
     }
   });
 });
+
+describe("board_css_question_and_radio_cards", () => {
+  it("question_title_is_20px", () => {
+    const title = tokens(read("board.css"), ".sf-view h3.sf-question-title");
+    expect(title["font-size"]).toBe("20px");
+    expect(title.margin).toBe("0");
+  });
+
+  it("radio_card_uses_only_tokens_and_focus_ring", () => {
+    const css = read("board.css");
+    const selected = tokens(css, ".sf-radio-card-selected");
+    expect(selected["border-color"]).toBe("var(--sf-accent)");
+    expect(selected.background).toBe("var(--sf-accent-soft)");
+    expect(tokens(css, ".sf-radio-card:focus-within").outline).toBe("2px solid var(--sf-focus)");
+    expect(tokens(css, ".sf-radio-card").border).toBe("1px solid var(--sf-border)");
+    const why = tokens(css, ".sf-radio-why");
+    expect(why["white-space"]).toBe("nowrap");
+    expect(why["text-overflow"]).toBe("ellipsis");
+  });
+});

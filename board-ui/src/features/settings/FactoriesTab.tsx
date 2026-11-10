@@ -6,6 +6,7 @@ import { HISTORY_KEY } from "../history/useHistory";
 import { FactoryForm } from "./FactoryForm";
 import { ImportFactory } from "./ImportFactory";
 import { RepoForm } from "./RepoForm";
+import { formatTime } from "../../lib/formatTime";
 
 type Editing =
   | { kind: "add-factory" }
@@ -13,11 +14,6 @@ type Editing =
   | { kind: "add-repo"; factoryId: string }
   | { kind: "edit-repo"; factoryId: string; repoId: string }
   | { kind: "import" };
-
-const formatTime = (iso: string): string => {
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
-};
 
 /** The gh login as `factory status` last found it (gh auth status); a factory the core has not checked is `unknown`. */
 function GhStatus({ health }: { health: FactoryHealth | undefined }) {
