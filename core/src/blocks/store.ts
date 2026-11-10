@@ -297,7 +297,11 @@ export class BlocksStore implements BoardStore {
       // The writeId finds this row again if the insert's reply is lost.
       const writeId = randomUUID();
       const row: Record<string, Value> = { writeId };
-      for (const [key, value] of Object.entries(task)) row[key] = encodeTaskValue(key as keyof Task, value);
+      for (const [key, value] of Object.entries(task)) {
+        // An empty list is left out so creates work before the schema has the field; a missing value reads as [].
+        if (key === 'dependsOn' && task.dependsOn.length === 0) continue;
+        row[key] = encodeTaskValue(key as keyof Task, value);
+      }
       let r: Awaited<ReturnType<BlocksData['insert']>>;
       try {
         r = await this.data.insert('FactoryTask', row);

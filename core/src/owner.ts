@@ -122,18 +122,25 @@ async function requireRepo(store: BoardStore, factoryId: string, repoId: string)
 /**
  * Validates a dependency list and returns it normalized. Every id must be a stored task of `factoryId`. `taskId` is the
  * task being edited (null for a new one: nothing can depend on it yet, so no self or cycle check).
+ * Ids in `stored` (the task's current list) skip the existence and factory checks: a missing task counts as finished, so
+ * an edit may keep or drop one.
  */
-async function checkDeps(store: BoardStore, factoryId: string, taskId: string | null, deps: unknown): Promise<string[]> {
+async function checkDeps(store: BoardStore, factoryId: string, taskId: string | null, deps: unknown, stored: readonly string[] = []): Promise<string[]> {
   if (!Array.isArray(deps) || !deps.every((d) => typeof d === 'string')) return invalid('dependsOn must be a list of task ids');
   const ids = normalizeDeps(deps as string[]);
   const tasks = await store.listTasks();
   for (const id of ids) {
     if (id === taskId) invalid(`${id} cannot depend on itself`);
+    if (stored.includes(id)) continue;
     const found = tasks.find((t) => t.taskId === id);
     if (!found) invalid(`dependency ${id} does not exist`);
     if (found!.factoryId !== factoryId) invalid(`dependency ${id} is not in factory ${factoryId}`);
   }
-  if (taskId !== null && createsCycle(taskId, ids, tasks)) invalid('these dependencies would make a cycle');
+  // Two simultaneous edits can each pass this check and together close a cycle; with a single owner that is accepted.
+  if (taskId !== null && createsCycle(taskId, ids, tasks)) {
+    const closing = ids.find((id) => createsCycle(taskId, [id], tasks));
+    invalid(`${closing ?? 'these dependencies'} would make a cycle`);
+  }
   return ids;
 }
 
@@ -260,7 +267,7 @@ export async function editTask(store: BoardStore, now: () => Date, taskId: strin
   }
   if (task.version !== expectedVersion) throw new VersionConflictError(taskId, expectedVersion, task.version);
   if (clean.baseBranch !== undefined && clean.baseBranch !== task.baseBranch && isMainRef(clean.baseBranch)) invalid(NEVER_MAIN);
-  if (clean.dependsOn !== undefined) clean.dependsOn = await checkDeps(store, task.factoryId, task.taskId, clean.dependsOn);
+  if (clean.dependsOn !== undefined) clean.dependsOn = await checkDeps(store, task.factoryId, task.taskId, clean.dependsOn, task.dependsOn);
   if (!EDITABLE_FIELDS.some((f) => f in clean && canon(clean[f]) !== canon(task[f]))) return task;
   if (clean.repo !== undefined && clean.repo !== task.repo) await requireRepo(store, task.factoryId, clean.repo);
   return ownerUpdate(store, now, task, clean, 'edited');

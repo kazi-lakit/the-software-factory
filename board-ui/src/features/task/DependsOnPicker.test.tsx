@@ -39,4 +39,13 @@ describe("DependsOnPicker", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: /T-2/ }));
     expect(onChange).toHaveBeenLastCalledWith(["T-1", "T-2"]);
   });
+
+  it("shows_a_selected_id_that_no_longer_exists_so_it_can_be_unticked", () => {
+    const onChange = vi.fn();
+    render(<DependsOnPicker id="x" factoryId="blocks" tasks={[task("T-1")]} value={["T-1", "T-9"]} onChange={onChange} />);
+    const missing = screen.getByRole("checkbox", { name: "T-9 (missing)" });
+    expect(missing).toBeChecked();
+    fireEvent.click(missing);
+    expect(onChange).toHaveBeenCalledWith(["T-1"]);
+  });
 });

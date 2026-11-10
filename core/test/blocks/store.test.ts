@@ -303,12 +303,14 @@ describe('BlocksStore', () => {
     const data = new FakeBlocksData('any');
     const s = new BlocksStore(data, 'owner');
     for (let i = 0; i < 6; i++) await s.createTask({ factoryId: 'blocks', title: 't', description: '', repo: 'data' });
-    expect(data.rows('FactoryTask')[0]!.dependsOn).toBe('[]');
+    expect(data.rows('FactoryTask')[0]!.dependsOn).toBeNull(); // not sent on insert; the fake null-fills
+    await s.createTask({ factoryId: 'blocks', title: 't', description: '', repo: 'data', dependsOn: ['T-1'] });
+    expect(data.rows('FactoryTask')[6]!.dependsOn).toBe('["T-1"]');
     const raws = [undefined, null, 'not json', '{"a":1}', '[1,2]', '["T-3"]'];
     for (const [i, v] of raws.entries()) {
       expect(await data.update('FactoryTask', { taskId: `T-${i + 1}` }, { dependsOn: v as string })).toEqual({ kind: 'applied' });
     }
-    expect((await s.listTasks()).map((t) => t.dependsOn)).toEqual([[], [], [], [], [], ['T-3']]);
+    expect((await s.listTasks()).map((t) => t.dependsOn)).toEqual([[], [], [], [], [], ['T-3'], ['T-1']]);
   });
 
   it('core identity can update core fields of an owner-created task', async () => {

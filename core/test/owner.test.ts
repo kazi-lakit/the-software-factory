@@ -315,6 +315,28 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       expect((await owner.getTask('T-1')).dependsOn).toEqual([]);
     });
 
+    test('edit names the id that closes the cycle', async () => {
+      const { owner, put } = setup();
+      const a = await put();
+      await put({}, { dependsOn: ['T-1'] });
+      await expect(editTask(owner, now, 'T-1', a.version, { dependsOn: ['T-2'] })).rejects.toThrow(/T-2 would make a cycle/);
+    });
+
+    test('a dependency that no longer exists can be dropped, and does not block other edits', async () => {
+      const { owner, put } = setup();
+      const t = await put();
+      await put();
+      const seeded = await owner.updateTask(t.taskId, t.version, { dependsOn: ['T-9'] });
+      const renamed = await editTask(owner, now, 'T-1', seeded.version, { title: 'New title' });
+      expect(renamed).toMatchObject({ title: 'New title', dependsOn: ['T-9'] });
+      expect(await code(editTask(owner, now, 'T-1', renamed.version, { dependsOn: ['T-9', 'T-8'] }))).toBe('invalid');
+      const kept = await editTask(owner, now, 'T-1', renamed.version, { dependsOn: ['T-9', 'T-1'].filter((d) => d !== 'T-1').concat('T-2') });
+      expect(kept.dependsOn).toEqual(['T-2', 'T-9']);
+      const cleared = await editTask(owner, now, 'T-1', kept.version, { dependsOn: [] });
+      expect(cleared.dependsOn).toEqual([]);
+      expect((await owner.getTask('T-1')).dependsOn).toEqual([]);
+    });
+
     test('edit refuses a bad shape and a task the core is working on', async () => {
       const { owner, put } = setup();
       await put();
