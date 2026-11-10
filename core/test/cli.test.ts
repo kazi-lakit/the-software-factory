@@ -26,29 +26,16 @@ const git: GitRepos = {
 };
 
 /** gh's `auth status --json hosts` answer for logins in state success on github.com. */
-const ghStatusJson = (logins: string[], extra: Array<{ login: string; state: string }> = []) =>
-  JSON.stringify({ hosts: { 'github.com': [...logins.map((login) => ({ host: 'github.com', login, state: 'success', active: false })), ...extra] } });
+const ghStatusJson = (logins: string[]) =>
+  JSON.stringify({ hosts: { 'github.com': logins.map((login) => ({ host: 'github.com', login, state: 'success', active: false })) } });
 
-/**
- * A fake `security` and `gh`: the listed names are both the Keychain accounts (value `secret`) and the gh logins.
- * It never touches the real Keychain or gh, and refuses `gh auth token` outright.
- */
-const fakeSecurity = (initial: string[] = ['gh-blocks'], gh: { code?: number; stdout?: string } = {}): ExecFile => {
-  const accounts = new Set(initial);
-  return async (file, args, stdin) => {
-    if (file === 'gh') {
-      if (args.join(' ') !== 'auth status --hostname github.com --json hosts') throw new Error(`unexpected gh ${args.join(' ')}`);
-      return { code: gh.code ?? 0, stdout: gh.stdout ?? ghStatusJson([...accounts]), stderr: '' };
-    }
-    if (args[0] === '-i') {
-      accounts.add(/ -a (\S+) /.exec(stdin ?? '')?.[1] ?? '');
-      return { code: 0, stdout: '', stderr: '' };
-    }
-    return accounts.has(args[args.indexOf('-a') + 1] ?? '') ? { code: 0, stdout: 'secret\n', stderr: '' } : { code: 44, stdout: '', stderr: '' };
-  };
+/** A fake `gh`: the listed names are the logged-in gh logins. It never runs the real gh, and refuses anything but `gh auth status`. */
+const fakeGh = (logins: string[] = ['gh-blocks'], gh: { code?: number; stdout?: string } = {}): ExecFile => async (file, args) => {
+  if (file !== 'gh' || args.join(' ') !== 'auth status --hostname github.com --json hosts') throw new Error(`unexpected ${file} ${args.join(' ')}`);
+  return { code: gh.code ?? 0, stdout: gh.stdout ?? ghStatusJson(logins), stderr: '' };
 };
 
-function setup(factories = seed(), accounts?: string[], securityCalls?: string[][], gh?: { code?: number; stdout?: string }, files?: string[]) {
+function setup(factories = seed(), logins?: string[], ghCalls?: string[][], gh?: { code?: number; stdout?: string }, files?: string[]) {
   const store = new MemoryStore({ factories });
   const exec: Exec = async () => ({ code: 0, output: '' });
   const engine = new Engine({
@@ -62,11 +49,11 @@ function setup(factories = seed(), accounts?: string[], securityCalls?: string[]
   };
   const out: string[] = [];
   const err: string[] = [];
-  const security = fakeSecurity(accounts, gh);
+  const fake = fakeGh(logins, gh);
   const exec2: ExecFile = (file, args, stdin) => {
-    securityCalls?.push(args);
+    ghCalls?.push(args);
     files?.push(file);
-    return security(file, args, stdin);
+    return fake(file, args, stdin);
   };
   const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine, { exec: exec2 });
   return { store, out, err, go, wired };
@@ -214,7 +201,7 @@ describe('factory cli', () => {
       exec: async () => ({ code: 0, output: '' }), now: () => new Date(), mode: 'session', claimant: 'me',
     });
     const go = (...argv: string[]) =>
-      run(argv, { out: (s) => out.push(s), err: () => {} }, async (o) => { wired.push(o); return { engine, store }; }, { exec: fakeSecurity() });
+      run(argv, { out: (s) => out.push(s), err: () => {} }, async (o) => { wired.push(o); return { engine, store }; }, { exec: fakeGh() });
     expect(await go('--store', 'blocks', 'status')).toBe(0);
     expect(wired[0]).toMatchObject({ store: 'blocks' });
     expect(out.length).toBeGreaterThan(0);
@@ -463,9 +450,10 @@ describe('migrate', () => {
 
   test('--yes runs the steps on the store and prints one line per step', async () => {
     rootWithRepos();
-    const { store, out, err, go } = setup({ defs: [], repos: [] }, ['github-pat']);
+    const { store, out, err, go } = setup({ defs: [], repos: [] }, ['kazi-lakit']);
     expect(await go('migrate', '--yes'), err.join()).toBe(0);
-    expect(out.map((l) => l.split(':')[0])).toEqual(['create-factory', 'tag-tasks', 'move-settings', 'copy-pat', 'read-back', 'repos-folder']);
+    expect(out.map((l) => l.split(':')[0])).toEqual(['create-factory', 'tag-tasks', 'move-settings', 'gh-login', 'read-back', 'repos-folder']);
+    expect(out[3]).toBe('gh-login: already - gh account kazi-lakit is logged in');
     expect((await store.listFactoryDefs()).map((d) => d.factoryId)).toEqual(['blocks']);
     out.length = 0;
     expect(await go('migrate', '--dry-run')).toBe(0);
@@ -476,36 +464,41 @@ describe('migrate', () => {
     const store = new BlocksStore(new FakeBlocksData('factory-core'), 'core');
     const out: string[] = [];
     const err: string[] = [];
-    const exec = fakeSecurity(initial);
+    const exec = fakeGh(initial);
     const calls: string[][] = [];
-    const spy: ExecFile = async (f, a, i) => { calls.push(a); return exec(f, a, i); };
+    const spy: ExecFile = async (f, a, i) => { calls.push([f, ...a]); return exec(f, a, i); };
     const go = (...argv: string[]) => run(['--store', 'blocks', ...argv], { out: (s) => out.push(s), err: (s) => err.push(s) }, async () => ({ engine: {} as Engine, store }), { exec: spy });
     return { store, out, err, go, calls };
   };
 
-  test('on the Blocks store --yes runs only the Keychain copy and lists the pending owner steps', async () => {
+  test.each([['--yes'], ['--dry-run']])('on the Blocks store %s has no core step: it says so and exits 0 (R16)', async (flag) => {
     rootWithRepos();
-    const { store, out, err, go, calls } = blocksCli(['github-pat']);
-    expect(await go('migrate', '--yes')).toBe(0);
+    const { store, out, err, go, calls } = blocksCli(['kazi-lakit']);
+    expect(await go('migrate', flag)).toBe(0);
     expect(err).toEqual([]);
-    expect(out.map((l) => l.split(':')[0])).toEqual(['copy-pat', 'create-factory', 'move-settings']);
-    expect(out[0]).toMatch(/^copy-pat: now/);
-    expect(out[1]).toBe('create-factory: pending - blocks factory not on the Board → import it on the Board (Settings → Factories → Import)');
-    expect(calls.some((a) => a[0] === '-i')).toBe(true);
+    expect(out).toEqual(['nothing for the core to do on the Blocks store; import on the Board, then run factory migrate --check']);
+    expect(calls).toEqual([]);
     expect(await store.listFactoryDefs()).toEqual([]);
   });
 
   test('--check is read-only: exit 2 while pending, 0 when done', async () => {
     rootWithRepos();
-    const { out, go, calls } = blocksCli(['github-pat']);
+    const { out, go, calls } = blocksCli(['kazi-lakit']);
     expect(await go('migrate', '--check')).toBe(2);
     expect(out[0]).toMatch(/^create-factory: pending/);
-    expect(calls.some((a) => a[0] === '-i')).toBe(false);
-    const done = setup({ defs: [defFixture('blocks')], repos: [] }, ['github-pat', 'github-pat:blocks']);
+    expect(out).toContain('gh-login: already - gh account kazi-lakit is logged in');
+    expect(calls).toEqual([['gh', 'auth', 'status', '--hostname', 'github.com', '--json', 'hosts']]);
+    const done = setup({ defs: [defFixture('blocks')], repos: [] }, ['gh-blocks']);
     // a Board import that holds the factory and every repo
     for (const r of buildImport(process.env.FACTORY_ROOT!, '/h').repos) await done.store.saveFactoryRepo(null, r);
     expect(await done.go('migrate', '--check')).toBe(0);
     expect(done.out.every((l) => !l.includes(': pending'))).toBe(true);
+    expect(done.out).toContain('gh-login: already - gh account gh-blocks is logged in');
+    // The gh login missing keeps the check pending.
+    const noLogin = setup({ defs: [defFixture('blocks')], repos: [] }, []);
+    for (const r of buildImport(process.env.FACTORY_ROOT!, '/h').repos) await noLogin.store.saveFactoryRepo(null, r);
+    expect(await noLogin.go('migrate', '--check')).toBe(2);
+    expect(noLogin.out).toContain('gh-login: pending - gh account gh-blocks is not logged in: run gh auth login');
   });
 
   test('--export writes the import file and needs no store', async () => {

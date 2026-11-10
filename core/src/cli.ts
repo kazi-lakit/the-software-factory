@@ -242,7 +242,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .command('migrate')
     .description('one-time move of today\'s work into factory blocks (re-runnable; run by the owner)')
     .option('--dry-run', 'print the steps without taking them')
-    .option('--yes', 'take the steps (on the Blocks store: only the Keychain copy; the rest is the owner\'s import on the Board)')
+    .option('--yes', 'take the steps (file store only: on the Blocks store the owner imports on the Board, then runs --check)')
     .option('--check', 'read-only: print each step as done or pending; exit 2 while any is pending')
     .option('--export <file>', 'write the blocks factory and its repos as an import file for the Board (reads only repos/*.yaml)')
     .action(async (o: { dryRun?: boolean; yes?: boolean; check?: boolean; export?: string }, cmd: Command) => {
@@ -252,18 +252,19 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
         return io.out(`wrote ${o.export}`);
       }
       if (o.check !== true && o.dryRun !== true && o.yes !== true) throw new CliExit('migrate changes the Board: pass --check or --dry-run to preview, --yes to run, or --export <file>', 1);
-      const ownerSteps = (cmd.optsWithGlobals() as { store: string }).store !== 'blocks';
+      const onBlocks = (cmd.optsWithGlobals() as { store: string }).store === 'blocks';
+      if (onBlocks && o.check !== true) return io.out('nothing for the core to do on the Blocks store; import on the Board, then run factory migrate --check');
       const { store } = await open(cmd);
       const line = (s: { name: string; done: string; detail: string }) => io.out(`${s.name}: ${s.done} - ${s.detail}`);
       if (o.check === true) {
-        const report = await checkMigration(store, findRoot(), home, exec, { blocks: !ownerSteps });
+        const report = await checkMigration(store, findRoot(), home, exec, { blocks: onBlocks });
         report.steps.forEach(line);
         for (const n of report.notes) io.out(`note: ${n}`);
         if (report.steps.some((s) => s.done === 'pending')) throw new CliExit('migration pending', 2);
         return;
       }
       try {
-        const report = await migrate(store, findRoot(), home, exec, { dryRun: o.dryRun === true, ownerSteps, onStep: line });
+        const report = await migrate(store, findRoot(), home, exec, { dryRun: o.dryRun === true, onStep: line });
         for (const n of report.notes) io.out(`note: ${n}`);
       } catch (e) {
         // The Blocks store with the core's credential refuses owner-only writes (factory definitions, settings, task factoryId).

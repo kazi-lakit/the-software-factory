@@ -7,11 +7,9 @@ import { DEFAULT_SETTINGS } from './defaults.js';
 import { validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from './factories.js';
 import { IMPORT_FORMAT, validateImportFile, type ImportFile } from './importFile.js';
 import { loadRepoConfig } from './repoConfig.js';
-import { KEYCHAIN_SERVICE, readSecret, SecretMissingError, type ExecFile } from './secrets.js';
+import { ghLoggedInUsers, isGhLoggedIn, type ExecFile } from './secrets.js';
 
 export const LEGACY_FACTORY_ID = 'blocks';
-const SOURCE_ACCOUNT = 'github-pat';
-const TARGET_ACCOUNT = `github-pat:${LEGACY_FACTORY_ID}`;
 
 export interface MigrateStep {
   name: string;
@@ -26,8 +24,6 @@ export interface MigrateReport {
 }
 export interface MigrateOptions {
   dryRun?: boolean;
-  /** false: only the steps the factory core may do (the Keychain copy); the owner steps are reported as pending. */
-  ownerSteps?: boolean;
   /** Called as each step finishes, so a failure later still shows what was done. */
   onStep?: (s: MigrateStep) => void;
 }
@@ -70,37 +66,17 @@ function loadLegacyRepos(root: string, def: FactoryDef): FactoryRepo[] {
   return out;
 }
 
-/** Step 4. Returns true when the value was copied now. */
-async function copyPat(exec: ExecFile, dry: boolean, push: (name: string, done: MigrateStep['done'], detail: string) => void): Promise<boolean> {
-  if (await hasEntry(exec, TARGET_ACCOUNT)) {
-    push('copy-pat', 'already', `${TARGET_ACCOUNT} exists in Keychain`);
-    return false;
-  }
-  if (dry) {
-    push('copy-pat', (await hasEntry(exec, SOURCE_ACCOUNT)) ? 'now' : 'skipped', `would copy ${SOURCE_ACCOUNT} to ${TARGET_ACCOUNT}`);
-    return false;
-  }
-  let pat: string | undefined;
-  try {
-    pat = await readSecret(SOURCE_ACCOUNT, exec);
-  } catch (e) {
-    if (!(e instanceof SecretMissingError)) throw e;
-  }
-  if (pat === undefined) {
-    push('copy-pat', 'skipped', `${SOURCE_ACCOUNT} not in Keychain; add ${TARGET_ACCOUNT} by hand`);
-    return false;
-  }
-  // The GitHub token alphabet only: nothing that needs quoting on the `security -i` line.
-  if (!/^[A-Za-z0-9_]+$/.test(pat)) {
-    throw new Error(`PAT has unexpected characters; copy it by hand with security add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${TARGET_ACCOUNT} -w`);
-  }
-  const { code } = await exec('security', ['-i'], `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${TARGET_ACCOUNT} -w ${pat}\n`);
-  if (code !== 0) throw new Error(`could not write ${TARGET_ACCOUNT} to Keychain`);
-  // Read it back: a write that "succeeded" must hold the same value (compared in memory, never printed).
-  const back = await readSecret(TARGET_ACCOUNT, exec).catch(() => undefined);
-  if (back !== pat) throw new Error(`${TARGET_ACCOUNT} does not match ${SOURCE_ACCOUNT} after the copy`);
-  push('copy-pat', 'now', `copied ${SOURCE_ACCOUNT} to ${TARGET_ACCOUNT}`);
-  return true;
+/**
+ * Step 4, read-only: is the gh login of `blocks` logged in? The stored definition's `ghUser` when it is on the Board, else
+ * the one the import gives it. One `gh auth status`; no token is read.
+ */
+async function ghLoginStep(store: BoardStore, home: string, exec: ExecFile): Promise<MigrateStep> {
+  const stored = (await store.listFactoryDefs()).find((d) => d.factoryId === LEGACY_FACTORY_ID);
+  const valid = stored ? validateFactoryDef(stored) : undefined;
+  const user = valid?.ok ? valid.value.ghUser : legacyDef(home).ghUser;
+  return isGhLoggedIn(await ghLoggedInUsers(exec), user)
+    ? { name: 'gh-login', done: 'already', detail: `gh account ${user} is logged in` }
+    : { name: 'gh-login', done: 'pending', detail: `gh account ${user} is not logged in: run gh auth login` };
 }
 
 /** Repo ids that are missing from `have` or differ from `want` (remote, base branch, checks). */
@@ -124,8 +100,9 @@ function oldLayoutNote(root: string): string | undefined {
 }
 
 /**
- * Read-only: where each step stands (`already` or `pending`, `skipped` when there is nothing to act on). Only entry names are
- * read from the Keychain. `blocks: true` (the Blocks store) leaves out the file-store checks: the raw board file and tag-tasks.
+ * Read-only: where each step stands (`already` or `pending`, `skipped` when there is nothing to act on). The gh login is
+ * checked with `gh auth status`, never a token. `blocks: true` (the Blocks store) leaves out the file-store checks: the raw
+ * board file and tag-tasks.
  */
 export async function checkMigration(store: BoardStore, root: string, home: string, exec: ExecFile, opts: { blocks?: boolean } = {}): Promise<MigrateReport> {
   const steps: MigrateStep[] = [];
@@ -161,9 +138,7 @@ export async function checkMigration(store: BoardStore, root: string, home: stri
   else if (stored.factories?.[ID]) add('move-settings', 'already', `settings are under ${ID}`);
   else add('move-settings', 'skipped', 'no settings stored');
 
-  if (await hasEntry(exec, TARGET_ACCOUNT)) add('copy-pat', 'already', `${TARGET_ACCOUNT} exists in Keychain`);
-  else if (await hasEntry(exec, SOURCE_ACCOUNT)) add('copy-pat', 'pending', `${SOURCE_ACCOUNT} not yet copied to ${TARGET_ACCOUNT}: run factory migrate --yes`);
-  else add('copy-pat', 'skipped', `${SOURCE_ACCOUNT} not in Keychain`);
+  steps.push(await ghLoginStep(store, home, exec));
 
   const clones = oldLayoutNote(root);
   if (clones) notes.push(clones);
@@ -178,16 +153,12 @@ export function buildImport(root: string, home: string): ImportFile {
   return r.value;
 }
 
-export async function hasEntry(exec: ExecFile, account: string): Promise<boolean> {
-  // No -w: this only asks whether the entry exists, it never reads the value.
-  return (await exec('security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', account])).code === 0;
-}
-
 /**
- * Moves today's work into factory `blocks`. Steps: 1 create `blocks` and its repos from `repos/*.yaml`; 2 tag tasks;
- * 3 move the settings to the `blocks` scopes and retire the legacy rows; 4 copy the Keychain PAT; 5 read it all back;
- * 6 tell the owner to remove `repos/`. Nothing is deleted. Events cannot be rewritten through the store: the stores
- * read an event without a factoryId as `blocks`.
+ * Moves today's work into factory `blocks` (the file store; on the Blocks store the owner imports on the Board instead).
+ * Steps: 1 create `blocks` and its repos from `repos/*.yaml`; 2 tag tasks; 3 move the settings to the `blocks` scopes and
+ * retire the legacy rows; 4 check, read-only, that the gh login of `blocks` is logged in; 5 read it all back; 6 tell the
+ * owner to remove `repos/`. Nothing is deleted. Events cannot be rewritten through the store: the stores read an event
+ * without a factoryId as `blocks`.
  */
 export async function migrate(store: BoardStore, root: string, home: string, exec: ExecFile, opts: MigrateOptions = {}): Promise<MigrateReport> {
   const dry = opts.dryRun === true;
@@ -198,15 +169,6 @@ export async function migrate(store: BoardStore, root: string, home: string, exe
     steps.push(s);
     opts.onStep?.(s);
   };
-  if (opts.ownerSteps === false) {
-    // The factory core's half: the Keychain copy. Definitions, settings and task tags are the owner's (the Board's Import action).
-    await copyPat(exec, dry, push);
-    const check = await checkMigration(store, root, home, exec, { blocks: true });
-    const owner = check.steps.filter((s) => s.name !== 'copy-pat');
-    for (const s of owner) push(s.name, s.done, s.detail);
-    if (owner.every((s) => s.done !== 'pending') && existsSync(join(root, 'repos'))) push('repos-folder', 'now', 'repos/ is no longer read; remove it with: git rm -r repos');
-    return { steps, notes: check.notes };
-  }
   const flags = readLegacyFlags(root);
   const would = dry ? 'would ' : '';
 
@@ -264,8 +226,9 @@ export async function migrate(store: BoardStore, root: string, home: string, exe
     push('move-settings', 'skipped', 'no settings stored');
   }
 
-  // 4. The Keychain PAT. The value only passes through memory and the child's stdin; it is never printed.
-  await copyPat(exec, dry, push);
+  // 4. The gh login of `blocks`: read-only, and a missing login is pending (the owner runs gh auth login), not a failure.
+  const login = await ghLoginStep(store, home, exec);
+  push(login.name, login.done, login.detail);
 
   // 5. Read back and compare with the source. Nothing is removed before this matches.
   const changed = steps.some((s) => s.done === 'now');
