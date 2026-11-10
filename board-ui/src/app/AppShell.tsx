@@ -1,4 +1,4 @@
-import type { MouseEvent, ReactNode } from "react";
+import { useState, type MouseEvent, type ReactNode } from "react";
 import { useAuth } from "./providers/AuthProvider";
 import { useCurrentUser, userDisplayName, userInitials } from "../features/profile/useCurrentUser";
 import { useFactories, useSelectedFactory } from "../features/factories/useFactories";
@@ -7,6 +7,7 @@ import { NEEDS_YOU } from "../features/board/status";
 import { ThemeSwitch } from "../shared/ui/ThemeSwitch";
 import { useSettings } from "../features/settings/useSettings";
 import { clearAllUnsent } from "../lib/unsent";
+import { TopBarLeadContext, type Lead } from "./topBarLead";
 
 export const PROJECT_NAME = "the-software-factory";
 
@@ -26,6 +27,7 @@ type ShellProps = { activePath: string; children: ReactNode; onNavigate: (path: 
 // board.css (sf-* classes and tokens) so light and dark come from the tokens.
 export function AppShell({ activePath, children, onNavigate }: ShellProps) {
   const { logout } = useAuth();
+  const [lead, setLead] = useState<Lead | null>(null);
   const me = useCurrentUser();
   const settings = useSettings();
   const profile = me.data?.data;
@@ -73,8 +75,14 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
   }
 
   return (
-    <div className="sf-app">
+    <TopBarLeadContext.Provider value={setLead}>
+    <div className={lead ? "sf-app sf-shell-detail" : "sf-app"}>
       <header className="sf-topbar">
+        {lead ? (
+          <button type="button" className="sf-topbar-lead" onClick={lead.onClick}>
+            {lead.label}
+          </button>
+        ) : null}
         <span className="sf-project sf-label">{PROJECT_NAME}</span>
         <nav className="sf-views" aria-label="Views">
           {views.map((view) => (
@@ -108,5 +116,6 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
       </header>
       <main className="sf-main">{children}</main>
     </div>
+    </TopBarLeadContext.Provider>
   );
 }

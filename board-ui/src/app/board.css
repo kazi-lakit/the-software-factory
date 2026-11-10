@@ -178,6 +178,20 @@ body {
   white-space: nowrap;
 }
 
+/* Phones only (see the phone block at the end); hidden everywhere else. */
+.sf-topbar-lead {
+  background: transparent;
+  border: 0;
+  color: var(--sf-text);
+  cursor: pointer;
+  display: none;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 0 8px;
+}
+
 .sf-views {
   align-items: stretch;
   align-self: stretch;
