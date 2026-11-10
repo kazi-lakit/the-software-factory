@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createTask, isMainRef, markReady, type FactoryRepo, type Status, type Task } from "@factory/core";
+import { useTopBarLead } from "../../app/topBarLead";
 import { boardStore } from "../../lib/board";
 import { clearUnsent, hasUnsent, keepUnsent, useUnsent } from "../../lib/unsent";
 import { useFactories, useSelectedFactory, type FactoryEntry } from "../factories/useFactories";
@@ -341,6 +342,8 @@ function NewTaskPanel({ entries, factoriesFailed, factoriesLoading, link, onClos
 type FormProps = Pick<PanelProps, "entries" | "id" | "onCreated"> & { note: string; onClose: () => void; onNoteClear: () => void; start: string };
 
 function NewTaskForm({ entries, id, note, onClose, onCreated, onNoteClear, start }: FormProps) {
+  // Phones: Cancel sits at the left of the top bar while the form is open; it closes like Close.
+  useTopBarLead({ label: "Cancel", onClick: onClose });
   const [title, setTitle, clearTitle] = useUnsent(newTaskId("title"));
   const [description, setDescription, clearDescription] = useUnsent(newTaskId("description"));
   const [factoryValue, setFactory, clearFactory] = useUnsent(newTaskId("factory"), start);

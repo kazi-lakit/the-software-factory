@@ -1,9 +1,10 @@
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenError } from "@factory/core";
 import { clearAllUnsent, keepUnsent } from "../../lib/unsent";
 import { factory, merge } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
+import { TopBarLeadContext, type Lead } from "../../app/topBarLead";
 import { BoardView } from "./BoardView";
 import { BOARD_VIEW_KEY, resetBoardViewForTests } from "./useBoardView";
 
@@ -938,5 +939,46 @@ describe("New task form restyle and Mark ready now", () => {
     fireEvent.click(screen.getByRole("button", { name: "New task" }));
     form = screen.getByRole("form", { name: "New task" });
     expect(ready(form)).not.toBeChecked();
+  });
+});
+
+describe("BoardView top bar Cancel", () => {
+  function renderWithLead() {
+    const leads: Array<Lead | null> = [];
+    const setter = (lead: Lead | null) => void leads.push(lead);
+    const view = renderWithClient(
+      <TopBarLeadContext.Provider value={setter}>
+        <BoardView onNavigate={vi.fn()} />
+      </TopBarLeadContext.Provider>
+    );
+    return { leads, ...view };
+  }
+  const last = (leads: Array<Lead | null>) => leads[leads.length - 1];
+
+  it("registers_Cancel_in_the_top_bar_while_the_New_task_form_is_open", async () => {
+    const { leads } = renderWithLead();
+    expect(last(leads)).toBeUndefined();
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    expect(last(leads)?.label).toBe("Cancel");
+  });
+
+  it("the_Cancel_lead_closes_the_form_exactly_like_Close_and_keeps_the_unsent_draft", async () => {
+    const { leads } = renderWithLead();
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    fireEvent.change(within(screen.getByRole("form", { name: "New task" })).getByLabelText("Title"), { target: { value: "Half typed" } });
+    act(() => last(leads)?.onClick());
+    expect(screen.queryByRole("form", { name: "New task" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    expect(within(screen.getByRole("form", { name: "New task" })).getByLabelText("Title")).toHaveValue("Half typed");
+  });
+
+  it("the_lead_is_cleared_when_the_form_closes_including_by_the_New_task_button", async () => {
+    const { leads } = renderWithLead();
+    const open = await screen.findByRole("button", { name: "New task" });
+    fireEvent.click(open);
+    expect(last(leads)?.label).toBe("Cancel");
+    fireEvent.click(open);
+    expect(screen.queryByRole("form", { name: "New task" })).not.toBeInTheDocument();
+    expect(last(leads)).toBeNull();
   });
 });
