@@ -7,6 +7,12 @@
       "description": "Unique id of the task."
     },
     {
+      "name": "factoryId",
+      "type": "String",
+      "isArray": false,
+      "description": "Id of the factory the task belongs to."
+    },
+    {
       "name": "title",
       "type": "String",
       "isArray": false,

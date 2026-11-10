@@ -14,7 +14,11 @@ const MATRIX = {
   FactoryRun: { read: ['factory-owner', 'factory-core'], insert: ['factory-core'], edit: ['factory-core'] },
   FactoryEvent: { read: ['factory-owner', 'factory-core'], insert: ['factory-owner', 'factory-core'] },
   FactorySpike: { read: ['factory-core'], insert: ['factory-core'], delete: ['factory-core'] },
+  FactoryDef: { read: ['factory-owner', 'factory-core'], insert: ['factory-owner'], edit: ['factory-owner'] },
+  FactoryRepo: { read: ['factory-owner', 'factory-core'], insert: ['factory-owner'], edit: ['factory-owner'] },
+  FactoryHealth: { read: ['factory-owner', 'factory-core'], insert: ['factory-core'], edit: ['factory-core'] },
 };
+const CLS_FIELDS = ['title', 'description', 'repo', 'baseBranch', 'gateOverrides', 'factoryId'];
 
 type Policy = { schemaName: string; policyName: string; policyType: number; operation: number; fieldNames: unknown[]; ruleGroup: { rules: { staticValue: string[] }[] } };
 type Rules = { security: { schemaName: string; operation: number; policyType: number; accessLevel: number; fieldNames: string[] }[]; policies: Policy[] };
@@ -22,7 +26,7 @@ type Rules = { security: { schemaName: string; operation: number; policyType: nu
 describe('blocks schema', () => {
   it('ACCESS equals the matrix', () => {
     expect(ACCESS).toEqual(MATRIX);
-    expect(TABLES).toHaveLength(7);
+    expect(TABLES).toHaveLength(10);
     expect(collectionOf('FactoryTask')).toBe('FactoryTasks');
   });
 
@@ -32,7 +36,7 @@ describe('blocks schema', () => {
     expect(new Set(deletes)).toEqual(new Set(['FactorySpike']));
     const rowLevel = rules.policies.filter(p => p.policyType === 0);
     expect(rowLevel.every(p => Array.isArray(p.fieldNames) && p.fieldNames.length === 0)).toBe(true);
-    expect(rules.security.filter(e => e.policyType === 0)).toHaveLength(7 * 4);
+    expect(rules.security.filter(e => e.policyType === 0)).toHaveLength(10 * 4);
     expect(rules.policies.map(p => p.policyName)).toContain('factory-task-edit-factory-core');
     expect(rules.policies.map(p => p.policyName)).toContain('factory-settings-insert-factory-owner');
   });
@@ -45,15 +49,15 @@ describe('blocks schema', () => {
     expect(actual).toEqual(expected);
   });
 
-  it('exactly one column write rule: owner-only CLS EDIT on the five protected fields, none for the core', () => {
+  it('exactly one column write rule: owner-only CLS EDIT on the six protected fields (factoryId included), none for the core', () => {
     const rules = generateRules() as Rules;
     const cls = rules.policies.filter(p => p.policyType === 1);
     expect(cls).toHaveLength(1);
-    expect(cls[0]).toMatchObject({ schemaName: 'FactoryTask', policyName: 'factory-task-edit-fields-factory-owner', operation: 2, isAllowPolicy: true, fieldNames: ['title', 'description', 'repo', 'baseBranch', 'gateOverrides'] });
+    expect(cls[0]).toMatchObject({ schemaName: 'FactoryTask', policyName: 'factory-task-edit-fields-factory-owner', operation: 2, isAllowPolicy: true, fieldNames: CLS_FIELDS });
     expect(cls[0]!.ruleGroup.rules.map(r => r.staticValue)).toEqual([['factory-owner']]);
     expect(JSON.stringify(cls[0])).not.toContain('factory-core');
-    expect(rules.security).toHaveLength(29);
-    expect(rules.security.filter(e => e.policyType === 1)).toEqual([{ schemaName: 'FactoryTask', operation: 2, policyType: 1, accessLevel: 3, fieldNames: ['title', 'description', 'repo', 'baseBranch', 'gateOverrides'] }]);
+    expect(rules.security).toHaveLength(41);
+    expect(rules.security.filter(e => e.policyType === 1)).toEqual([{ schemaName: 'FactoryTask', operation: 2, policyType: 1, accessLevel: 3, fieldNames: CLS_FIELDS }]);
     expect(PROTECTED_TASK_FIELDS).toEqual(cls[0]!.fieldNames);
     for (const f of PROTECTED_TASK_FIELDS) expect(FIELDS.FactoryTask.map(x => x.name)).toContain(f);
   });
@@ -65,8 +69,17 @@ describe('blocks schema', () => {
     expect(insertRoles.sort()).toEqual(['factory-core', 'factory-owner']);
     const cls = rules.policies.filter(p => p.policyType === 1);
     expect(cls).toHaveLength(1);
-    expect(cls[0]!.fieldNames).toEqual(['title', 'description', 'repo', 'baseBranch', 'gateOverrides']);
+    expect(cls[0]!.fieldNames).toEqual(CLS_FIELDS);
     expect(cls[0]!.ruleGroup.rules.map(r => r.staticValue)).toEqual([['factory-owner']]);
+  });
+
+  it('factoryId is a field of FactoryTask and FactoryEvent; definitions are owner-written, health core-written', () => {
+    for (const table of ['FactoryTask', 'FactoryEvent'] as const) expect(FIELDS[table].map(f => f.name)).toContain('factoryId');
+    const rules = generateRules() as Rules;
+    const roles = (schema: string, operation: number) => rules.policies.filter(p => p.schemaName === schema && p.policyType === 0 && p.operation === operation).map(p => p.ruleGroup.rules[0]!.staticValue[0]);
+    for (const table of ['FactoryDef', 'FactoryRepo']) expect([roles(table, 1), roles(table, 2)]).toEqual([['factory-owner'], ['factory-owner']]);
+    expect([roles('FactoryHealth', 1), roles('FactoryHealth', 2)]).toEqual([['factory-core'], ['factory-core']]);
+    for (const table of ['FactoryDef', 'FactoryRepo', 'FactoryHealth']) expect(roles(table, 3)).toEqual([]);
   });
 
   it('protected and core task fields are disjoint', () => {
@@ -81,7 +94,10 @@ describe('blocks schema', () => {
     const indexes = generateIndexes() as { schemaName: string; fields: string[]; name: string }[];
     expect(indexes).toContainEqual({ schemaName: 'FactoryTask', fields: ['taskId'], name: 'factory_task_taskid_unique' });
     for (const i of indexes) expect(i.name).toBe(`factory_${i.schemaName.replace('Factory', '').toLowerCase()}_${i.fields[0]!.toLowerCase()}_unique`);
-    expect(indexes).toHaveLength(7);
+    expect(indexes).toHaveLength(10);
+    expect(indexes).toContainEqual({ schemaName: 'FactoryDef', fields: ['factoryId'], name: 'factory_def_factoryid_unique' });
+    expect(indexes).toContainEqual({ schemaName: 'FactoryRepo', fields: ['repoKey'], name: 'factory_repo_repokey_unique' });
+    expect(indexes).toContainEqual({ schemaName: 'FactoryHealth', fields: ['factoryId'], name: 'factory_health_factoryid_unique' });
   });
 
   it('--check passes against the committed files', () => {

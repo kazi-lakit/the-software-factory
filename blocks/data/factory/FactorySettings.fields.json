@@ -4,7 +4,7 @@
       "name": "scope",
       "type": "String",
       "isArray": false,
-      "description": "Unique scope: global or a repo id."
+      "description": "Unique scope: a factory id, or <factoryId>/<repoId>."
     },
     {
       "name": "json",

@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import type { BoardStore, RepoId, Status, Task } from "@factory/core";
 import { BlocksStore } from "../../../core/src/blocks/store";
 import { FakeBlocksData, newFakeStorage } from "../../../core/src/blocks/fakeData";
-import { seed } from "../../../core/test/factoryFixtures";
+import { seed, seedBlocksFactories } from "../../../core/test/factoryFixtures";
 import { REPO_IDS } from "../lib/repoIds";
 
 type FakeBoard = { owner: BlocksStore; core: BlocksStore; ownerData: FakeBlocksData };
@@ -19,9 +19,10 @@ export function resetFakeBoard(): FakeBoard {
   // plan 6 Task 7/8 replaces this: the factory and its repos come from the store.
   const factories = seed("blocks", [...REPO_IDS]);
   const ownerData = new FakeBlocksData("factory-owner", { storage });
+  seedBlocksFactories(ownerData, factories);
   current = {
-    core: new BlocksStore(new FakeBlocksData("factory-core", { storage }), "core", { factories }),
-    owner: new BlocksStore(ownerData, "owner", { factories }),
+    core: new BlocksStore(new FakeBlocksData("factory-core", { storage }), "core"),
+    owner: new BlocksStore(ownerData, "owner"),
     ownerData
   };
   return current;

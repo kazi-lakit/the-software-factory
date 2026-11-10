@@ -1,3 +1,4 @@
+import type { FakeBlocksData } from '../src/blocks/fakeData.js';
 import type { FactoryDef, FactoryRepo } from '../src/factories.js';
 
 export const checksFixture = {
@@ -19,3 +20,19 @@ export const repoFixture = (factoryId: string, repoId: string, over: Partial<Fac
 export const seed = (factoryId = 'blocks', repos: string[] = ['data', 'iam', 'os']) => ({
   defs: [defFixture(factoryId)], repos: repos.map((r) => repoFixture(factoryId, r)),
 });
+
+/** Stores the definitions as rows in a fake Blocks project (as the Board's owner would have saved them). */
+export function seedBlocksFactories(data: FakeBlocksData, factories: { defs: FactoryDef[]; repos: FactoryRepo[] }): void {
+  for (const d of factories.defs) {
+    data.seed('FactoryDef', {
+      factoryId: d.factoryId, name: d.name, protectedBranches: JSON.stringify(d.protectedBranches), gitName: d.gitName, gitEmail: d.gitEmail,
+      docsPath: d.docsPath, patAccount: d.patAccount, active: d.active ? 1 : 0, version: d.version, writeId: '',
+    });
+  }
+  for (const r of factories.repos) {
+    data.seed('FactoryRepo', {
+      repoKey: `${r.factoryId}/${r.repoId}`, factoryId: r.factoryId, repoId: r.repoId, remote: r.remote, baseBranch: r.baseBranch,
+      checks: JSON.stringify(r.checks), version: r.version, writeId: '',
+    });
+  }
+}

@@ -38,7 +38,7 @@ describe('runGate', () => {
     // Rows the gate inserts directly can be updated: version 1, empty writeId.
     // The settings row is nulled afterwards so getSettings skips it.
     expect(owner.rows('FactorySettings')[0]).toMatchObject({ json: 'null' });
-    expect(await deps.ownerStore.getSettings()).toEqual({ factories: { blocks: { factory: expect.anything(), repos: {} } } });
+    expect(await deps.ownerStore.getSettings()).toEqual({ factories: {} });
   });
 
   it('step 11 passes when the column rule holds: refusal leaves the row unchanged', async () => {
@@ -53,7 +53,7 @@ describe('runGate', () => {
   it('step 11 FAILs with a strip-build hint when core title edits are not refused', async () => {
     const { deps, lines, owner } = setup({ columnRule: false });
     expect(await runGate(deps)).toBe(false);
-    expect(lines.filter((l) => l.includes('FAIL') && !l.startsWith(' ')).map((l) => l.split(' ')[0])).toEqual(['2', '11']);
+    expect(lines.filter((l) => l.includes('FAIL') && !l.startsWith(' ')).map((l) => l.split(' ')[0])).toEqual(['2', '11', '15']);
     expect(lines.find((l) => l.startsWith('  11a'))).toContain('column rule not enforced (strip build?)');
     expect(lines.filter((l) => l.startsWith('  11') && l.endsWith(': pass')).map((l) => l.trim()[2])).toEqual(['b', 'c', 'd']);
     expect(owner.rows('FactoryTask').find((r) => r.taskId === 'GATE-abcd1234-cols')).toMatchObject({ status: 'cancelled' });
@@ -76,6 +76,45 @@ describe('runGate', () => {
     expect(lines.filter((l) => l.includes('FAIL') && !l.startsWith(' ')).map((l) => l.split(' ')[0])).toEqual(['12']);
     expect(lines.find((l) => l.startsWith('12 '))).toContain('question was not cleared to null');
     expect(owner.rows('FactoryTask').find((r) => r.taskId === 'GATE-abcd1234-null')).toMatchObject({ status: 'cancelled' });
+  });
+
+  it('steps 13 to 15 leave only GATE- rows in the factory tables and nothing live', async () => {
+    const { deps, owner, lines } = setup();
+    expect(await runGate(deps)).toBe(true);
+    expect(lines).toContain('13 FactoryDef and FactoryRepo: core insert and edit forbidden, owner insert and edit ok: pass');
+    expect(owner.rows('FactoryDef')).toMatchObject([{ factoryId: 'GATE-abcd1234', name: 'gate owner', active: 0, version: 2 }]);
+    expect(owner.rows('FactoryRepo')).toMatchObject([{ repoKey: 'GATE-abcd1234/gate', remote: 'gate owner', version: 2 }]);
+    expect(owner.rows('FactoryHealth')).toMatchObject([{ factoryId: 'GATE-abcd1234', patPresent: 1, version: 2 }]);
+    expect(owner.rows('FactoryTask').find((r) => r.taskId === 'GATE-abcd1234-fid')).toMatchObject({ factoryId: 'blocks', status: 'cancelled', version: 1 });
+    // No real factory can have such an id, so the core skips the rows.
+    expect((await deps.coreStore.listFactoryDefs()).every((x) => x.factoryId.startsWith('GATE-'))).toBe(true);
+    expect((await new BlocksStore(deps.core, 'core').listFactoryDefs())[0]!.factoryId).toMatch(/^GATE-/);
+  });
+
+  it('step 13 FAILs when the core may insert a FactoryDef', async () => {
+    const { deps, lines } = setup({ grantCore: ['FactoryDef', 'insert'] });
+    expect(await runGate(deps)).toBe(false);
+    expect(lines.filter((l) => l.includes('FAIL')).map((l) => l.split(' ')[0])).toEqual(['13']);
+  });
+
+  it('step 13 FAILs when a denied core edit of a FactoryRepo would land', async () => {
+    const { deps, lines } = setup({ grantCore: ['FactoryRepo', 'edit'] });
+    expect(await runGate(deps)).toBe(false);
+    expect(lines.filter((l) => l.includes('FAIL')).map((l) => l.split(' ')[0])).toEqual(['13']);
+  });
+
+  it('step 14 FAILs when the owner may insert FactoryHealth', async () => {
+    const { deps, lines } = setup();
+    (deps.owner as FakeBlocksData).grant('FactoryHealth', 'insert');
+    expect(await runGate(deps)).toBe(false);
+    expect(lines.filter((l) => l.includes('FAIL')).map((l) => l.split(' ')[0])).toEqual(['14']);
+  });
+
+  it('step 15 FAILs when the column rule lacks factoryId', async () => {
+    const { deps, lines, owner } = setup({ columnRule: false });
+    expect(await runGate(deps)).toBe(false);
+    expect(lines.find((l) => l.startsWith('15 '))).toContain('FAIL');
+    expect(owner.rows('FactoryTask').find((r) => r.taskId === 'GATE-abcd1234-fid')).toMatchObject({ factoryId: 'gate-other' });
   });
 
   it('prints labels only, never row values', async () => {

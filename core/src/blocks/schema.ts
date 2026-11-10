@@ -1,6 +1,6 @@
 // Board tables, indexes and access rules as code. `tools/blocks-resources.ts` renders these into the
 // files the `blocks` CLI deploys. Ported from ACR's tools/blocks-store/resources.ts.
-export const TABLES = ['FactoryTask', 'FactoryDoc', 'FactoryApproval', 'FactorySettings', 'FactoryRun', 'FactoryEvent', 'FactorySpike'] as const;
+export const TABLES = ['FactoryTask', 'FactoryDoc', 'FactoryApproval', 'FactorySettings', 'FactoryRun', 'FactoryEvent', 'FactorySpike', 'FactoryDef', 'FactoryRepo', 'FactoryHealth'] as const;
 export type SchemaName = (typeof TABLES)[number];
 export type Role = 'factory-owner' | 'factory-core';
 export type Operation = 'read' | 'insert' | 'edit' | 'delete';
@@ -12,7 +12,7 @@ const i = (name: string, description: string): Field => ({ name, type: 'Int', de
 /** Only String and Int: objects and decimals are JSON or decimal text in a String field. */
 export const FIELDS: Record<SchemaName, Field[]> = {
   FactoryTask: [
-    s('taskId', 'Unique id of the task.'), s('title', 'Task title.'), s('description', 'Task description.'), s('repo', 'Repo id the task targets.'),
+    s('taskId', 'Unique id of the task.'), s('factoryId', 'Id of the factory the task belongs to.'), s('title', 'Task title.'), s('description', 'Task description.'), s('repo', 'Repo id the task targets.'),
     s('baseBranch', 'Branch the task branches from.'), s('status', 'Task status.'), s('stage', 'Current pipeline stage.'), s('branch', 'Task branch name.'),
     s('prUrl', 'Pull request URL.'), s('blockedReason', 'Why the task is blocked.'), s('question', 'Open question for the owner.'), s('answer', 'Owner answer to the question.'),
     s('gateOverrides', 'JSON text of the gate overrides.'), s('claimBy', 'Worker that holds the claim.'), s('claimUntil', 'ISO time the claim expires.'),
@@ -27,7 +27,7 @@ export const FIELDS: Record<SchemaName, Field[]> = {
     i('docVersion', 'Document version approved.'), s('decision', 'Approval decision.'), s('comment', 'Reviewer comment.'), s('at', 'ISO time of the decision.'),
   ],
   FactorySettings: [
-    s('scope', 'Unique scope: global or a repo id.'), s('json', 'JSON text of the Settings or RepoSettings object.'),
+    s('scope', 'Unique scope: a factory id, or <factoryId>/<repoId>.'), s('json', 'JSON text of the Settings or RepoSettings object.'),
     i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
   ],
   FactoryRun: [
@@ -36,16 +36,32 @@ export const FIELDS: Record<SchemaName, Field[]> = {
     i('turns', 'Number of agent turns.'), s('costUsd', 'Run cost in USD, as decimal text.'), i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
   ],
   FactoryEvent: [
-    s('eventId', 'Unique id: SHA-256 of the event JSON.'), s('taskId', 'Task the event belongs to.'), s('actor', 'Who caused the event.'), s('action', 'What happened.'),
+    s('eventId', 'Unique id: SHA-256 of the event JSON.'), s('taskId', 'Task the event belongs to.'), s('factoryId', 'Id of the factory the event belongs to.'), s('actor', 'Who caused the event.'), s('action', 'What happened.'),
     s('field', 'Field that changed.'), s('from', 'Previous value.'), s('to', 'New value.'), s('reason', 'Why it changed.'), s('at', 'ISO time of the event.'),
   ],
   FactorySpike: [s('spikeKey', 'Unique key of the spike row.'), s('body', 'Spike payload.'), s('bodySha256', 'SHA-256 of the body.')],
+  FactoryDef: [
+    s('factoryId', 'Unique id of the factory.'), s('name', 'Display name.'), s('protectedBranches', 'JSON text of the protected branch names.'),
+    s('gitName', 'Git author name.'), s('gitEmail', 'Git author email.'), s('docsPath', 'Folder the factory writes docs to.'),
+    s('patAccount', 'Keychain account of the factory PAT (never the token).'), i('active', '1 if the factory is active, else 0.'),
+    i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
+  ],
+  FactoryRepo: [
+    s('repoKey', 'Unique key: factoryId/repoId.'), s('factoryId', 'Factory the repo belongs to.'), s('repoId', 'Repo id, unique within its factory.'),
+    s('remote', 'Git remote of the repo.'), s('baseBranch', 'Branch tasks branch from.'), s('checks', 'JSON text of the repo checks.'),
+    i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
+  ],
+  FactoryHealth: [
+    s('factoryId', 'Unique id of the factory.'), i('patPresent', '1 if the factory PAT was found, else 0.'), s('checkedAt', 'ISO time of the check.'),
+    i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
+  ],
 };
 
 /** Each listed field is its own single-field unique index. */
 export const UNIQUE: Record<SchemaName, string[]> = {
   FactoryTask: ['taskId'], FactoryDoc: ['docKey'], FactoryApproval: ['approvalId'], FactorySettings: ['scope'],
   FactoryRun: ['runId'], FactoryEvent: ['eventId'], FactorySpike: ['spikeKey'],
+  FactoryDef: ['factoryId'], FactoryRepo: ['repoKey'], FactoryHealth: ['factoryId'],
 };
 
 const both: Role[] = ['factory-owner', 'factory-core'];
@@ -58,6 +74,9 @@ export const ACCESS: Record<SchemaName, Partial<Record<Operation, Role[]>>> = {
   FactoryRun: { read: both, insert: ['factory-core'], edit: ['factory-core'] },
   FactoryEvent: { read: both, insert: both },
   FactorySpike: { read: ['factory-core'], insert: ['factory-core'], delete: ['factory-core'] },
+  FactoryDef: { read: both, insert: ['factory-owner'], edit: ['factory-owner'] },
+  FactoryRepo: { read: both, insert: ['factory-owner'], edit: ['factory-owner'] },
+  FactoryHealth: { read: both, insert: ['factory-core'], edit: ['factory-core'] },
 };
 
 // Operation numbers follow the Blocks probe entries.
@@ -70,7 +89,7 @@ const OPERATIONS: { key: Operation; number: number; verb: string }[] = [
  * FactoryTask fields only factory-owner may change. A column write rule (CLS, EDIT) makes Blocks refuse a core
  * update that changes one of them. Must stay disjoint from the store's CORE_TASK_FIELDS.
  */
-export const PROTECTED_TASK_FIELDS: readonly string[] = ['title', 'description', 'repo', 'baseBranch', 'gateOverrides'];
+export const PROTECTED_TASK_FIELDS: readonly string[] = ['title', 'description', 'repo', 'baseBranch', 'gateOverrides', 'factoryId'];
 
 export const collectionOf = (schema: SchemaName): string => `${schema}s`;
 const kebab = (schema: SchemaName) => schema.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();

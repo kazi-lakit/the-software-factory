@@ -7,12 +7,11 @@ import {
 import { DEFAULT_SETTINGS } from '../../src/defaults.js';
 import { CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, RereadAfterUpdateError, VersionConflictError } from '../../src/store.js';
 import { PROTECTED_TASK_FIELDS } from '../../src/blocks/schema.js';
-import { seed } from '../factoryFixtures.js';
+import { defFixture, repoFixture, seedBlocksFactories } from '../factoryFixtures.js';
 import { runStoreContract } from '../storeContract.js';
 
 // R1: the contract suite runs on role 'any' (owner identity, no access checks).
-// plan 6 Task 3 turns the factory part of the contract on for BlocksStore.
-runStoreContract('BlocksStore', () => new BlocksStore(new FakeBlocksData('any'), 'owner'), { factories: false });
+runStoreContract('BlocksStore', (identity) => new BlocksStore(new FakeBlocksData('any'), identity ?? 'owner'));
 
 /** Counts every BlocksData call, and updates on their own. */
 function counting(inner: BlocksData): BlocksData & { calls: number; updates: number } {
@@ -47,19 +46,154 @@ describe('BlocksStore hashes (golden values from the node:crypto implementation)
     const insert = data.insert.bind(data);
     data.insert = (async (schema: any, values: any, ...rest: any[]) => { inserted.push({ schema, ...values }); return (insert as any)(schema, values, ...rest); }) as any;
     await new BlocksStore(data, 'owner').addEvents([event]);
-    expect(inserted.find((r) => r.schema === 'FactoryEvent')!.eventId).toBe('a788f3848b0058c3ca1487971ad0d9e1d3404e8ab4335722e28e3c0f75c642dc');
+    expect(inserted.find((r) => r.schema === 'FactoryEvent')!.eventId).toBe('2e1b4ba5b86e791a6487ecfb04898fe34196032ebccdbba9d54bc3ade93b370e');
   });
 });
 
-describe('BlocksStore until plan 6 Task 3', () => {
-  it('lists only the factories it was given and does not store factories, health or other factories\' tasks', async () => {
-    const s = new BlocksStore(new FakeBlocksData('any'), 'owner', { factories: seed('blocks', ['data']) });
-    expect((await s.listFactoryDefs()).map((d) => d.factoryId)).toEqual(['blocks']);
-    expect((await s.listFactoryRepos('blocks')).map((r) => r.repoId)).toEqual(['data']);
-    expect(await s.listFactoryRepos('delta')).toEqual([]);
-    await expect(s.saveFactoryDef(null, seed().defs[0]!)).rejects.toThrow('not implemented');
-    await expect(s.createTask({ factoryId: 'delta', title: 't', description: '', repo: 'api' })).rejects.toThrow('not implemented');
-    await expect(s.updateSettingsScope('delta', undefined, null)).rejects.toThrow('not implemented');
+describe('BlocksStore factories', () => {
+  const stored = async (data: FakeBlocksData) => {
+    const s = new BlocksStore(data, 'owner');
+    return { s, def: await s.saveFactoryDef(null, defFixture('delta')), repo: await s.saveFactoryRepo(null, repoFixture('delta', 'api')) };
+  };
+
+  it('stores a def and a repo in their tables: lists and checks as JSON text, active as 1/0, the repo under its key', async () => {
+    const data = new FakeBlocksData('any');
+    const { s, def, repo } = await stored(data);
+    expect(data.rows('FactoryDef')[0]).toMatchObject({
+      factoryId: 'delta', protectedBranches: '["dev","stg","main"]', active: 1, version: 1, patAccount: 'github-pat:delta',
+    });
+    expect(data.rows('FactoryRepo')[0]).toMatchObject({ repoKey: 'delta/api', factoryId: 'delta', repoId: 'api', version: 1 });
+    expect(JSON.parse(String(data.rows('FactoryRepo')[0]!.checks))).toEqual(repo.checks);
+    await s.saveFactoryDef(def, { ...def, active: false, gitName: '' });
+    expect(data.rows('FactoryDef')[0]).toMatchObject({ active: 0, gitName: '', version: 2 });
+    expect(await s.listFactoryDefs()).toEqual([{ ...def, active: false, gitName: '', version: 2 }]);
+  });
+
+  it('a repo id may exist in two factories: they are two rows', async () => {
+    const s = new BlocksStore(new FakeBlocksData('any'), 'owner');
+    await s.saveFactoryRepo(null, repoFixture('delta', 'api'));
+    await s.saveFactoryRepo(null, repoFixture('mods', 'api'));
+    expect((await s.listFactoryRepos()).map((r) => `${r.factoryId}/${r.repoId}`)).toEqual(['delta/api', 'mods/api']);
+  });
+
+  it('a stale or missing before is a VersionConflictError, and the row is unchanged', async () => {
+    const data = new FakeBlocksData('any');
+    const { s, def, repo } = await stored(data);
+    await s.saveFactoryDef(def, { ...def, name: 'first' });
+    await s.saveFactoryRepo(repo, { ...repo, remote: 'first' });
+    await expect(s.saveFactoryDef(def, { ...def, name: 'x' })).rejects.toBeInstanceOf(VersionConflictError);
+    await expect(s.saveFactoryRepo(repo, { ...repo, remote: 'x' })).rejects.toBeInstanceOf(VersionConflictError);
+    await expect(s.saveFactoryDef(null, def)).rejects.toBeInstanceOf(VersionConflictError);
+    expect(data.rows('FactoryDef')[0]).toMatchObject({ name: 'first', version: 2 });
+    expect(data.rows('FactoryRepo')[0]).toMatchObject({ remote: 'first', version: 2 });
+  });
+
+  it('a lost insert reply still returns the saved def', async () => {
+    const data = new FakeBlocksData('any');
+    data.failNextReply('insert', 'FactoryDef');
+    const s = new BlocksStore(data, 'owner');
+    await expect(s.saveFactoryDef(null, defFixture('delta'))).resolves.toMatchObject({ factoryId: 'delta', version: 1 });
+    expect(data.rows('FactoryDef')).toHaveLength(1);
+  });
+
+  it('a def row without a version cannot be saved', async () => {
+    const data = new FakeBlocksData('any');
+    data.seed('FactoryDef', { factoryId: 'old', name: 'Old', protectedBranches: '["main"]', active: 1 });
+    await expect(new BlocksStore(data, 'owner').saveFactoryDef({ ...defFixture('old'), version: 0 }, defFixture('old'))).rejects.toBeInstanceOf(MissingVersionError);
+  });
+
+  it('the core may not save defs or repos (before any data call); the owner may not set health', async () => {
+    const data = counting(new FakeBlocksData('factory-core'));
+    const core = new BlocksStore(data, 'core');
+    await expect(core.saveFactoryDef(null, defFixture('delta'))).rejects.toBeInstanceOf(OwnerOnlyError);
+    await expect(core.saveFactoryRepo(null, repoFixture('delta', 'api'))).rejects.toBeInstanceOf(OwnerOnlyError);
+    expect(data.calls).toBe(0);
+    const owner = new BlocksStore(counting(new FakeBlocksData('factory-owner')), 'owner');
+    await expect(owner.setFactoryHealth({ factoryId: 'delta', patPresent: true, checkedAt: 't' })).rejects.toBeInstanceOf(OwnerOnlyError);
+  });
+
+  it('under the access rules the core reads defs and writes health, the owner writes defs and reads health', async () => {
+    const storage = newFakeStorage();
+    const owner = new BlocksStore(new FakeBlocksData('factory-owner', { storage }), 'owner');
+    const core = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core');
+    await owner.saveFactoryDef(null, defFixture('delta'));
+    expect((await core.listFactoryDefs()).map((d) => d.factoryId)).toEqual(['delta']);
+    await core.setFactoryHealth({ factoryId: 'delta', patPresent: false, checkedAt: 'a' });
+    await core.setFactoryHealth({ factoryId: 'delta', patPresent: true, checkedAt: 'b' });
+    expect(await owner.listFactoryHealth()).toEqual([{ factoryId: 'delta', patPresent: true, checkedAt: 'b' }]);
+    expect(storage.tables.get('FactoryHealth')).toHaveLength(1);
+  });
+
+  it('tasks and events store their factoryId; rows without one read as factory blocks', async () => {
+    const data = new FakeBlocksData('any');
+    const s = new BlocksStore(data, 'owner');
+    await s.createTask({ factoryId: 'delta', title: 't', description: '', repo: 'api' });
+    expect(data.rows('FactoryTask')[0]).toMatchObject({ factoryId: 'delta' });
+    await s.addEvents([{ ...event, factoryId: 'delta' }]);
+    expect(data.rows('FactoryEvent')[0]).toMatchObject({ factoryId: 'delta' });
+    data.seed('FactoryTask', { taskId: 'T-9', title: 'old', description: '', repo: 'data', baseBranch: 'dev', status: 'inbox', version: 1 });
+    data.seed('FactoryEvent', { eventId: 'old', taskId: 'T-9', actor: 'x', action: 'move', reason: '', at: '2026-01-01T00:00:00.000Z' });
+    expect((await s.getTask('T-9')).factoryId).toBe('blocks');
+    expect((await s.listEvents('T-9'))[0]!.factoryId).toBe('blocks');
+  });
+
+  it('identical events in two factories do not collide; a retried one is still one row', async () => {
+    const data = new FakeBlocksData('any');
+    const s = new BlocksStore(data, 'owner');
+    await s.addEvents([{ ...event, taskId: '-', factoryId: 'delta' }, { ...event, taskId: '-', factoryId: 'mods' }, { ...event, taskId: '-', factoryId: 'delta' }]);
+    expect(data.rows('FactoryEvent').map((r) => r.factoryId)).toEqual(['delta', 'mods']);
+  });
+
+  it('a core patch of factoryId is refused; the owner may', async () => {
+    const data = new FakeBlocksData('any');
+    const owner = new BlocksStore(data, 'owner');
+    const t = await owner.createTask({ factoryId: 'blocks', title: 't', description: '', repo: 'data' });
+    await expect(new BlocksStore(data, 'core').updateTask(t.taskId, 1, { factoryId: 'x' })).rejects.toBeInstanceOf(CoreFieldError);
+    await expect(owner.updateTask(t.taskId, 1, { factoryId: 'x' })).resolves.toMatchObject({ factoryId: 'x' });
+  });
+
+  describe('legacy settings rows (until `migrate` runs)', () => {
+    const legacy = () => {
+      const data = new FakeBlocksData('any');
+      data.seed('FactorySettings', { scope: 'global', json: JSON.stringify({ paused: true }), version: 1 });
+      data.seed('FactorySettings', { scope: 'data', json: JSON.stringify({ maxParallel: 1 }), version: 3 });
+      data.seed('FactorySettings', { scope: 'os', json: 'null', version: 2 });
+      return { data, s: new BlocksStore(data, 'owner') };
+    };
+
+    it('global is factory blocks, any other scope a repo of blocks', async () => {
+      const { s } = legacy();
+      expect(await s.getSettings()).toEqual({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: { data: { maxParallel: 1 } } } } });
+    });
+
+    it('a new-scope row wins over the legacy one; a write uses the new scope and leaves the legacy rows alone', async () => {
+      const { s, data } = legacy();
+      await s.updateSettingsScope('blocks/data', { maxParallel: 1 }, { maxParallel: 2 });
+      await s.updateSettingsScope('blocks', { ...DEFAULT_SETTINGS, paused: true }, { ...DEFAULT_SETTINGS, maxParallel: 4 });
+      expect((await s.getSettings()).factories.blocks).toEqual({ factory: { ...DEFAULT_SETTINGS, maxParallel: 4 }, repos: { data: { maxParallel: 2 } } });
+      expect(data.rows('FactorySettings').map((r) => [r.scope, r.json])).toEqual([
+        ['global', '{"paused":true}'], ['data', '{"maxParallel":1}'], ['os', 'null'],
+        ['blocks/data', '{"maxParallel":2}'], ['blocks', JSON.stringify({ ...DEFAULT_SETTINGS, maxParallel: 4 })],
+      ]);
+    });
+
+    it('removing a legacy repo scope shadows it with a null row', async () => {
+      const { s } = legacy();
+      await s.updateSettingsScope('blocks/data', { maxParallel: 1 }, null);
+      expect((await s.getSettings()).factories.blocks!.repos).toEqual({});
+    });
+
+    it('a factory with that id makes the scope its factory scope, not a legacy repo', async () => {
+      const { s, data } = legacy();
+      seedBlocksFactories(data, { defs: [defFixture('data')], repos: [] });
+      expect((await s.getSettings()).factories).toMatchObject({ data: { factory: { ...DEFAULT_SETTINGS, maxParallel: 1 } }, blocks: { repos: {} } });
+    });
+
+    it('setSettings writes new scopes and hides legacy repo scopes that are left out', async () => {
+      const { s } = legacy();
+      await s.setSettings({ factories: { blocks: { factory: DEFAULT_SETTINGS, repos: {} } } });
+      expect(await s.getSettings()).toEqual({ factories: { blocks: { factory: DEFAULT_SETTINGS, repos: {} } } });
+    });
   });
 });
 
@@ -158,7 +292,7 @@ describe('BlocksStore', () => {
     const insert = data.insert.bind(data);
     data.insert = async (schema, row) => {
       data.insert = insert;
-      await insert('FactorySettings', { scope: 'data', json: '{"maxParallel":5}', version: 1 });
+      await insert('FactorySettings', { scope: 'blocks/data', json: '{"maxParallel":5}', version: 1 });
       return insert(schema, row);
     };
     await expect(s.updateSettingsScope('blocks/data', undefined, { maxParallel: 1 })).rejects.toBeInstanceOf(VersionConflictError);
@@ -172,7 +306,7 @@ describe('BlocksStore', () => {
     const update = data.update.bind(data);
     data.update = async (schema, filter, input) => {
       data.update = update;
-      await update('FactorySettings', { scope: 'data' }, { json: '{"maxParallel":7}', version: 2 });
+      await update('FactorySettings', { scope: 'blocks/data' }, { json: '{"maxParallel":7}', version: 2 });
       return update(schema, filter, input);
     };
     await expect(s.updateSettingsScope('blocks/data', { maxParallel: 1 }, { maxParallel: 2 })).rejects.toBeInstanceOf(VersionConflictError);
@@ -190,7 +324,7 @@ describe('BlocksStore', () => {
     await s.setSettings({ factories: { blocks: { factory: DEFAULT_SETTINGS, repos: {} } } });
     await s.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } });
     expect(data.rows('FactorySettings')).toHaveLength(1);
-    expect(data.rows('FactorySettings')[0]).toMatchObject({ scope: 'global', version: 2 });
+    expect(data.rows('FactorySettings')[0]).toMatchObject({ scope: 'blocks', version: 2 });
   });
 
   it('a column refusal is final: ForbiddenError after exactly one send, row unchanged', async () => {
@@ -216,7 +350,7 @@ describe('BlocksStore', () => {
   it('a row with a null version is refused before any update is sent', async () => {
     const fake = new FakeBlocksData('any');
     fake.seed('FactoryTask', { taskId: 'T-1', title: 't', status: 'inbox' });
-    fake.seed('FactorySettings', { scope: 'global', json: '{}' });
+    fake.seed('FactorySettings', { scope: 'blocks', json: '{}' });
     fake.seed('FactoryRun', { runId: 'R-1', taskId: 'T-1', step: 'spec' });
     const data = counting(fake);
     const s = new BlocksStore(data, 'owner');
@@ -227,7 +361,7 @@ describe('BlocksStore', () => {
     await expect(s.updateTask('T-1', t.version, { status: 'ready' })).rejects.toThrow(
       'FactoryTask row T-1 has no version; rows made outside the factory must set version 1',
     );
-    await expect(s.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } })).rejects.toThrow('FactorySettings row global has no version');
+    await expect(s.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } })).rejects.toThrow('FactorySettings row blocks has no version');
     await expect(s.finishRun('R-1', { result: 'done', turns: null, costUsd: null })).rejects.toThrow('FactoryRun row R-1 has no version');
     expect(data.updates).toBe(0);
   });

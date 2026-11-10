@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
-import { seed } from './factoryFixtures.js';
+import { seed, seedBlocksFactories } from './factoryFixtures.js';
 import type { Exec } from '../src/checks.js';
 import { run, type WireOptions } from '../src/cli.js';
 import { Engine } from '../src/engine.js';
@@ -351,7 +351,9 @@ describe('new', () => {
 
   test('works with a BlocksStore (core identity)', async () => {
     const storage = newFakeStorage();
-    const store = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core', { factories: seed() });
+    const data = new FakeBlocksData('factory-core', { storage });
+    seedBlocksFactories(data, seed());
+    const store = new BlocksStore(data, 'core');
     const out: string[] = [];
     const engine = new Engine({
       store, git, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,

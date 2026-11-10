@@ -1,0 +1,34 @@
+{
+  "fields": [
+    {
+      "name": "factoryId",
+      "type": "String",
+      "isArray": false,
+      "description": "Unique id of the factory."
+    },
+    {
+      "name": "patPresent",
+      "type": "Int",
+      "isArray": false,
+      "description": "1 if the factory PAT was found, else 0."
+    },
+    {
+      "name": "checkedAt",
+      "type": "String",
+      "isArray": false,
+      "description": "ISO time of the check."
+    },
+    {
+      "name": "version",
+      "type": "Int",
+      "isArray": false,
+      "description": "Row version; bumped on every update."
+    },
+    {
+      "name": "writeId",
+      "type": "String",
+      "isArray": false,
+      "description": "Id of the write that produced this version."
+    }
+  ]
+}

@@ -47,5 +47,26 @@
       "spikeKey"
     ],
     "name": "factory_spike_spikekey_unique"
+  },
+  {
+    "schemaName": "FactoryDef",
+    "fields": [
+      "factoryId"
+    ],
+    "name": "factory_def_factoryid_unique"
+  },
+  {
+    "schemaName": "FactoryRepo",
+    "fields": [
+      "repoKey"
+    ],
+    "name": "factory_repo_repokey_unique"
+  },
+  {
+    "schemaName": "FactoryHealth",
+    "fields": [
+      "factoryId"
+    ],
+    "name": "factory_health_factoryid_unique"
   }
 ]

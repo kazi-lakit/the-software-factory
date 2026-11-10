@@ -11,7 +11,7 @@ import {
   answerTask, cancelTask, createTask, createTaskAsCore, decideGate, editTask, markReady, OwnerActionError, saveFactory, saveRepo, saveSettings,
   StaleDocError,
 } from '../src/owner.js';
-import { defFixture, repoFixture, seed } from './factoryFixtures.js';
+import { defFixture, repoFixture, seed, seedBlocksFactories } from './factoryFixtures.js';
 import type { RepoConfig } from '../src/repoConfig.js';
 import { IllegalMoveError } from '../src/status.js';
 import { FileStore, MemoryStore, VersionConflictError, type BoardStore } from '../src/store.js';
@@ -28,10 +28,9 @@ const fixtures: [string, () => { owner: BoardStore; core: BoardStore }][] = [
   }],
   ['BlocksStore', () => {
     const storage = newFakeStorage();
-    return {
-      owner: new BlocksStore(new FakeBlocksData('factory-owner', { storage }), 'owner', { factories: seed() }),
-      core: new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core', { factories: seed() }),
-    };
+    const ownerData = new FakeBlocksData('factory-owner', { storage });
+    seedBlocksFactories(ownerData, seed());
+    return { owner: new BlocksStore(ownerData, 'owner'), core: new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core') };
   }],
 ];
 
@@ -550,13 +549,16 @@ describe.each(fixtures)('creating a task checks the factory and its repos (%s)',
     expect(await store.listTasks()).toEqual([]);
   });
 
-  // BlocksStore stores tasks of factory `blocks` only until plan 6 Task 3.
-  test.runIf(_name === 'MemoryStore')('the same repo id in a second factory is its own repo', async () => {
+  test('the same repo id in a second factory is its own repo', async () => {
     const factories = {
       defs: [defFixture('blocks'), defFixture('delta')],
       repos: [repoFixture('blocks', 'data'), repoFixture('delta', 'api')],
     };
-    const owner = new MemoryStore({ factories });
+    const owner: BoardStore = _name === 'MemoryStore' ? new MemoryStore({ factories }) : (() => {
+      const data = new FakeBlocksData('any');
+      seedBlocksFactories(data, factories);
+      return new BlocksStore(data, 'owner');
+    })();
     await expect(createTask(owner, now, { factoryId: 'delta', ...input, repo: 'api' })).resolves.toMatchObject({ factoryId: 'delta', repo: 'api' });
     await expect(createTask(owner, now, { factoryId: 'delta', ...input })).rejects.toThrow('repo data is not in factory delta');
     await expect(createTask(owner, now, { factoryId: 'blocks', ...input })).resolves.toMatchObject({ factoryId: 'blocks', repo: 'data' });

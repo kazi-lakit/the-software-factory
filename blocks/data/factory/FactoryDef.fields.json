@@ -1,0 +1,64 @@
+{
+  "fields": [
+    {
+      "name": "factoryId",
+      "type": "String",
+      "isArray": false,
+      "description": "Unique id of the factory."
+    },
+    {
+      "name": "name",
+      "type": "String",
+      "isArray": false,
+      "description": "Display name."
+    },
+    {
+      "name": "protectedBranches",
+      "type": "String",
+      "isArray": false,
+      "description": "JSON text of the protected branch names."
+    },
+    {
+      "name": "gitName",
+      "type": "String",
+      "isArray": false,
+      "description": "Git author name."
+    },
+    {
+      "name": "gitEmail",
+      "type": "String",
+      "isArray": false,
+      "description": "Git author email."
+    },
+    {
+      "name": "docsPath",
+      "type": "String",
+      "isArray": false,
+      "description": "Folder the factory writes docs to."
+    },
+    {
+      "name": "patAccount",
+      "type": "String",
+      "isArray": false,
+      "description": "Keychain account of the factory PAT (never the token)."
+    },
+    {
+      "name": "active",
+      "type": "Int",
+      "isArray": false,
+      "description": "1 if the factory is active, else 0."
+    },
+    {
+      "name": "version",
+      "type": "Int",
+      "isArray": false,
+      "description": "Row version; bumped on every update."
+    },
+    {
+      "name": "writeId",
+      "type": "String",
+      "isArray": false,
+      "description": "Id of the write that produced this version."
+    }
+  ]
+}

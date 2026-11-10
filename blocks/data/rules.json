@@ -197,6 +197,90 @@
       "fieldNames": []
     },
     {
+      "schemaName": "FactoryDef",
+      "operation": 0,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryDef",
+      "operation": 1,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryDef",
+      "operation": 2,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryDef",
+      "operation": 3,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryRepo",
+      "operation": 0,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryRepo",
+      "operation": 1,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryRepo",
+      "operation": 2,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryRepo",
+      "operation": 3,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryHealth",
+      "operation": 0,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryHealth",
+      "operation": 1,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryHealth",
+      "operation": 2,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryHealth",
+      "operation": 3,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
       "schemaName": "FactoryTask",
       "operation": 2,
       "policyType": 1,
@@ -206,7 +290,8 @@
         "description",
         "repo",
         "baseBranch",
-        "gateOverrides"
+        "gateOverrides",
+        "factoryId"
       ]
     }
   ],
@@ -887,9 +972,309 @@
       "isAllowPolicy": true
     },
     {
+      "schemaName": "FactoryDef",
+      "policyName": "factory-def-read-factory-owner",
+      "policyDescription": "factory-owner reads FactoryDef rows.",
+      "policyType": 0,
+      "operation": 0,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-owner"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryDef",
+      "policyName": "factory-def-read-factory-core",
+      "policyDescription": "factory-core reads FactoryDef rows.",
+      "policyType": 0,
+      "operation": 0,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-core"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryDef",
+      "policyName": "factory-def-insert-factory-owner",
+      "policyDescription": "factory-owner inserts FactoryDef rows.",
+      "policyType": 0,
+      "operation": 1,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-owner"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryDef",
+      "policyName": "factory-def-edit-factory-owner",
+      "policyDescription": "factory-owner edits FactoryDef rows.",
+      "policyType": 0,
+      "operation": 2,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-owner"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryRepo",
+      "policyName": "factory-repo-read-factory-owner",
+      "policyDescription": "factory-owner reads FactoryRepo rows.",
+      "policyType": 0,
+      "operation": 0,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-owner"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryRepo",
+      "policyName": "factory-repo-read-factory-core",
+      "policyDescription": "factory-core reads FactoryRepo rows.",
+      "policyType": 0,
+      "operation": 0,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-core"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryRepo",
+      "policyName": "factory-repo-insert-factory-owner",
+      "policyDescription": "factory-owner inserts FactoryRepo rows.",
+      "policyType": 0,
+      "operation": 1,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-owner"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryRepo",
+      "policyName": "factory-repo-edit-factory-owner",
+      "policyDescription": "factory-owner edits FactoryRepo rows.",
+      "policyType": 0,
+      "operation": 2,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-owner"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryHealth",
+      "policyName": "factory-health-read-factory-owner",
+      "policyDescription": "factory-owner reads FactoryHealth rows.",
+      "policyType": 0,
+      "operation": 0,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-owner"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryHealth",
+      "policyName": "factory-health-read-factory-core",
+      "policyDescription": "factory-core reads FactoryHealth rows.",
+      "policyType": 0,
+      "operation": 0,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-core"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryHealth",
+      "policyName": "factory-health-insert-factory-core",
+      "policyDescription": "factory-core inserts FactoryHealth rows.",
+      "policyType": 0,
+      "operation": 1,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-core"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryHealth",
+      "policyName": "factory-health-edit-factory-core",
+      "policyDescription": "factory-core edits FactoryHealth rows.",
+      "policyType": 0,
+      "operation": 2,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-core"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
       "schemaName": "FactoryTask",
       "policyName": "factory-task-edit-fields-factory-owner",
-      "policyDescription": "Only factory-owner changes title, description, repo, baseBranch, gateOverrides.",
+      "policyDescription": "Only factory-owner changes title, description, repo, baseBranch, gateOverrides, factoryId.",
       "policyType": 1,
       "operation": 2,
       "fieldNames": [
@@ -897,7 +1282,8 @@
         "description",
         "repo",
         "baseBranch",
-        "gateOverrides"
+        "gateOverrides",
+        "factoryId"
       ],
       "ruleGroup": {
         "logicalOperator": 0,

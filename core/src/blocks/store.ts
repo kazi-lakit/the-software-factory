@@ -23,7 +23,7 @@ export const CORE_TASK_FIELDS: readonly (keyof Task)[] = [
 
 type Value = string | number | null;
 const TASK_KEYS = new Set<string>([
-  'title', 'description', 'repo', 'baseBranch', 'gateOverrides', ...CORE_TASK_FIELDS,
+  'factoryId', 'title', 'description', 'repo', 'baseBranch', 'gateOverrides', ...CORE_TASK_FIELDS,
 ]);
 /** A current doc with the same body and author counts as a lost-reply retry only if it was created this recently. */
 export const DOC_RETRY_WINDOW_MS = 120_000;
@@ -59,6 +59,11 @@ export const CLEARABLE_FIELDS: Partial<Record<SchemaName, readonly string[]>> = 
   FactoryRun: ['endedAt', 'result', 'costUsd'],
 };
 
+/** Rows written before plan 6 have no factoryId; they belong to factory `blocks`. */
+const LEGACY_FACTORY = 'blocks';
+/** Settings rows written before plan 6: scope `global` is factory `blocks`, any other scope a repo of it. */
+const LEGACY_FACTORY_SCOPE = 'global';
+
 /** An update input with every clear as ''. A null for any other field (an Int, a required String) cannot be stored. */
 function encodeUpdate(schema: SchemaName, input: Record<string, Value>): Record<string, Value> {
   const out: Record<string, Value> = {};
@@ -90,14 +95,10 @@ function encodeTaskValue(key: keyof Task, value: Task[keyof Task]): Value {
   return value as Value;
 }
 
-/** Until plan 6 Task 3 stores factories in Blocks, every row belongs to factory `blocks`. */
-const BLOCKS_FACTORY = 'blocks';
-const notYet = (what: string) => new Error(`BlocksStore: ${what} is not implemented yet (plan 6 Task 3)`);
-
 function decodeTask(r: Row): Task {
   return {
     taskId: text(r.taskId),
-    factoryId: BLOCKS_FACTORY,
+    factoryId: opt(r.factoryId) ?? LEGACY_FACTORY,
     title: text(r.title),
     description: text(r.description),
     repo: text(r.repo) as RepoId,
@@ -135,13 +136,44 @@ const decodeRun = (r: Row): Run => ({
 });
 
 const decodeEvent = (r: Row): FactoryEvent => ({
-  taskId: text(r.taskId), factoryId: BLOCKS_FACTORY, actor: text(r.actor), action: text(r.action) as FactoryEvent['action'],
+  taskId: text(r.taskId), factoryId: opt(r.factoryId) ?? LEGACY_FACTORY, actor: text(r.actor), action: text(r.action) as FactoryEvent['action'],
   field: str(r.field), from: str(r.from), to: str(r.to), reason: text(r.reason), at: text(r.at),
 });
 
-/** Fixed key order, so a retried event hashes to the same eventId. */
+const decodeBranches = (v: Value | undefined): string[] => {
+  try {
+    const parsed: unknown = JSON.parse(text(v));
+    return Array.isArray(parsed) ? parsed.filter((b): b is string => typeof b === 'string') : [];
+  } catch {
+    return [];
+  }
+};
+
+const decodeDef = (r: Row): FactoryDef => ({
+  factoryId: text(r.factoryId), name: text(r.name), protectedBranches: decodeBranches(r.protectedBranches), gitName: text(r.gitName),
+  gitEmail: text(r.gitEmail), docsPath: text(r.docsPath), patAccount: text(r.patAccount), active: num(r.active) === 1, version: num(r.version),
+});
+
+/** A repo whose checks are not a JSON object decodes with empty checks, which validation then skips. */
+const decodeRepo = (r: Row): FactoryRepo => ({
+  factoryId: text(r.factoryId), repoId: text(r.repoId), remote: text(r.remote), baseBranch: text(r.baseBranch),
+  checks: (parseObject(r.checks) ?? {}) as FactoryRepo['checks'], version: num(r.version),
+});
+
+const decodeHealth = (r: Row): FactoryHealth => ({ factoryId: text(r.factoryId), patPresent: num(r.patPresent) === 1, checkedAt: text(r.checkedAt) });
+
+const encodeDef = (d: FactoryDef): Record<string, Value> => ({
+  name: d.name, protectedBranches: JSON.stringify(d.protectedBranches), gitName: d.gitName, gitEmail: d.gitEmail, docsPath: d.docsPath,
+  patAccount: d.patAccount, active: d.active ? 1 : 0,
+});
+
+const encodeRepo = (r: FactoryRepo): Record<string, Value> => ({ remote: r.remote, baseBranch: r.baseBranch, checks: canonicalJson(r.checks) });
+
+const repoKey = (factoryId: string, repoId: string) => `${factoryId}/${repoId}`;
+
+/** Fixed key order, so a retried event hashes to the same eventId; the factory is part of it, so two factories never collide. */
 const eventId = (e: FactoryEvent) =>
-  sha256(JSON.stringify({ taskId: e.taskId, actor: e.actor, action: e.action, field: e.field, from: e.from, to: e.to, reason: e.reason, at: e.at }));
+  sha256(JSON.stringify({ taskId: e.taskId, factoryId: e.factoryId, actor: e.actor, action: e.action, field: e.field, from: e.from, to: e.to, reason: e.reason, at: e.at }));
 
 const highest = (rows: Row[]): Row | undefined =>
   rows.reduce<Row | undefined>((top, r) => (top === undefined || num(r.version) > num(top.version) ? r : top), undefined);
@@ -158,12 +190,12 @@ type Settled = { kind: 'applied' | 'forbidden' } | { kind: 'conflict' | 'unautho
 const hasVersion = (r: Row): boolean => typeof r.version === 'number';
 
 /**
- * A settings row's value as getSettings gives it: global is merged over the defaults; a repo scope with a null json
- * (removed: rows are never deleted) or a malformed one is undefined.
+ * A settings row's value as getSettings gives it: a factory scope is merged over the defaults; a repo scope with a null
+ * json (removed: rows are never deleted) or a malformed one is undefined.
  */
-function scopeValue(scope: string, json: Value | undefined): Settings | RepoSettings | undefined {
+function scopeValue(isFactory: boolean, json: Value | undefined): Settings | RepoSettings | undefined {
   const value = parseObject(json) as Partial<Settings> | RepoSettings | undefined;
-  if (scope !== 'global') return value as RepoSettings | undefined;
+  if (!isFactory) return value as RepoSettings | undefined;
   return { ...DEFAULT_SETTINGS, ...value, gates: { ...DEFAULT_SETTINGS.gates, ...value?.gates } } as Settings;
 }
 
@@ -186,14 +218,10 @@ export class BlocksStore implements BoardStore {
   /** `now` decides the addDoc retry window (default: real time). */
   constructor(
     private readonly data: BlocksData, private readonly identity: 'core' | 'owner',
-    opts: { now?: () => Date; factories?: { defs: FactoryDef[]; repos: FactoryRepo[] } } = {},
+    opts: { now?: () => Date } = {},
   ) {
-    this.interimFactories = opts.factories ?? { defs: [], repos: [] };
     this.now = opts.now ?? (() => new Date());
   }
-
-  /** Interim (plan 6 Task 3 stores definitions in Blocks): what the caller gave, read-only. */
-  private readonly interimFactories: { defs: FactoryDef[]; repos: FactoryRepo[] };
 
   private ownerOnly(method: string): void {
     if (this.identity !== 'owner') throw new OwnerOnlyError(`${method} is done on the Board, not by the factory core`);
@@ -213,14 +241,13 @@ export class BlocksStore implements BoardStore {
 
   async createTask(t: NewTask): Promise<Task> {
     assertNewStatus(t.status);
-    if (t.factoryId !== BLOCKS_FACTORY) throw notYet(`a task in factory ${t.factoryId}`);
     // Both identities may insert a task: the core only through `factory new` (see createTaskAsCore).
     for (let attempt = 0; attempt <= DUPLICATE_RETRIES; attempt++) {
       const ids = await this.data.list('FactoryTask', {}, ['taskId']);
       const taskId = `T-${1 + Math.max(0, ...ids.map((r) => taskNumber(r.taskId)))}`;
       const task: Task = {
         taskId,
-        factoryId: BLOCKS_FACTORY,
+        factoryId: t.factoryId,
         title: t.title,
         description: t.description,
         repo: t.repo,
@@ -242,7 +269,7 @@ export class BlocksStore implements BoardStore {
       // The writeId finds this row again if the insert's reply is lost.
       const writeId = randomUUID();
       const row: Record<string, Value> = { writeId };
-      for (const [key, value] of Object.entries(task)) if (key !== 'factoryId') row[key] = encodeTaskValue(key as keyof Task, value);
+      for (const [key, value] of Object.entries(task)) row[key] = encodeTaskValue(key as keyof Task, value);
       let r: Awaited<ReturnType<BlocksData['insert']>>;
       try {
         r = await this.data.insert('FactoryTask', row);
@@ -359,54 +386,148 @@ export class BlocksStore implements BoardStore {
   }
 
   async listFactoryDefs(): Promise<FactoryDef[]> {
-    return structuredClone(this.interimFactories.defs);
+    return (await this.data.list('FactoryDef', {})).map(decodeDef).sort((a, b) => (a.factoryId < b.factoryId ? -1 : a.factoryId > b.factoryId ? 1 : 0));
   }
 
   async listFactoryRepos(factoryId?: string): Promise<FactoryRepo[]> {
-    return structuredClone(this.interimFactories.repos.filter((r) => factoryId === undefined || r.factoryId === factoryId));
+    const rows = await this.data.list('FactoryRepo', factoryId === undefined ? {} : { factoryId });
+    return rows.map(decodeRepo).sort((a, b) => {
+      const x = repoKey(a.factoryId, a.repoId);
+      const y = repoKey(b.factoryId, b.repoId);
+      return x < y ? -1 : x > y ? 1 : 0;
+    });
   }
 
-  async saveFactoryDef(_before: FactoryDef | null, _after: FactoryDef): Promise<FactoryDef> {
-    throw notYet('saveFactoryDef');
+  async saveFactoryDef(before: FactoryDef | null, after: FactoryDef): Promise<FactoryDef> {
+    this.ownerOnly('saveFactoryDef');
+    const what = `factory ${after.factoryId}`;
+    const fields = encodeDef(after);
+    if (before === null) {
+      await this.insertVersioned('FactoryDef', { factoryId: after.factoryId }, { factoryId: after.factoryId, ...fields }, what);
+      return { ...structuredClone(after), version: 1 };
+    }
+    await this.updateVersioned('FactoryDef', { factoryId: after.factoryId }, before.version, fields, what);
+    return { ...structuredClone(after), version: before.version + 1 };
   }
 
-  async saveFactoryRepo(_before: FactoryRepo | null, _after: FactoryRepo): Promise<FactoryRepo> {
-    throw notYet('saveFactoryRepo');
+  async saveFactoryRepo(before: FactoryRepo | null, after: FactoryRepo): Promise<FactoryRepo> {
+    this.ownerOnly('saveFactoryRepo');
+    const key = repoKey(after.factoryId, after.repoId);
+    const what = `repo ${key}`;
+    const fields = encodeRepo(after);
+    if (before === null) {
+      await this.insertVersioned('FactoryRepo', { repoKey: key }, { repoKey: key, factoryId: after.factoryId, repoId: after.repoId, ...fields }, what);
+      return { ...structuredClone(after), version: 1 };
+    }
+    await this.updateVersioned('FactoryRepo', { repoKey: key }, before.version, fields, what);
+    return { ...structuredClone(after), version: before.version + 1 };
+  }
+
+  /** Inserts a version 1 row; an existing row is a version conflict. A lost reply is recognised by its writeId. */
+  private async insertVersioned(schema: SchemaName, key: Filter, row: Record<string, Value>, what: string): Promise<void> {
+    const writeId = randomUUID();
+    let r: Awaited<ReturnType<BlocksData['insert']>>;
+    try {
+      r = await this.data.insert(schema, { ...row, version: 1, writeId });
+    } catch (error) {
+      const [found] = await this.data.list(schema, key, ['writeId']).catch((): Row[] => []);
+      if (found?.writeId === writeId) return;
+      throw error;
+    }
+    if (r.kind === 'forbidden') throw new BlocksForbiddenError(`insert${schema}`);
+    if (r.kind === 'duplicate') {
+      const [found] = await this.data.list(schema, key, ['version']).catch((): Row[] => []);
+      throw new VersionConflictError(what, 0, num(found?.version), `${what} already exists; reload and save again`);
+    }
+  }
+
+  /** One compare-and-set update of a definition row, keyed by `key` plus the version the caller read. */
+  private async updateVersioned(schema: SchemaName, key: Filter, expectedVersion: number, fields: Record<string, Value>, what: string): Promise<void> {
+    const [row] = await this.data.list(schema, key, ['version']);
+    if (row && !hasVersion(row)) throw new MissingVersionError(schema, String(Object.values(key)[0]));
+    const outcome = await this.settle(schema, key, expectedVersion, fields);
+    if (outcome.kind === 'applied') return;
+    if (outcome.kind === 'conflict') {
+      throw new VersionConflictError(what, expectedVersion, outcome.seenVersion, `${what} changed since it was read; reload and save again`);
+    }
+    throw this.settleError(outcome, what, what, expectedVersion);
   }
 
   async listFactoryHealth(): Promise<FactoryHealth[]> {
-    throw notYet('listFactoryHealth');
+    return (await this.data.list('FactoryHealth', {})).map(decodeHealth).sort((a, b) => (a.factoryId < b.factoryId ? -1 : a.factoryId > b.factoryId ? 1 : 0));
   }
 
-  async setFactoryHealth(_h: FactoryHealth): Promise<void> {
-    throw notYet('setFactoryHealth');
-  }
-
-  /** Until plan 6 Task 3, the rows are factory `blocks`' scopes: `global` is the factory, any other scope a repo of it. */
-  async getSettings(): Promise<StoredSettings> {
-    const rows = await this.data.list('FactorySettings', {});
-    if (rows.length === 0) return { factories: {} };
-    let factory = scopeValue('global', undefined) as Settings;
-    const repos: Record<string, RepoSettings> = {};
-    for (const r of rows) {
-      const value = scopeValue(text(r.scope), r.json);
-      if (r.scope === 'global') factory = value as Settings;
-      else if (value !== undefined) repos[text(r.scope)] = value as RepoSettings;
+  async setFactoryHealth(h: FactoryHealth): Promise<void> {
+    if (this.identity !== 'core') throw new OwnerOnlyError('setFactoryHealth is done by the factory core');
+    const fields: Record<string, Value> = { patPresent: h.patPresent ? 1 : 0, checkedAt: h.checkedAt };
+    const key = { factoryId: h.factoryId };
+    // The core is the only writer: an insert that finds the row (or an update that loses a race) is retried once against it.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const [row] = await this.data.list('FactoryHealth', key, ['version']);
+      if (!row) {
+        const r = await this.data.insert('FactoryHealth', { ...key, ...fields, version: 1, writeId: randomUUID() });
+        if (r.kind === 'inserted') return;
+        if (r.kind === 'forbidden') throw new BlocksForbiddenError('insertFactoryHealth');
+        continue;
+      }
+      if (!hasVersion(row)) throw new MissingVersionError('FactoryHealth', h.factoryId);
+      const expected = num(row.version);
+      const outcome = await this.settle('FactoryHealth', key, expected, fields);
+      if (outcome.kind === 'applied') return;
+      if (outcome.kind === 'conflict') continue;
+      throw this.settleError(outcome, `health ${h.factoryId}`, `health ${h.factoryId}`, expected);
     }
-    return { factories: { [BLOCKS_FACTORY]: { factory, repos } } };
+    throw new Error(`setFactoryHealth: health of ${h.factoryId} kept changing`);
   }
 
-  async updateSettingsScope(factoryScope: string, before: unknown, after: Settings | RepoSettings | null): Promise<void> {
+  /**
+   * Every settings value by its current scope name (`<f>` or `<f>/<r>`), and the rows stored under those names.
+   * Until `migrate` runs, rows from before plan 6 count as factory `blocks`: `global` is its factory scope and any other
+   * scope without a slash is its repo, unless a factory has that id. A row under the current name wins over a legacy one.
+   */
+  private async settingsView(): Promise<{ values: Map<string, Settings | RepoSettings | undefined>; rows: Map<string, Row> }> {
+    const all = await this.data.list('FactorySettings', {}, ['scope', 'json', 'version']);
+    const values = new Map<string, Settings | RepoSettings | undefined>();
+    const rows = new Map<string, Row>();
+    const legacy = all.some((r) => r.scope === LEGACY_FACTORY_SCOPE);
+    const isLegacyRepoScope = (scope: string, ids: Set<string>) => legacy && !scope.includes('/') && scope !== LEGACY_FACTORY && !ids.has(scope);
+    const factoryIds = legacy ? new Set((await this.data.list('FactoryDef', {}, ['factoryId'])).map((r) => text(r.factoryId))) : new Set<string>();
+    for (const r of all) {
+      const scope = text(r.scope);
+      if (scope === LEGACY_FACTORY_SCOPE) values.set(LEGACY_FACTORY, scopeValue(true, r.json));
+      else if (isLegacyRepoScope(scope, factoryIds)) values.set(repoKey(LEGACY_FACTORY, scope), scopeValue(false, r.json));
+    }
+    for (const r of all) {
+      const scope = text(r.scope);
+      if (scope === LEGACY_FACTORY_SCOPE || isLegacyRepoScope(scope, factoryIds)) continue;
+      values.set(scope, scopeValue(!scope.includes('/'), r.json));
+      rows.set(scope, r);
+    }
+    return { values, rows };
+  }
+
+  async getSettings(): Promise<StoredSettings> {
+    const { values } = await this.settingsView();
+    const out: StoredSettings = { factories: {} };
+    const entry = (factoryId: string) => (out.factories[factoryId] ??= { factory: scopeValue(true, undefined) as Settings, repos: {} });
+    for (const [scope, value] of values) {
+      const { factoryId, repoId } = parseScope(scope);
+      if (repoId === undefined) entry(factoryId).factory = value as Settings;
+      else if (value !== undefined) entry(factoryId).repos[repoId] = value as RepoSettings;
+    }
+    return out;
+  }
+
+  async updateSettingsScope(scope: string, before: unknown, after: Settings | RepoSettings | null): Promise<void> {
     this.ownerOnly('updateSettingsScope');
-    const { factoryId, repoId } = parseScope(factoryScope);
-    if (factoryId !== BLOCKS_FACTORY) throw notYet(`settings of factory ${factoryId}`);
-    const scope = repoId ?? 'global';
-    if (scope === 'global' && after === null) throw new Error('factory settings cannot be removed');
-    const [row] = await this.data.list('FactorySettings', { scope }, ['version', 'json']);
-    if (canonicalJson(scopeValue(scope, row?.json)) !== canonicalJson(before)) throw settingsConflict(scope);
+    const isFactory = parseScope(scope).repoId === undefined;
+    if (isFactory && after === null) throw new Error('factory settings cannot be removed');
+    const { values, rows } = await this.settingsView();
+    if (canonicalJson(values.has(scope) ? values.get(scope) : scopeValue(isFactory, undefined)) !== canonicalJson(before)) throw settingsConflict(scope);
+    const row = rows.get(scope);
     const json = after === null ? 'null' : JSON.stringify(after);
     if (!row) {
-      if (after === null) return;
+      if (after === null && !values.has(scope)) return;
       const r = await this.data.insert('FactorySettings', { scope, json, version: 1 });
       if (r.kind === 'forbidden') throw new BlocksForbiddenError('insertFactorySettings');
       // Someone created the scope since the read: their value is not the `before` this caller saw.
@@ -423,13 +544,14 @@ export class BlocksStore implements BoardStore {
 
   async setSettings(s: StoredSettings): Promise<void> {
     this.ownerOnly('setSettings');
-    const existing = await this.data.list('FactorySettings', {}, ['scope']);
-    for (const id of Object.keys(s.factories)) if (id !== BLOCKS_FACTORY) throw notYet(`settings of factory ${id}`);
-    const entry = s.factories[BLOCKS_FACTORY];
-    const wanted = new Map<string, string>([['global', JSON.stringify(entry?.factory ?? DEFAULT_SETTINGS)]]);
-    for (const [scope, value] of Object.entries(entry?.repos ?? {})) wanted.set(scope, JSON.stringify(value));
-    // Rows cannot be deleted, so a repo scope left out is written as null json.
-    for (const r of existing) if (!wanted.has(text(r.scope))) wanted.set(text(r.scope), 'null');
+    const { values } = await this.settingsView();
+    const wanted = new Map<string, string>();
+    for (const [factoryId, entry] of Object.entries(s.factories)) {
+      wanted.set(factoryId, JSON.stringify(entry.factory));
+      for (const [repoId, value] of Object.entries(entry.repos)) wanted.set(repoKey(factoryId, repoId), JSON.stringify(value));
+    }
+    // Rows cannot be deleted, so a scope left out is written as null json (this also hides a legacy row of that scope).
+    for (const scope of values.keys()) if (!wanted.has(scope)) wanted.set(scope, 'null');
     for (const [scope, json] of wanted) await this.writeSettings(scope, json);
   }
 
@@ -485,7 +607,7 @@ export class BlocksStore implements BoardStore {
   async addEvents(events: FactoryEvent[]): Promise<void> {
     for (const e of events) {
       const r = await this.data.insert('FactoryEvent', {
-        eventId: eventId(e), taskId: e.taskId, actor: e.actor, action: e.action, field: e.field, from: e.from, to: e.to, reason: e.reason, at: e.at,
+        eventId: eventId(e), taskId: e.taskId, factoryId: e.factoryId, actor: e.actor, action: e.action, field: e.field, from: e.from, to: e.to, reason: e.reason, at: e.at,
       });
       // A duplicate is an event an earlier, lost-reply call already wrote.
       if (r.kind === 'forbidden') throw new ForbiddenError(`${this.identity === 'core' ? 'factory core' : 'owner'} may not write events`);

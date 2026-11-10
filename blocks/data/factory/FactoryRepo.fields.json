@@ -1,0 +1,52 @@
+{
+  "fields": [
+    {
+      "name": "repoKey",
+      "type": "String",
+      "isArray": false,
+      "description": "Unique key: factoryId/repoId."
+    },
+    {
+      "name": "factoryId",
+      "type": "String",
+      "isArray": false,
+      "description": "Factory the repo belongs to."
+    },
+    {
+      "name": "repoId",
+      "type": "String",
+      "isArray": false,
+      "description": "Repo id, unique within its factory."
+    },
+    {
+      "name": "remote",
+      "type": "String",
+      "isArray": false,
+      "description": "Git remote of the repo."
+    },
+    {
+      "name": "baseBranch",
+      "type": "String",
+      "isArray": false,
+      "description": "Branch tasks branch from."
+    },
+    {
+      "name": "checks",
+      "type": "String",
+      "isArray": false,
+      "description": "JSON text of the repo checks."
+    },
+    {
+      "name": "version",
+      "type": "Int",
+      "isArray": false,
+      "description": "Row version; bumped on every update."
+    },
+    {
+      "name": "writeId",
+      "type": "String",
+      "isArray": false,
+      "description": "Id of the write that produced this version."
+    }
+  ]
+}

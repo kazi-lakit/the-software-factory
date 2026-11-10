@@ -55,12 +55,12 @@ function expect(ok: boolean, what: string): void {
 
 /** A task row for a direct insert: version 1 and an empty writeId, so the core can later update it. */
 const taskRow = (taskId: string, status: string) => ({
-  taskId, title: 'gate synthetic task', description: 'created by blocks:gate', repo: 'gate', baseBranch: 'dev', status,
+  taskId, factoryId: 'blocks', title: 'gate synthetic task', description: 'created by blocks:gate', repo: 'gate', baseBranch: 'dev', status,
   attempt: 0, costUsd: '0', gateOverrides: '{}', version: 1, writeId: '',
 });
 
 /** A write that is denied either way Blocks may answer: 403, or a not-applied update; the row must also be unchanged. */
-async function expectDeniedUpdate(d: BlocksData, owner: BlocksData, schema: 'FactorySettings' | 'FactoryEvent', key: Record<string, string>, field: string, who: string): Promise<void> {
+async function expectDeniedUpdate(d: BlocksData, owner: BlocksData, schema: 'FactorySettings' | 'FactoryEvent' | 'FactoryDef' | 'FactoryRepo' | 'FactoryHealth', key: Record<string, string>, field: string, who: string): Promise<void> {
   const r = await d.update(schema, key, { [field]: 'gate-denied' });
   expect(r.kind === 'forbidden' || r.kind === 'not-applied', `${who} edit of ${schema} was ${r.kind}`);
   const [row] = await owner.list(schema, key, [field]);
@@ -106,7 +106,8 @@ export const STEPS: Step[] = [
   {
     label: '4 FactorySettings: core edit forbidden, owner insert and edit ok',
     async run(d, c) {
-      const scope = `gate-${c.suffix}`;
+      // A repo scope of an id no real factory has, so a left-over row names no factory.
+      const scope = `GATE-${c.suffix}/gate`;
       const ins = await d.owner.insert('FactorySettings', { scope, json: '{}', version: 1, writeId: '' });
       expect(ins.kind === 'inserted', `owner insert of FactorySettings answered ${ins.kind}`);
       await expectDeniedUpdate(d.core, d.owner, 'FactorySettings', { scope }, 'json', 'core');
@@ -266,6 +267,56 @@ export const STEPS: Step[] = [
         failure ??= new Error(`cleanup (cancel the null-check task) failed: ${firstLine(error)}`);
       }
       if (failure !== undefined) throw failure;
+    },
+  },
+  {
+    label: '13 FactoryDef and FactoryRepo: core insert and edit forbidden, owner insert and edit ok',
+    async run(d, c) {
+      // The ids start with GATE- and have capitals, which no real factory id has: the core skips these rows as invalid.
+      const factoryId = `GATE-${c.suffix}`;
+      const repoKey = `${factoryId}/gate`;
+      const defRow = { factoryId, name: 'gate', protectedBranches: '["main"]', gitName: '', gitEmail: '', docsPath: '', patAccount: 'gate', active: 0, version: 1, writeId: '' };
+      const repoRow = { repoKey, factoryId, repoId: 'gate', remote: 'gate', baseBranch: 'dev', checks: '{}', version: 1, writeId: '' };
+      for (const [schema, row, key, field] of [['FactoryDef', defRow, { factoryId }, 'name'], ['FactoryRepo', repoRow, { repoKey }, 'remote']] as const) {
+        const denied = await d.core.insert(schema, row);
+        expect(denied.kind === 'forbidden', `core insert of ${schema} answered ${denied.kind}`);
+        expect((await d.owner.list(schema, key, ['version'])).length === 0, `refused core insert of ${schema} left a row`);
+        const ok = await d.owner.insert(schema, row);
+        expect(ok.kind === 'inserted', `owner insert of ${schema} answered ${ok.kind}`);
+        await expectDeniedUpdate(d.core, d.owner, schema, key, field, 'core');
+        const edit = await d.owner.update(schema, key, { [field]: 'gate owner', version: 2, writeId: `gate-${c.suffix}-${field}` });
+        expect(edit.kind === 'applied', `owner edit of ${schema} was ${edit.kind}`);
+      }
+    },
+  },
+  {
+    label: '14 FactoryHealth: owner insert and edit forbidden, core insert and edit ok',
+    async run(d, c) {
+      const row = (factoryId: string) => ({ factoryId, patPresent: 0, checkedAt: new Date().toISOString(), version: 1, writeId: '' });
+      const ownerId = `GATE-${c.suffix}-owner`;
+      const denied = await d.owner.insert('FactoryHealth', row(ownerId));
+      expect(denied.kind === 'forbidden', `owner insert of FactoryHealth answered ${denied.kind}`);
+      expect((await d.core.list('FactoryHealth', { factoryId: ownerId }, ['version'])).length === 0, 'refused owner insert of FactoryHealth left a row');
+      const factoryId = `GATE-${c.suffix}`;
+      const ok = await d.core.insert('FactoryHealth', row(factoryId));
+      expect(ok.kind === 'inserted', `core insert of FactoryHealth answered ${ok.kind}`);
+      await expectDeniedUpdate(d.owner, d.owner, 'FactoryHealth', { factoryId }, 'checkedAt', 'owner');
+      const edit = await d.core.update('FactoryHealth', { factoryId }, { patPresent: 1, version: 2, writeId: `gate-${c.suffix}-h` });
+      expect(edit.kind === 'applied', `core edit of FactoryHealth was ${edit.kind}`);
+    },
+  },
+  {
+    label: '15 core change of a task factoryId to a different value refused',
+    async run(d, c) {
+      // The value must change: Blocks checks only the columns an update changes. The task is created cancelled, so
+      // nothing live is left on the Board.
+      const taskId = `GATE-${c.suffix}-fid`;
+      const ins = await d.owner.insert('FactoryTask', taskRow(taskId, 'cancelled'));
+      expect(ins.kind === 'inserted', `owner insert of FactoryTask answered ${ins.kind}`);
+      const r = await d.core.update('FactoryTask', { taskId, version: 1 }, { factoryId: 'gate-other', version: 2, writeId: `gate-${c.suffix}-f` });
+      expect(r.kind === 'forbidden', `core factoryId change answered ${r.kind} (column rule not enforced, or factoryId missing from it?)`);
+      const [after] = await d.owner.list('FactoryTask', { taskId }, ['factoryId', 'version']);
+      expect(after !== undefined && after.factoryId === 'blocks' && Number(after.version) === 1, 'refused core factoryId change changed the row');
     },
   },
 ];

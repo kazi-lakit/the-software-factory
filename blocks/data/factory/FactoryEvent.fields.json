@@ -13,6 +13,12 @@
       "description": "Task the event belongs to."
     },
     {
+      "name": "factoryId",
+      "type": "String",
+      "isArray": false,
+      "description": "Id of the factory the event belongs to."
+    },
+    {
       "name": "actor",
       "type": "String",
       "isArray": false,

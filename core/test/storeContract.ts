@@ -5,11 +5,10 @@ import { defFixture, repoFixture } from './factoryFixtures.js';
 
 /**
  * Behaviour every BoardStore must share. Assertions follow the interface, not one store's internals.
- * `factories: false` skips the definition, health and multi-factory tests (BlocksStore until plan 6 Task 3).
  * `make(identity)` builds a store for the owner or the core; with none, one that checks nothing.
  */
 export function runStoreContract(
-  name: string, make: (identity?: StoreIdentity) => BoardStore | Promise<BoardStore>, opts: { factories?: boolean } = {},
+  name: string, make: (identity?: StoreIdentity) => BoardStore | Promise<BoardStore>,
 ): void {
   const mk = (s: BoardStore, title = 'a') => s.createTask({ factoryId: 'blocks', title, description: '', repo: 'data' });
 
@@ -201,7 +200,6 @@ export function runStoreContract(
       expect(await s.listEvents()).toHaveLength(2);
       expect(await s.listEvents('T-2')).toEqual([{ taskId: 'T-2', ...e }]);
     });
-    if (opts.factories === false) return;
 
     describe('factories', () => {
       const def = defFixture('delta');
