@@ -157,7 +157,7 @@ body {
 
 .sf-topbar {
   align-items: center;
-  background: transparent;
+  background: var(--sf-surface);
   border-bottom: 1px solid var(--sf-chrome-border);
   display: flex;
   flex-wrap: wrap;

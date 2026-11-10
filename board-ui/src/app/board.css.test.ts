@@ -388,11 +388,25 @@ describe("board_css_motion", () => {
 const labelLine = { ...labelType, "line-height": "var(--sf-label-line)" };
 
 describe("board_css_topbar", () => {
-  it("topbar_is_transparent_with_one_chrome_border_hairline", () => {
+  it("topbar_is_opaque_surface_with_one_chrome_border_hairline", () => {
     const t = tokens(read("board.css"), ".sf-topbar");
-    expect(t.background).toBe("transparent");
+    expect(t.background).toBe("var(--sf-surface)");
     expect(t["border-bottom"]).toBe("1px solid var(--sf-chrome-border)");
     for (const k of ["border", "border-top", "border-left", "border-right", "box-shadow"]) expect(t).not.toHaveProperty(k);
+  });
+
+  it("surface_token_is_opaque_in_dark_and_light", () => {
+    const css = read("board.css");
+    const opaqueHex = /^#[0-9a-fA-F]{6}$/;
+    expect(tokens(css, ":root")["--sf-surface"]).toMatch(opaqueHex);
+    expect(tokens(css, ':root[data-theme="light"]')["--sf-surface"]).toMatch(opaqueHex);
+  });
+
+  it("topbar_stays_sticky_at_top_in_flow", () => {
+    const t = tokens(read("board.css"), ".sf-topbar");
+    expect(t.position).toBe("sticky");
+    expect(t.top).toBe("0");
+    expect(t["z-index"]).toBe("10");
   });
 
   it("topbar_height_token_is_52px", () => {
