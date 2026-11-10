@@ -65,7 +65,7 @@ export function AppRouter() {
   }
 
   return (
-    <RequireAuth currentPath={path} onNavigate={navigate}>
+    <RequireAuth currentPath={`${path}${search}`} onNavigate={navigate}>
       <RequireOwner onNavigate={navigate}>
         <AppShell activePath={path} onNavigate={navigate}>
           {taskId ? <TaskView key={taskId} taskId={taskId} onNavigate={navigate} /> : Page ? <Page onNavigate={navigate} /> : null}

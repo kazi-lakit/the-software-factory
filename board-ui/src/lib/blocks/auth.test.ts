@@ -156,6 +156,13 @@ describe("hosted sign-in", () => {
     }
   });
 
+  it("keeps_a_new_task_link_query_through_sign_in", async () => {
+    callback.mockResolvedValue({});
+    const target = "/?new=1&title=Fix%20it%20%26%20more&description=a%0Ab%20%23&repo=iam&base=dev";
+    await startLogin(target);
+    await expect(completeLogin("https://app.test/login/callback?code=c")).resolves.toEqual({ ok: true, returnTo: target });
+  });
+
   it("keeps_the_path_query_and_hash_of_a_page_on_this_site", async () => {
     callback.mockResolvedValue({});
     sessionStorage.setItem("blocks-app:oidc-return-to", "/tasks/T-3?view=plan#diff");

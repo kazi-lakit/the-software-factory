@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenError } from "@factory/core";
-import { clearAllUnsent } from "../../lib/unsent";
+import { clearAllUnsent, keepUnsent } from "../../lib/unsent";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
 import { BoardView } from "./BoardView";
 
@@ -22,6 +22,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  window.history.replaceState({}, "", "/");
   clearAllUnsent();
   vi.restoreAllMocks();
 });
@@ -142,5 +143,89 @@ describe("BoardView", () => {
     expect(listId && document.getElementById(listId)).toBeTruthy();
     fireEvent.click(cancelled);
     expect(cancelled).not.toHaveAttribute("aria-controls");
+  });
+});
+
+describe("BoardView new-task link", () => {
+  const link = (query: string) => window.history.replaceState({}, "", `/?${query}`);
+  const params = (values: Record<string, string>) => new URLSearchParams({ new: "1", ...values }).toString();
+  const openForm = () => screen.findByRole("form", { name: "New task" });
+
+  it("opens_the_form_prefilled_from_the_link", async () => {
+    link(params({ base: "stg", description: "Fix it & more\nline two #1 é", repo: "iam", title: "Fix the typo" }));
+    renderBoard();
+    const form = await openForm();
+    expect(within(form).getByLabelText("Title")).toHaveValue("Fix the typo");
+    expect(within(form).getByLabelText("Description")).toHaveValue("Fix it & more\nline two #1 é");
+    expect(within(form).getByLabelText("Repo")).toHaveValue("iam");
+    expect(within(form).getByLabelText("Base branch")).toHaveValue("stg");
+  });
+
+  it("falls_back_to_the_default_repo_and_shows_a_note_for_an_unknown_repo", async () => {
+    link(params({ repo: "nope", title: "T" }));
+    renderBoard();
+    const form = await openForm();
+    expect(within(form).getByLabelText("Repo")).toHaveValue("os");
+    expect(screen.getByText('Unknown repo "nope" in the link; pick one.')).toBeInTheDocument();
+  });
+
+  it("trims_the_base_and_uses_dev_when_it_is_empty", async () => {
+    link(params({ base: "   ", title: "T" }));
+    renderBoard();
+    expect(within(await openForm()).getByLabelText("Base branch")).toHaveValue("dev");
+    cleanup();
+    clearAllUnsent();
+    link(params({ base: "  stg  ", title: "T" }));
+    renderBoard();
+    expect(within(await openForm()).getByLabelText("Base branch")).toHaveValue("stg");
+  });
+
+  it("caps_the_title_at_200_and_the_description_at_8000", async () => {
+    link(params({ description: "d".repeat(9000), title: "t".repeat(300) }));
+    renderBoard();
+    const form = await openForm();
+    expect((within(form).getByLabelText("Title") as HTMLInputElement).value).toHaveLength(200);
+    expect((within(form).getByLabelText("Description") as HTMLTextAreaElement).value).toHaveLength(8000);
+  });
+
+  it("clears_the_parameters_from_the_address_bar_after_reading_them", async () => {
+    link(params({ title: "T" }));
+    renderBoard();
+    await openForm();
+    await waitFor(() => expect(window.location.search).toBe(""));
+    expect(window.location.pathname).toBe("/");
+  });
+
+  it("replaces_unsent_draft_text_with_the_link", async () => {
+    keepUnsent("new-task:title", "old draft");
+    keepUnsent("new-task:description", "old description");
+    link(params({ title: "From the link" }));
+    renderBoard();
+    const form = await openForm();
+    expect(within(form).getByLabelText("Title")).toHaveValue("From the link");
+    expect(within(form).getByLabelText("Description")).toHaveValue("");
+  });
+
+  it("opens_no_form_without_new_1", async () => {
+    link(params({ title: "T" }).replace("new=1", "new=0"));
+    renderBoard();
+    await screen.findByRole("button", { name: "New task" });
+    expect(screen.queryByRole("form", { name: "New task" })).not.toBeInTheDocument();
+    link("title=T");
+    cleanup();
+    renderBoard();
+    await screen.findByRole("button", { name: "New task" });
+    expect(screen.queryByRole("form", { name: "New task" })).not.toBeInTheDocument();
+  });
+
+  it("creates_nothing_until_create_task_is_clicked", async () => {
+    link(params({ description: "D", repo: "data", title: "Drafted" }));
+    renderBoard();
+    const form = await openForm();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await fakeBoard().owner.listTasks()).toEqual([]);
+    fireEvent.click(within(form).getByRole("button", { name: "Create task" }));
+    expect(await within(column("Inbox")).findByText("Drafted")).toBeInTheDocument();
+    expect(await fakeBoard().owner.listTasks()).toEqual([expect.objectContaining({ description: "D", repo: "data", title: "Drafted" })]);
   });
 });

@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { createTask, REPO_IDS, type RepoId, type Status, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
-import { hasUnsent, useUnsent } from "../../lib/unsent";
+import { clearUnsent, hasUnsent, keepUnsent, useUnsent } from "../../lib/unsent";
 import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 import { COLUMNS, isTestTask, MUTED, STATUS_LABEL } from "./status";
 import { TaskCard } from "./TaskCard";
@@ -13,6 +13,34 @@ type Navigate = (path: string) => void;
 const NEW_TASK_FIELDS = ["title", "description", "repo", "baseBranch"] as const;
 const newTaskId = (field: (typeof NEW_TASK_FIELDS)[number]) => `new-task:${field}`;
 
+const TITLE_MAX = 200;
+const DESCRIPTION_MAX = 8000;
+const DEFAULT_REPO = REPO_IDS[0] ?? "os";
+const DEFAULT_BASE = "dev";
+
+type LinkPrefill = { open: boolean; repoNote: string };
+
+/**
+ * `/?new=1&title=…&description=…&repo=…&base=…` (made by /factory:new) opens the New task form filled in.
+ * The values replace any unsent draft text, are written where the form reads its starting text, and nothing
+ * is submitted: the owner reads the form and clicks Create task. Safe to call twice (StrictMode).
+ */
+function readLinkPrefill(): LinkPrefill {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("new") !== "1") return { open: false, repoNote: "" };
+  const hold = (field: (typeof NEW_TASK_FIELDS)[number], text: string, initial: string) => {
+    if (text === initial) clearUnsent(newTaskId(field));
+    else keepUnsent(newTaskId(field), text);
+  };
+  const repo = params.get("repo")?.trim() ?? "";
+  const known = (REPO_IDS as readonly string[]).includes(repo);
+  hold("title", (params.get("title") ?? "").slice(0, TITLE_MAX), "");
+  hold("description", (params.get("description") ?? "").slice(0, DESCRIPTION_MAX), "");
+  hold("repo", known ? repo : DEFAULT_REPO, DEFAULT_REPO);
+  hold("baseBranch", params.get("base")?.trim() || DEFAULT_BASE, DEFAULT_BASE);
+  return { open: true, repoNote: repo && !known ? `Unknown repo "${repo}" in the link; pick one.` : "" };
+}
+
 /** The queue: a column per status, a repo filter, test tasks hidden by default, and the New task form. */
 export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const board = useBoard();
@@ -21,8 +49,17 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const [repo, setRepo] = useState<RepoId | "">("");
   const [showTest, setShowTest] = useState(false);
   const [expanded, setExpanded] = useState<ReadonlySet<Status>>(new Set());
-  // Reopens on unsent text, e.g. after the session ended mid-form.
-  const [creating, setCreating] = useState(() => NEW_TASK_FIELDS.some((f) => hasUnsent(newTaskId(f))));
+  // A New task link wins over unsent text; otherwise reopens on unsent text, e.g. after the session ended mid-form.
+  const [prefill] = useState(readLinkPrefill);
+  const [creating, setCreating] = useState(() => prefill.open || NEW_TASK_FIELDS.some((f) => hasUnsent(newTaskId(f))));
+  // Drop the link's parameters so a reload does not fill the form again.
+  useEffect(() => {
+    if (!prefill.open) return;
+    const params = new URLSearchParams(window.location.search);
+    for (const key of ["new", "title", "description", "repo", "base"]) params.delete(key);
+    const rest = params.toString();
+    window.history.replaceState(window.history.state, "", `${window.location.pathname}${rest ? `?${rest}` : ""}${window.location.hash}`);
+  }, [prefill]);
   const [notice, setNotice] = useState("");
   const newTaskButton = useRef<HTMLButtonElement>(null);
   // After a create the form is gone: focus returns to the button that opened it.
@@ -77,6 +114,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
       {creating ? (
         <NewTaskForm
           id={formId}
+          repoNote={prefill.repoNote}
           onClose={() => setCreating(false)}
           onCreated={(task) => {
             setCreating(false);
@@ -133,7 +171,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   );
 }
 
-function NewTaskForm({ id, onClose, onCreated }: { id: string; onClose: () => void; onCreated: (task: Task) => void }) {
+function NewTaskForm({ id, repoNote, onClose, onCreated }: { id: string; repoNote: string; onClose: () => void; onCreated: (task: Task) => void }) {
   const [title, setTitle, clearTitle] = useUnsent(newTaskId("title"));
   const [description, setDescription, clearDescription] = useUnsent(newTaskId("description"));
   const [repo, setRepo, clearRepo] = useUnsent(newTaskId("repo"), REPO_IDS[0] ?? "os");
@@ -186,6 +224,7 @@ function NewTaskForm({ id, onClose, onCreated }: { id: string; onClose: () => vo
           <input id={`${id}-base`} className="sf-input sf-mono" value={baseBranch} onChange={(event) => setBaseBranch(event.target.value)} />
         </label>
       </div>
+      {repoNote ? <p role="status">{repoNote}</p> : null}
       <WriteProblemNotice problem={problem} />
       <div className="sf-actions">
         <button type="submit" className="sf-button sf-button-primary" disabled={busy}>Create task</button>

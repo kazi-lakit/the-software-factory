@@ -78,6 +78,15 @@ describe("RequireAuth", () => {
   });
 });
 
+describe("RequireAuth with a query string", () => {
+  it("keeps_the_query_of_the_page_to_return_to", async () => {
+    claims.mockResolvedValue(undefined);
+    renderAt("/?new=1&title=Fix%20it%20%26%20more");
+    await waitFor(() => expect(window.location.pathname).toBe("/login"));
+    expect(window.location.search).toBe(`?returnTo=${encodeURIComponent("/?new=1&title=Fix%20it%20%26%20more")}`);
+  });
+});
+
 describe("the owner check", () => {
   it("shows_the_board_to_a_factory_owner", async () => {
     claims.mockResolvedValue({ sub: "me" });
