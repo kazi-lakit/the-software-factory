@@ -9,12 +9,15 @@ export const DEFAULT_BOARD_URL = 'https://dfrsgz-eseqz.slsblx.com';
 export const REPOS = ['os', 'iam', 'monitor', 'logic', 'data', 'localization', 'release'];
 export const TITLE_MAX = 200;
 export const DESCRIPTION_MAX = 8000;
+const MAX_LINK = 8000;
 
 const text = (value) => (typeof value === 'string' ? value : '');
 
 export function buildLink(draft, boardUrl) {
   const repo = text(draft?.repo).trim();
   if (!REPOS.includes(repo)) throw new Error(`factory: unknown repo ${text(draft?.repo)}`);
+  const base = text(draft?.base).trim();
+  if (base === 'main') throw new Error('factory: the factory never targets main');
   const title = text(draft?.title);
   if (title.trim() === '') throw new Error('factory: title must not be blank');
   const params = new URLSearchParams({
@@ -22,7 +25,7 @@ export function buildLink(draft, boardUrl) {
     title: title.slice(0, TITLE_MAX),
     description: text(draft?.description).slice(0, DESCRIPTION_MAX),
     repo,
-    base: text(draft?.base).trim(),
+    base,
   });
   return `${boardUrl.replace(/\/+$/, '')}/?${params.toString()}`;
 }
@@ -37,7 +40,9 @@ function main(file) {
       throw new Error(`factory: cannot read the draft: ${error.message}`);
     }
     const board = process.env.FACTORY_BOARD_URL || DEFAULT_BOARD_URL;
-    process.stdout.write(`${buildLink(draft, board)}\n`);
+    const link = buildLink(draft, board);
+    if (link.length > MAX_LINK) process.stderr.write('factory: long link; some browsers or proxies may refuse it — shorten the description\n');
+    process.stdout.write(`${link}\n`);
   } catch (error) {
     process.stderr.write(`${error.message}\n`);
     process.exit(1);

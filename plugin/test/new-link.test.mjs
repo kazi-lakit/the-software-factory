@@ -56,6 +56,11 @@ describe('buildLink', () => {
     expect(() => buildLink(draft({ title: undefined }), BOARD)).toThrow(/title/);
   });
 
+  it('rejects base main', () => {
+    expect(() => buildLink(draft({ base: 'main' }), BOARD)).toThrow('factory: the factory never targets main');
+    expect(() => buildLink(draft({ base: ' main ' }), BOARD)).toThrow('factory: the factory never targets main');
+  });
+
   it('strips trailing slashes from the board url', () => {
     expect(buildLink(draft(), `${BOARD}/`).startsWith(`${BOARD}/?new=1`)).toBe(true);
     expect(buildLink(draft(), `${BOARD}//`).startsWith(`${BOARD}/?new=1`)).toBe(true);
@@ -84,6 +89,21 @@ describe('link.mjs command line', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain('factory: unknown repo nope');
     expect(r.stdout).toBe('');
+  });
+
+  it('exits 1 for base main', () => {
+    const r = runCli(draft({ base: 'main' }));
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('factory: the factory never targets main');
+    expect(r.stdout).toBe('');
+  });
+
+  it('warns on stderr about a link longer than 8000 characters, but still prints it', () => {
+    const long = runCli(draft({ description: 'é'.repeat(3000) }));
+    expect(long.status).toBe(0);
+    expect(long.stderr).toContain('long link; some browsers or proxies may refuse it');
+    expect(long.stdout.trim().length).toBeGreaterThan(8000);
+    expect(runCli(draft()).stderr).toBe('');
   });
 
   it('exits 1 for a missing or unreadable draft file', () => {

@@ -169,6 +169,28 @@ describe("BoardView new-task link", () => {
     expect(screen.getByText('Unknown repo "nope" in the link; pick one.')).toBeInTheDocument();
   });
 
+  it("caps_the_repo_shown_in_the_note_at_40_characters", async () => {
+    link(params({ repo: "r".repeat(100), title: "T" }));
+    renderBoard();
+    await openForm();
+    expect(screen.getByText(`Unknown repo "${"r".repeat(40)}" in the link; pick one.`)).toBeInTheDocument();
+  });
+
+  it("clears_the_note_on_a_repo_change_and_on_close", async () => {
+    link(params({ repo: "nope", title: "T" }));
+    renderBoard();
+    const form = await openForm();
+    fireEvent.change(within(form).getByLabelText("Repo"), { target: { value: "iam" } });
+    expect(screen.queryByText(/Unknown repo/)).not.toBeInTheDocument();
+    cleanup();
+    clearAllUnsent();
+    link(params({ repo: "nope", title: "T" }));
+    renderBoard();
+    fireEvent.click(within(await openForm()).getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    expect(screen.queryByText(/Unknown repo/)).not.toBeInTheDocument();
+  });
+
   it("trims_the_base_and_uses_dev_when_it_is_empty", async () => {
     link(params({ base: "   ", title: "T" }));
     renderBoard();

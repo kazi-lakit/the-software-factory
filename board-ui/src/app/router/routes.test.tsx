@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { blocksClient } from "../../lib/blocks/client";
-import { completeLogin, fetchSessionClaims, renewSession } from "../../lib/blocks/auth";
+import { completeLogin, fetchSessionClaims, onSessionExpired, renewSession } from "../../lib/blocks/auth";
 import { LocalizationProvider } from "../../lib/i18n/LocalizationProvider";
 import { AuthProvider } from "../providers/AuthProvider";
 import { AppRouter } from "./routes";
@@ -84,6 +84,24 @@ describe("RequireAuth with a query string", () => {
     renderAt("/?new=1&title=Fix%20it%20%26%20more");
     await waitFor(() => expect(window.location.pathname).toBe("/login"));
     expect(window.location.search).toBe(`?returnTo=${encodeURIComponent("/?new=1&title=Fix%20it%20%26%20more")}`);
+  });
+});
+
+describe("a New task link and an expiring session", () => {
+  it("does_not_carry_the_link_into_the_sign_in_return", async () => {
+    let expire: () => void = () => undefined;
+    vi.mocked(onSessionExpired).mockImplementation((listener) => {
+      expire = listener;
+      return () => undefined;
+    });
+    claims.mockResolvedValue({ sub: "me" });
+    me.mockResolvedValue({ data: { roles: ["factory-owner"] } } as never);
+    renderAt("/?new=1&title=Draft&repo=iam");
+    expect(await screen.findByRole("form", { name: "New task" })).toBeInTheDocument();
+    await waitFor(() => expect(window.location.search).toBe(""));
+    act(() => expire());
+    await waitFor(() => expect(window.location.pathname).toBe("/login"));
+    expect(window.location.search).toBe(`?returnTo=${encodeURIComponent("/")}`);
   });
 });
 

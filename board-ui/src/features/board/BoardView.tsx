@@ -15,6 +15,7 @@ const newTaskId = (field: (typeof NEW_TASK_FIELDS)[number]) => `new-task:${field
 
 const TITLE_MAX = 200;
 const DESCRIPTION_MAX = 8000;
+const REPO_NOTE_MAX = 40;
 const DEFAULT_REPO = REPO_IDS[0] ?? "os";
 const DEFAULT_BASE = "dev";
 
@@ -38,7 +39,7 @@ function readLinkPrefill(): LinkPrefill {
   hold("description", (params.get("description") ?? "").slice(0, DESCRIPTION_MAX), "");
   hold("repo", known ? repo : DEFAULT_REPO, DEFAULT_REPO);
   hold("baseBranch", params.get("base")?.trim() || DEFAULT_BASE, DEFAULT_BASE);
-  return { open: true, repoNote: repo && !known ? `Unknown repo "${repo}" in the link; pick one.` : "" };
+  return { open: true, repoNote: repo && !known ? `Unknown repo "${repo.slice(0, REPO_NOTE_MAX)}" in the link; pick one.` : "" };
 }
 
 /** The queue: a column per status, a repo filter, test tasks hidden by default, and the New task form. */
@@ -59,8 +60,11 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
     for (const key of ["new", "title", "description", "repo", "base"]) params.delete(key);
     const rest = params.toString();
     window.history.replaceState(window.history.state, "", `${window.location.pathname}${rest ? `?${rest}` : ""}${window.location.hash}`);
+    // replaceState fires no event: tell the router, so a later sign-in redirect does not carry the link again.
+    window.dispatchEvent(new PopStateEvent("popstate"));
   }, [prefill]);
   const [notice, setNotice] = useState("");
+  const [repoNote, setRepoNote] = useState(prefill.repoNote);
   const newTaskButton = useRef<HTMLButtonElement>(null);
   // After a create the form is gone: focus returns to the button that opened it.
   const [refocusNewTask, setRefocusNewTask] = useState(false);
@@ -114,10 +118,15 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
       {creating ? (
         <NewTaskForm
           id={formId}
-          repoNote={prefill.repoNote}
-          onClose={() => setCreating(false)}
+          repoNote={repoNote}
+          onRepoChange={() => setRepoNote("")}
+          onClose={() => {
+            setCreating(false);
+            setRepoNote("");
+          }}
           onCreated={(task) => {
             setCreating(false);
+            setRepoNote("");
             setRefocusNewTask(true);
             setNotice(`Created ${task.taskId}.`);
           }}
@@ -171,7 +180,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   );
 }
 
-function NewTaskForm({ id, repoNote, onClose, onCreated }: { id: string; repoNote: string; onClose: () => void; onCreated: (task: Task) => void }) {
+function NewTaskForm({ id, repoNote, onRepoChange, onClose, onCreated }: { id: string; repoNote: string; onRepoChange: () => void; onClose: () => void; onCreated: (task: Task) => void }) {
   const [title, setTitle, clearTitle] = useUnsent(newTaskId("title"));
   const [description, setDescription, clearDescription] = useUnsent(newTaskId("description"));
   const [repo, setRepo, clearRepo] = useUnsent(newTaskId("repo"), REPO_IDS[0] ?? "os");
@@ -215,7 +224,10 @@ function NewTaskForm({ id, repoNote, onClose, onCreated }: { id: string; repoNot
       <div className="sf-field-row">
         <label className="sf-field" htmlFor={`${id}-repo`}>
           <span>Repo</span>
-          <select id={`${id}-repo`} className="sf-select" value={repo} onChange={(event) => setRepo(event.target.value)}>
+          <select id={`${id}-repo`} className="sf-select" value={repo} onChange={(event) => {
+            setRepo(event.target.value);
+            onRepoChange();
+          }}>
             {REPO_IDS.map((repoId) => <option key={repoId} value={repoId}>{repoId}</option>)}
           </select>
         </label>
