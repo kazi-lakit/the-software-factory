@@ -21,7 +21,7 @@ describe('run skill', () => {
     expect(fm.name).toBe('run');
     expect(fm.description).toBe('Run one step of the software factory (use only when the user runs /factory:run)');
     expect(fm['argument-hint']).toBe('[<factory>|T-12] [--loop]');
-    expect(fm['allowed-tools']).toBe('Bash(HUSKY=0 node:*), Bash(printenv:*), Bash(rm -f:*), Bash(git -C:*), Agent, Read, Write');
+    expect(fm['allowed-tools']).toBe('Bash(HUSKY=0 node:*), Bash(printenv:*), Bash(rm -f:*), Bash(git -C:*), Agent, SendMessage, Read, Write');
     expect(fmText).not.toContain('disable-model-invocation');
   });
 
@@ -133,6 +133,22 @@ describe('run skill', () => {
     expect(body).toMatch(/unchanged/);
     expect(body).toMatch(/Never compose or edit a reply/);
     expect(body).not.toContain("subagent's final message");
+  });
+
+  it('asks the same agent once to restate a reply that has no result block (T-9, T-10)', () => {
+    const step6 = body.slice(body.indexOf('6. Record'), body.indexOf('\n7. '));
+    // Checks the reply file for the block before complete, and asks once.
+    expect(step6).toMatch(/Read the reply file[^\n]*`<factory-result>`[^\n]*`<\/factory-result>`/);
+    expect(step6).toContain('SendMessage');
+    expect(step6).toMatch(/at most once/);
+    // The exact message: no work redone, only the reply restated.
+    expect(step6).toContain('Your reply ended without the `<factory-result>` block, so the factory cannot record this step. Do not redo, change or add any work, and do not run any tool. Reply again with your final reply only, in the reply format: the same summary, the `<factory-result>` JSON block and, if your stage writes a doc, the `<factory-doc>` block.');
+    // The restated reply replaces the file the same way, and complete runs whatever it holds.
+    expect(step6).toMatch(/restated reply[^\n]*hook[^\n]*reply file/);
+    expect(step6).toMatch(/run `complete` whatever the reply file holds/);
+    // The retry comes before complete, and the skill still never writes a reply itself.
+    expect(step6.indexOf('SendMessage')).toBeLessThan(step6.indexOf(' complete <task> <step>'));
+    expect(body).toMatch(/Never compose or edit a reply/);
   });
 
   it('quotes every path argument (M5)', () => {
