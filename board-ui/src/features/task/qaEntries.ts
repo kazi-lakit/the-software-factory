@@ -1,11 +1,9 @@
 import type { FactoryEvent } from "@factory/core";
-import { isAnswer, isQaEvent, isQuestion } from "../../lib/qaEvent";
+import { isAnswer, isQuestion } from "../../lib/qaEvent";
 import { optionText, parseQuestion } from "./parseQuestion";
 
 export type QaMark = "recommended" | "not-recommended" | "none";
 export type QaEntry = { key: string; question: string; askedBy: string; answer: string | null; answeredAt: string | null; mark: QaMark };
-
-export { isQaEvent };
 
 const humanise = (text: string): string => {
   const spaced = text.replace(/[-_]+/g, " ").trim();
@@ -41,8 +39,15 @@ export function buildQaLog(events: readonly FactoryEvent[], openQuestion: string
       if (last && last.answer === null) last.answer = event;
     }
   }
-  const last = asked[asked.length - 1];
-  if (openQuestion !== null && last && last.event.to === openQuestion) asked.pop();
+  if (openQuestion !== null) {
+    const unanswered = (i: number) => asked[i]!.answer === null;
+    let drop = -1;
+    for (let i = asked.length - 1; i >= 0 && drop < 0; i--) {
+      if (unanswered(i) && (asked[i]!.event.to ?? "").trim() === openQuestion.trim()) drop = i;
+    }
+    for (let i = asked.length - 1; i >= 0 && drop < 0; i--) if (unanswered(i)) drop = i;
+    if (drop >= 0) asked.splice(drop, 1);
+  }
   return asked
     .map(({ answer, event }, index): QaEntry => {
       const parsed = parseQuestion(event.to ?? "");

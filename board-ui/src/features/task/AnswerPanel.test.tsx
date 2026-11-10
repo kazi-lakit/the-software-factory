@@ -248,8 +248,30 @@ describe("AnswerPanel review fixes", () => {
     expect(heading.textContent).toBe("Choose an answer");
   });
 
-  it("keeps_radios_enabled_while_sending", async () => {
-    await renderPanel(LETTERED(true));
-    expect(screen.getByRole("radio", { name: /develop/ })).not.toBeDisabled();
+  it("disables_radios_and_other_text_while_sending", async () => {
+    const task = await blockedTask(LETTERED(true));
+    let release: () => void = () => undefined;
+    const pending = new Promise<never>((_, reject) => {
+      release = () => reject(new Error("stop"));
+    });
+    vi.spyOn(fakeBoard().owner, "updateTask").mockReturnValueOnce(pending);
+    renderWithClient(<AnswerPanel task={task} events={[questionEvent(task)]} onReload={vi.fn()} />);
+    const radios = screen.getAllByRole("radio");
+    fireEvent.click(radios[radios.length - 1]!);
+    fireEvent.change(answerBox(), { target: { value: "use release" } });
+    send();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send answer" })).toBeDisabled());
+    for (const radio of screen.getAllByRole("radio")) expect(radio).toBeDisabled();
+    expect(answerBox()).toBeDisabled();
+    release();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send answer" })).toBeEnabled());
+    for (const radio of screen.getAllByRole("radio")) expect(radio).toBeEnabled();
+  });
+
+  it("shows_the_blocked_heading_when_there_is_no_question", async () => {
+    const task = await seedTask({ title: "Stuck" }, "blocked", { blockedReason: "agent asked", stage: "spec" });
+    renderWithClient(<AnswerPanel task={{ ...task, question: null }} events={[]} onReload={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Blocked: your answer" })).toBeInTheDocument();
+    expect(screen.getByText("No question was given.")).toBeInTheDocument();
   });
 });

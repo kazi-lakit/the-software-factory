@@ -91,4 +91,14 @@ describe("buildQaLog review fixes", () => {
     const keys = buildQaLog([ev("question", LETTERED), ev("question", LETTERED)], null).map((e) => e.key);
     expect(new Set(keys).size).toBe(2);
   });
+
+  it("drops_the_open_question_even_when_it_is_not_the_last_event_or_text_differs_by_whitespace", () => {
+    const entries = buildQaLog([ev("question", "Old?"), ev("question", "Open?\n"), ev("question", null), ev("answer", "stray")], "Open?");
+    expect(entries.map((e) => e.question)).toEqual(["Old?"]);
+  });
+
+  it("drops_only_the_last_unanswered_when_the_open_text_matches_nothing", () => {
+    const entries = buildQaLog([ev("question", "First?"), ev("answer", "1"), ev("question", "Second?")], "Reworded?");
+    expect(entries.map((e) => e.question)).toEqual(["First?"]);
+  });
 });

@@ -90,7 +90,7 @@ function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryE
           <div className="sf-radio-cards" role="radiogroup" aria-labelledby={headingId}>
             {options.map((option) => (
               <label key={option.letter} className={`sf-radio-card${choice === option.letter ? " sf-radio-card-selected" : ""}`}>
-                <input type="radio" name={groupName} value={option.letter} checked={choice === option.letter} aria-disabled={busy} onChange={() => { if (!busy) setChoice(option.letter); }} />
+                <input type="radio" name={groupName} value={option.letter} checked={choice === option.letter} disabled={busy} onChange={() => setChoice(option.letter)} />
                 <span className="sf-radio-body">
                   <span className="sf-radio-label">
                     {option.label}
@@ -101,7 +101,7 @@ function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryE
               </label>
             ))}
             <label className={`sf-radio-card${choice === OTHER ? " sf-radio-card-selected" : ""}`}>
-              <input type="radio" name={groupName} value={OTHER} checked={choice === OTHER} aria-disabled={busy} onChange={() => { if (!busy) setChoice(OTHER); }} />
+              <input type="radio" name={groupName} value={OTHER} checked={choice === OTHER} disabled={busy} onChange={() => setChoice(OTHER)} />
               <span className="sf-radio-body">
                 <span className="sf-radio-label">Other</span>
                 <span className="sf-radio-why">Write your own answer</span>
@@ -112,7 +112,7 @@ function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryE
         {showTextarea ? (
           <label className="sf-field" htmlFor={answerId}>
             <span>Your answer</span>
-            <textarea id={answerId} className="sf-input" rows={4} value={text} onChange={(event) => setText(event.target.value)} />
+            <textarea id={answerId} className="sf-input" rows={4} value={text} disabled={busy} onChange={(event) => setText(event.target.value)} />
           </label>
         ) : null}
         <WriteProblemNotice problem={problem} onReload={() => void onReload()} />
