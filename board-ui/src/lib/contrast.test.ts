@@ -77,3 +77,21 @@ describe("non_text_colours_meet_3_to_1", () => {
     expect(r, `${theme}: ${fg} on ${bg} is ${r.toFixed(2)}:1`).toBeGreaterThanOrEqual(3);
   });
 });
+
+// The task page's new text pairs: stepper labels (muted, waiting in accent-text) on the page, details terms on the surface panel.
+describe("task_page_text_pairs_meet_4_5_to_1", () => {
+  const rules: [string, string, string][] = [
+    [".sf-stepper-label", "muted", "bg"],
+    [".sf-stepper-item-waiting .sf-stepper-label", "accent-text", "bg"],
+    [".sf-details dt", "muted", "surface"],
+    [".sf-task-meta", "muted", "bg"]
+  ];
+  const cases = Object.keys(themes).flatMap((t) => rules.map(([sel, fg, bg]) => [t, sel, fg, bg] as const));
+  it.each(cases)("%s: %s (%s on %s)", (theme, selector, fg, bg) => {
+    const declared = tokens(css, selector).color;
+    expect(declared, `${selector} sets no colour`).toBe(`var(--sf-${fg})`);
+    const t = themes[theme] as Record<string, string>;
+    const r = ratio(parse(t[`--sf-${fg}`] as string).rgb, parse(t[`--sf-${bg}`] as string).rgb);
+    expect(r, `${theme}: ${selector} is ${r.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+});

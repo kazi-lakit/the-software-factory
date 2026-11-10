@@ -80,3 +80,11 @@ describe("AnswerPanel", () => {
     expect(answerBox()).toHaveValue("Use dev.");
   });
 });
+
+describe("AnswerPanel styling", () => {
+  it("answer_panel_is_a_needs_you_panel", async () => {
+    const task = await blockedTask();
+    renderWithClient(<AnswerPanel task={task} onReload={vi.fn()} />);
+    expect(screen.getByRole("region")).toHaveClass("sf-panel", "sf-panel-needs-you");
+  });
+});

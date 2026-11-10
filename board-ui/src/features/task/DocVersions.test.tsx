@@ -48,3 +48,23 @@ describe("DocVersions", () => {
     expect(screen.getByText("No plan yet.")).toBeInTheDocument();
   });
 });
+
+describe("DocVersions dropdowns", () => {
+  it("version_and_compare_selects_use_the_shared_select_class", () => {
+    render(<DocVersions label="Spec" docs={docs} />);
+    expect(screen.getByLabelText("Spec version")).toHaveClass("sf-select");
+    expect(screen.getByLabelText("Compare with")).toHaveClass("sf-select");
+  });
+
+  it("selects_have_no_inline_style_override", () => {
+    render(<DocVersions label="Spec" docs={docs} />);
+    expect(screen.getByLabelText("Spec version")).not.toHaveAttribute("style");
+    expect(screen.getByLabelText("Compare with")).not.toHaveAttribute("style");
+  });
+
+  it("labels_are_associated_with_the_selects", () => {
+    render(<DocVersions label="Spec" docs={docs} />);
+    expect(screen.getByLabelText("Spec version").tagName).toBe("SELECT");
+    expect(screen.getByLabelText("Compare with").tagName).toBe("SELECT");
+  });
+});

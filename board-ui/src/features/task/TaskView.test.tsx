@@ -126,7 +126,7 @@ describe("TaskView factory", () => {
 
 const DAY = 86_400_000;
 const createEvent = (taskId: string, at: string) =>
-  ({ action: "create", actor: "you", factoryId: "blocks", at, taskId, to: "inbox" }) as const;
+  ({ action: "create", actor: "you", factoryId: "blocks", at, field: null, from: null, reason: "", taskId, to: "inbox" }) as const;
 
 describe("TaskView page layout", () => {
   it("title_h2_has_the_title_class_and_meta_line_under_it", async () => {
@@ -157,8 +157,8 @@ describe("TaskView page layout", () => {
     const task = await seedTask({ title: "Details" }, "build", { branch: "factory/T-9-x", costUsd: 2.25, stage: "build" });
     const { owner } = fakeBoard();
     await owner.addEvents([
-      { action: "move", actor: "core", factoryId: "blocks", at: "2026-11-10T10:00:00.000Z", field: "status", from: "ready", taskId: task.taskId, to: "spec" },
-      { action: "move", actor: "core", factoryId: "blocks", at: "2099-01-01T10:00:00.000Z", field: "status", from: "spec", taskId: task.taskId, to: "plan" }
+      { action: "move", actor: "core", factoryId: "blocks", at: "2026-11-10T10:00:00.000Z", field: "status", from: "ready", reason: "", taskId: task.taskId, to: "spec" },
+      { action: "move", actor: "core", factoryId: "blocks", at: "2099-01-01T10:00:00.000Z", field: "status", from: "spec", reason: "", taskId: task.taskId, to: "plan" }
     ]);
     renderTask(task.taskId);
     const details = await screen.findByRole("complementary", { name: "Details" });
