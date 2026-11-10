@@ -334,14 +334,15 @@ describe('factories, status health and --factory', () => {
     expect(out).toEqual(['paused']);
   });
 
-  test('factories --json lists defs and repos and has no PAT value', async () => {
+  test('factories --json lists defs and repos, names the gh login and has no token', async () => {
     const { out, go } = setup(two());
     expect(await go('factories', '--json')).toBe(0);
     const json = JSON.parse(out.join('\n'));
     expect(json.factories.map((f: { factoryId: string }) => f.factoryId)).toEqual(['blocks', 'delta']);
     expect(json.factories[1].repos).toMatchObject([{ repoId: 'api' }]);
     expect(out.join('\n')).not.toMatch(/secret/);
-    expect(Object.keys(json.factories[0])).not.toContain('pat');
+    expect(json.factories[0].ghUser).toBe('gh-blocks');
+    expect(Object.keys(json.factories[0]).filter((k) => /token|secret|^pat/i.test(k))).toEqual([]);
     await go('factories');
     expect(out.at(-1)).toBe('delta (delta) active: api');
   });
