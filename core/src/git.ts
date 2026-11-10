@@ -56,6 +56,12 @@ async function assertWorktree(path: string): Promise<void> {
   if (top !== realpathSync(path)) throw invalid;
 }
 
+/** The clone's origin must be the repo's remote: after the owner changes `remote`, a push would go to the old repo. */
+async function assertOrigin(path: string, factoryId: string, repo: FactoryRepo): Promise<void> {
+  const origin = (await git(path, ['remote', 'get-url', 'origin'])).trim();
+  if (origin !== repo.remote) throw new Error(`clone ${factoryId}/${repo.repoId} points at a different remote; remove it to re-clone`);
+}
+
 async function branchExists(clone: string, branch: string): Promise<boolean> {
   try {
     await execFileP('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { cwd: clone });
@@ -73,8 +79,9 @@ export class LocalGitRepos implements GitRepos {
     const clone = join(factoryClones, repo.repoId);
     if (!existsSync(clone)) {
       mkdirSync(factoryClones, { recursive: true });
-      await git(undefined, ['clone', repo.remote, clone]);
+      await git(undefined, ['clone', '--', repo.remote, clone]);
     }
+    await assertOrigin(clone, factoryId, repo);
     await git(clone, ['fetch', 'origin', '--prune']);
     const hooks = join(clone, '.git', 'hooks');
     mkdirSync(hooks, { recursive: true });
@@ -90,6 +97,7 @@ export class LocalGitRepos implements GitRepos {
     const path = join(this.root, '.clones', 'worktrees', taskId);
     if (existsSync(path)) {
       await assertWorktree(path);
+      await assertOrigin(path, factoryId, repo);
       // The clone the worktree really belongs to (an old-layout clone is not at .clones/<factory>/<repo>).
       writeProtectedList(await commonDirOf(path), protectedBranches);
       await this.setIdentity(path, identity);

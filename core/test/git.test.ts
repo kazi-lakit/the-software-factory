@@ -61,6 +61,38 @@ describe('LocalGitRepos', () => {
     expect(existsSync(join(b, '.git'))).toBe(true);
   });
 
+  test('clone passes the remote after -- so git never reads it as an option (M4)', async () => {
+    const marker = join(tmp, 'upload-pack-ran');
+    const r = new LocalGitRepos(join(tmp, 'dashes'));
+    const err = await r.ensureClone('d', repoFixture('d', 'api', { remote: `--upload-pack=touch ${marker}` }), ['main']).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toContain('git clone -- --upload-pack=');
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  describe('a clone whose origin is not the repo\'s remote (M4)', () => {
+    let other: string;
+    const MISMATCH = 'clone moved/api points at a different remote; remove it to re-clone';
+    beforeAll(() => {
+      other = join(tmp, 'other.git');
+      git(tmp, 'clone', '--bare', bare, other);
+    });
+
+    test('ensureClone refuses it and leaves origin as it was', async () => {
+      const api = repoFixture('moved', 'api', { remote: bare });
+      const clone = await repos.ensureClone('moved', api, ['main']);
+      await expect(repos.ensureClone('moved', { ...api, remote: other }, ['main'])).rejects.toThrow(MISMATCH);
+      expect(git(clone, 'remote', 'get-url', 'origin').trim()).toBe(bare);
+    });
+
+    test('a reused worktree of that clone is refused too, so nothing is pushed to the old remote', async () => {
+      const api = repoFixture('moved', 'api', { remote: bare });
+      await repos.worktree('moved', api, 'T-40', 'factory/T-40-x', ['main']);
+      await expect(repos.worktree('moved', { ...api, remote: other }, 'T-40', 'factory/T-40-x', ['main'])).rejects.toThrow(MISMATCH);
+      expect(await repos.worktree('moved', api, 'T-40', 'factory/T-40-x', ['main'])).toBe(join(root, '.clones', 'worktrees', 'T-40'));
+    });
+  });
+
   test('worktree branches from origin/dev and is reused', async () => {
     const branch = 'factory/T-1-x';
     const wt = await repos.worktree('blocks', cfg, 'T-1', branch, ['dev', 'main']);
