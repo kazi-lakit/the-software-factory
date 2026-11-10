@@ -56,9 +56,9 @@ export function realish(p, realpath = fs.realpathSync) {
   }
 }
 
-/** True when the command names the worktree or a subfolder as `cd "<wt>"`, `cd <wt>/sub`, `-C "<wt>"` or `-C <wt>`. */
+/** True when the command names the worktree or a subfolder as `cd "<wt>"`, `cd <wt>/sub` (no `.` or `..` segments), `-C "<wt>"` or `-C <wt>`. */
 function namesWorktree(cmd, wt) {
-  const re = new RegExp(`(?:\\bcd|(?:^|\\s)-C)\\s+(["']?)${escapeRe(wt)}(?:\\/[^\\s"';&|)]*)?\\1(?=$|[\\s;&|)])`);
+  const re = new RegExp(`(?:\\bcd|(?:^|\\s)-C)\\s+(["']?)${escapeRe(wt)}(?:\\/(?!\\.{1,2}(?:[\\/\\s"';&|)]|$))[^\\s"';&|)\\/]+)*\\/?\\1(?=$|[\\s;&|)])`);
   return re.test(cmd);
 }
 
