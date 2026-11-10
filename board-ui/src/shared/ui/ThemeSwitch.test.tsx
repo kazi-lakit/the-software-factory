@@ -1,11 +1,10 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { THEME_KEY, applyTheme, resetThemeForTests } from "../../lib/theme";
+import { THEME_KEY, applyTheme } from "../../lib/theme";
 import { ThemeSwitch } from "./ThemeSwitch";
 
 beforeEach(() => {
   localStorage.clear();
-  resetThemeForTests();
   applyTheme("dark");
 });
 afterEach(cleanup);

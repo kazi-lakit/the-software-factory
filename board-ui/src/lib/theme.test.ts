@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { renderHook, act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { THEME_KEY, resetThemeForTests, resolveInitialTheme, setTheme, useTheme } from "./theme";
+import { THEME_KEY, applyTheme, resolveInitialTheme, setTheme, useTheme } from "./theme";
 
 const systemDark = (dark: boolean) =>
   vi.stubGlobal("matchMedia", (q: string) => ({ matches: dark && q.includes("dark"), media: q }));
@@ -11,7 +11,6 @@ const systemDark = (dark: boolean) =>
 beforeEach(() => {
   localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
-  resetThemeForTests();
   systemDark(true);
 });
 afterEach(() => {
@@ -76,6 +75,18 @@ describe("useTheme", () => {
     const { result } = renderHook(() => useTheme());
     expect(result.current).toBe("dark");
     act(() => setTheme("light"));
+    expect(result.current).toBe("light");
+  });
+});
+
+describe("useTheme_follows_the_attribute", () => {
+  it("a_direct_applyTheme_call_updates_the_hook", async () => {
+    const { result } = renderHook(() => useTheme());
+    expect(result.current).toBe("dark");
+    await act(async () => {
+      applyTheme("light");
+      await Promise.resolve();
+    });
     expect(result.current).toBe("light");
   });
 });

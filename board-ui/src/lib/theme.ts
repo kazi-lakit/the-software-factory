@@ -28,38 +28,39 @@ export function applyTheme(theme: Theme): void {
   document.documentElement.setAttribute("data-theme", theme);
 }
 
-// Module state so every mounted switch agrees. The system setting is only read at start-up (a saved choice must not move).
-const listeners = new Set<() => void>();
-let current: Theme | undefined;
-
+// The DOM attribute is the single source of truth, so it is read on every snapshot and the hook follows any change to it.
 const read = (): Theme => {
-  if (current === undefined) {
-    const attr = document.documentElement.getAttribute("data-theme");
-    current = isTheme(attr) ? attr : resolveInitialTheme();
-  }
-  return current;
+  const attr = document.documentElement.getAttribute("data-theme");
+  return isTheme(attr) ? attr : resolveInitialTheme();
 };
-
-/** Test only: forget the page's theme so the next read starts again. */
-export function resetThemeForTests(): void {
-  current = undefined;
-}
 
 /** Apply the theme and remember it; without writable storage it still applies for the life of the page. */
 export function setTheme(theme: Theme): void {
-  current = theme;
   applyTheme(theme);
   try {
     window.localStorage.setItem(THEME_KEY, theme);
   } catch {
     // Not kept for the next visit.
   }
-  for (const listener of listeners) listener();
+  for (const listener of [...listeners]) {
+    try {
+      listener();
+    } catch {
+      // One failing listener must not stop the others.
+    }
+  }
 }
+
+const listeners = new Set<() => void>();
 
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
-  return () => void listeners.delete(listener);
+  const observer = new MutationObserver(listener);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  return () => {
+    listeners.delete(listener);
+    observer.disconnect();
+  };
 };
 
 export function useTheme(): Theme {

@@ -193,4 +193,9 @@ describe("board_css_theme_tokens", () => {
     expect(tokens(css, ".sf-paused").color).toBe("var(--sf-accent-text)");
     expect(tokens(css, ".sf-badge").color).toBe("var(--sf-accent-text)");
   });
+
+  it("focus_outlines_use_the_focus_token", () => {
+    const outlines = read("board.css").match(/outline:[^;]*;/g) ?? [];
+    for (const o of outlines) if (o.includes("var(")) expect(o).toContain("var(--sf-focus)");
+  });
 });

@@ -68,7 +68,7 @@ describe("text_pairs_meet_4_5_to_1", () => {
 // than changed or tested here. chrome-border and needs-tint are decorative.
 describe("non_text_colours_meet_3_to_1", () => {
   const cases = Object.keys(themes).flatMap((t) =>
-    ["focus", "progress", "accent"].flatMap((fg) => ["bg", "surface"].map((bg) => [t, fg, bg] as const))
+    ["focus", "progress", "accent"].flatMap((fg) => ["bg", "surface", "accent-soft"].map((bg) => [t, fg, bg] as const))
   );
   it.each(cases)("%s: %s on %s", (theme, fg, bg) => {
     const t = themes[theme] as Record<string, string>;
