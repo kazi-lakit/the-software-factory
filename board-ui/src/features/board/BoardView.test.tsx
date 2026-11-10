@@ -826,3 +826,117 @@ describe("BoardView all stages restyle", () => {
     expect(screen.getAllByRole("region")).toHaveLength(13);
   });
 });
+
+describe("New task form restyle and Mark ready now", () => {
+  beforeEach(showStages);
+  async function openForm() {
+    renderBoard();
+    fireEvent.click(await screen.findByRole("button", { name: "New task" }));
+    return screen.getByRole("form", { name: "New task" });
+  }
+  const ready = (form: HTMLElement) => within(form).getByRole("switch", { name: "Mark ready now" });
+
+  it("new_task_form_has_visible_28px_title_and_outlined_close", async () => {
+    const form = await openForm();
+    expect(within(form).getByRole("heading", { name: "New task" })).toHaveClass("sf-page-title");
+    expect(within(form).getByRole("button", { name: "Close" })).not.toHaveClass("sf-button-primary");
+  });
+
+  it("mark_ready_now_is_a_shared_switch_off_by_default", async () => {
+    const form = await openForm();
+    expect(ready(form)).not.toBeChecked();
+    expect(ready(form).closest("label")).toHaveClass("sf-switch");
+  });
+
+  it("switch_off_creates_only", async () => {
+    const create = vi.spyOn(fakeBoard().owner, "createTask");
+    const update = vi.spyOn(fakeBoard().owner, "updateTask");
+    const form = await openForm();
+    fireEvent.change(within(form).getByLabelText("Title"), { target: { value: "Plain" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Create task" }));
+    await within(column("Inbox")).findByText("Plain");
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(update).not.toHaveBeenCalled();
+    expect((await fakeBoard().owner.listTasks())[0]!.status).toBe("inbox");
+  });
+
+  it("switch_on_creates_then_marks_ready", async () => {
+    const create = vi.spyOn(fakeBoard().owner, "createTask");
+    const update = vi.spyOn(fakeBoard().owner, "updateTask");
+    const form = await openForm();
+    fireEvent.change(within(form).getByLabelText("Title"), { target: { value: "Go now" } });
+    fireEvent.click(ready(form));
+    fireEvent.click(within(form).getByRole("button", { name: "Create task" }));
+    await waitFor(() => expect(screen.queryByRole("form", { name: "New task" })).not.toBeInTheDocument());
+    expect(create).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(create.mock.invocationCallOrder[0]!).toBeLessThan(update.mock.invocationCallOrder[0]!);
+    const [stored] = await fakeBoard().owner.listTasks();
+    expect(stored!.status).toBe("ready");
+    expect((await fakeBoard().owner.listEvents(stored!.taskId)).length).toBe(2);
+  });
+
+  it("create_failure_never_marks_ready", async () => {
+    const update = vi.spyOn(fakeBoard().owner, "updateTask");
+    const create = vi.spyOn(fakeBoard().owner, "createTask");
+    const form = await openForm();
+    fireEvent.click(ready(form));
+    fireEvent.click(within(form).getByRole("button", { name: "Create task" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("title must not be blank");
+    fireEvent.change(within(form).getByLabelText("Title"), { target: { value: "Keep" } });
+    fireEvent.change(within(form).getByLabelText("Base branch"), { target: { value: "main" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Create task" }));
+    expect(await screen.findByText(/never uses main as a base/)).toBeInTheDocument();
+    create.mockRejectedValueOnce(new ForbiddenError("no"));
+    fireEvent.change(within(form).getByLabelText("Base branch"), { target: { value: "dev" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Create task" }));
+    expect(await screen.findByText("Blocks refused this change for your account.")).toBeInTheDocument();
+    expect(update).not.toHaveBeenCalled();
+    expect(within(form).getByLabelText("Title")).toHaveValue("Keep");
+  });
+
+  it("mark_ready_failure_keeps_inbox_and_notifies_after_the_form_closes", async () => {
+    vi.spyOn(fakeBoard().owner, "updateTask").mockRejectedValueOnce(new ForbiddenError("no"));
+    const form = await openForm();
+    fireEvent.change(within(form).getByLabelText("Title"), { target: { value: "Half" } });
+    fireEvent.click(ready(form));
+    fireEvent.click(within(form).getByRole("button", { name: "Create task" }));
+    await waitFor(() => expect(screen.queryByRole("form", { name: "New task" })).not.toBeInTheDocument());
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.map((a) => a.textContent).join(" ")).toContain("Blocks refused this change for your account.");
+    expect(alerts.map((a) => a.textContent).join(" ")).toContain("The task was created but not marked ready.");
+    const [stored] = await fakeBoard().owner.listTasks();
+    expect(stored!.status).toBe("inbox");
+    await within(column("Inbox")).findByText("Half");
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    expect(screen.getByLabelText("Title")).toHaveValue("");
+    expect(screen.queryByText("The task was created but not marked ready.")).not.toBeInTheDocument();
+  });
+
+  it("submit_disabled_while_in_flight", async () => {
+    let release: () => void = () => undefined;
+    const real = fakeBoard().owner.createTask.bind(fakeBoard().owner);
+    const create = vi.spyOn(fakeBoard().owner, "createTask").mockImplementation(async (...args) => {
+      await new Promise<void>((resolve) => { release = resolve; });
+      return real(...args);
+    });
+    const form = await openForm();
+    fireEvent.change(within(form).getByLabelText("Title"), { target: { value: "Once" } });
+    const button = within(form).getByRole("button", { name: "Create task" });
+    fireEvent.click(button);
+    await waitFor(() => expect(button).toBeDisabled());
+    fireEvent.click(button);
+    expect(create).toHaveBeenCalledTimes(1);
+    release();
+    await within(column("Inbox")).findByText("Once");
+  });
+
+  it("ready_now_is_not_persisted_in_unsent", async () => {
+    let form = await openForm();
+    fireEvent.click(ready(form));
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    fireEvent.click(screen.getByRole("button", { name: "New task" }));
+    form = screen.getByRole("form", { name: "New task" });
+    expect(ready(form)).not.toBeChecked();
+  });
+});
