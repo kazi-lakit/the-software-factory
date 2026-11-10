@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { GhLoginMissingError, readGhToken, readSecret, SecretMissingError, type ExecFile } from '../src/secrets.js';
+import { GhLoginMissingError, ghLoggedInUsers, isGhLoggedIn, readGhToken, readSecret, SecretMissingError, type ExecFile } from '../src/secrets.js';
 
 describe('readSecret', () => {
   test('runs security with the exact args and trims the trailing newline', async () => {
@@ -63,5 +63,21 @@ describe('GhLoginMissingError', () => {
     const err = await readGhToken('octocat', async () => ({ code: 1, stdout: '', stderr: '' })).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(GhLoginMissingError);
     expect(err).toMatchObject({ user: 'octocat' });
+  });
+});
+
+describe('ghLoggedInUsers', () => {
+  test('lists the github.com logins in state success, lower-cased, from gh auth status (R16)', async () => {
+    const calls: Array<[string, string[]]> = [];
+    const stdout = JSON.stringify({ hosts: { 'github.com': [{ login: 'Kazi-Lakit', state: 'success' }, { login: 'other', state: 'timeout' }, null] } });
+    const users = await ghLoggedInUsers(async (file, args) => { calls.push([file, args]); return { code: 0, stdout, stderr: '' }; });
+    expect(calls).toEqual([['gh', ['auth', 'status', '--hostname', 'github.com', '--json', 'hosts']]]);
+    expect([...users]).toEqual(['kazi-lakit']);
+    expect(isGhLoggedIn(users, 'KAZI-lakit')).toBe(true);
+    expect(isGhLoggedIn(users, 'other')).toBe(false);
+  });
+
+  test('a gh that cannot be run is an empty list, not an error', async () => {
+    expect((await ghLoggedInUsers(async () => { throw new Error('spawn gh ENOENT'); })).size).toBe(0);
   });
 });

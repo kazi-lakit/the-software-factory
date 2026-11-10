@@ -25,10 +25,21 @@ const git: GitRepos = {
   isClean: async () => true,
 };
 
-/** A fake `security`: only the listed accounts exist (value `secret`). It never touches the real Keychain. */
-const fakeSecurity = (initial: string[] = ['gh-blocks']): ExecFile => {
+/** gh's `auth status --json hosts` answer for logins in state success on github.com. */
+const ghStatusJson = (logins: string[], extra: Array<{ login: string; state: string }> = []) =>
+  JSON.stringify({ hosts: { 'github.com': [...logins.map((login) => ({ host: 'github.com', login, state: 'success', active: false })), ...extra] } });
+
+/**
+ * A fake `security` and `gh`: the listed names are both the Keychain accounts (value `secret`) and the gh logins.
+ * It never touches the real Keychain or gh, and refuses `gh auth token` outright.
+ */
+const fakeSecurity = (initial: string[] = ['gh-blocks'], gh: { code?: number; stdout?: string } = {}): ExecFile => {
   const accounts = new Set(initial);
-  return async (_file, args, stdin) => {
+  return async (file, args, stdin) => {
+    if (file === 'gh') {
+      if (args.join(' ') !== 'auth status --hostname github.com --json hosts') throw new Error(`unexpected gh ${args.join(' ')}`);
+      return { code: gh.code ?? 0, stdout: gh.stdout ?? ghStatusJson([...accounts]), stderr: '' };
+    }
     if (args[0] === '-i') {
       accounts.add(/ -a (\S+) /.exec(stdin ?? '')?.[1] ?? '');
       return { code: 0, stdout: '', stderr: '' };
@@ -37,7 +48,7 @@ const fakeSecurity = (initial: string[] = ['gh-blocks']): ExecFile => {
   };
 };
 
-function setup(factories = seed(), accounts?: string[], securityCalls?: string[][]) {
+function setup(factories = seed(), accounts?: string[], securityCalls?: string[][], gh?: { code?: number; stdout?: string }, files?: string[]) {
   const store = new MemoryStore({ factories });
   const exec: Exec = async () => ({ code: 0, output: '' });
   const engine = new Engine({
@@ -51,9 +62,10 @@ function setup(factories = seed(), accounts?: string[], securityCalls?: string[]
   };
   const out: string[] = [];
   const err: string[] = [];
-  const security = fakeSecurity(accounts);
+  const security = fakeSecurity(accounts, gh);
   const exec2: ExecFile = (file, args, stdin) => {
     securityCalls?.push(args);
+    files?.push(file);
     return security(file, args, stdin);
   };
   const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine, { exec: exec2 });
@@ -319,7 +331,7 @@ describe('factory cli', () => {
     expect(json.tasks).toMatchObject([{ taskId: 'T-1', status: 'ready' }]);
     expect(json.factories).toMatchObject([{ factoryId: 'blocks', name: 'blocks', active: true, paused: false, counts: { ready: 1 }, ghLoggedIn: true }]);
     await go('status');
-    expect(out.slice(1).join('\n')).toMatch(/factory blocks: active, paused false, PAT present, ready=1\n.*ready: 1/s);
+    expect(out.slice(1).join('\n')).toMatch(/factory blocks: active, paused false, gh gh-blocks logged in, ready=1\n.*ready: 1/s);
   });
 });
 
@@ -366,32 +378,51 @@ describe('factories, status health and --factory', () => {
     expect(err).toEqual(['error: --factory is required (active: blocks, delta)']);
   });
 
-  test('status writes a health row per factory and prints the PAT state', async () => {
+  test('status writes a health row per factory and prints the gh login state (R16)', async () => {
     const { store, out, go } = setup(two(), ['gh-blocks']);
     expect(await go('status')).toBe(0);
-    expect(out).toContain('factory blocks: active, paused false, PAT present');
-    expect(out).toContain('factory delta: active, paused false, PAT missing');
+    expect(out).toContain('factory blocks: active, paused false, gh gh-blocks logged in');
+    expect(out).toContain('factory delta: active, paused false, gh gh-delta not logged in');
     const health = await store.listFactoryHealth();
     expect(health.map((h) => [h.factoryId, h.ghLoggedIn])).toEqual([['blocks', true], ['delta', false]]);
     expect(JSON.stringify(health)).not.toMatch(/secret/);
   });
 
-  test('status checks that each PAT entry exists without reading its value (M2)', async () => {
+  test('status asks gh auth status once, never gh auth token, and never the Keychain (R16)', async () => {
     const calls: string[][] = [];
-    const { out, go } = setup(two(), ['gh-blocks'], calls);
+    const files: string[] = [];
+    const { out, go } = setup(two(), ['gh-blocks'], calls, undefined, files);
     expect(await go('status')).toBe(0);
-    expect(calls.length).toBe(2);
-    expect(calls.some((a) => a.includes('-w'))).toBe(false);
-    expect(out).toContain('factory blocks: active, paused false, PAT present');
-    expect(out).toContain('factory delta: active, paused false, PAT missing');
+    expect(calls).toEqual([['auth', 'status', '--hostname', 'github.com', '--json', 'hosts']]);
+    expect(files).toEqual(['gh']);
+    expect(calls.some((a) => a.includes('token'))).toBe(false);
+    expect(out).toContain('factory blocks: active, paused false, gh gh-blocks logged in');
   });
 
-  test('status prints PAT unknown for a factory never checked (M2)', async () => {
+  test('status matches the login ignoring case, and only in state success (R16)', async () => {
+    const stdout = JSON.stringify({ hosts: { 'github.com': [{ login: 'GH-Blocks', state: 'success' }, { login: 'gh-delta', state: 'error' }], 'ghe.example.com': [{ login: 'gh-delta', state: 'success' }] } });
+    const { store, go } = setup(two(), [], undefined, { stdout });
+    expect(await go('status')).toBe(0);
+    expect((await store.listFactoryHealth()).map((h) => [h.factoryId, h.ghLoggedIn])).toEqual([['blocks', true], ['delta', false]]);
+  });
+
+  test.each([
+    ['gh fails', { code: 1, stdout: '' }],
+    ['gh prints no JSON', { stdout: 'not json' }],
+    ['gh prints another shape', { stdout: '{"hosts":[]}' }],
+  ])('%s: every factory is not logged in (R16)', async (_name, gh) => {
+    const { store, out, go } = setup(two(), ['gh-blocks', 'gh-delta'], undefined, gh);
+    expect(await go('status')).toBe(0);
+    expect((await store.listFactoryHealth()).map((h) => h.ghLoggedIn)).toEqual([false, false]);
+    expect(out).toContain('factory blocks: active, paused false, gh gh-blocks not logged in');
+  });
+
+  test('status prints unknown for a factory never checked (M2)', async () => {
     const { store, out, go } = setup(two());
     store.listFactoryDefs = async () => []; // nothing to probe: the health rows stay unwritten
     expect(await go('status')).toBe(0);
-    expect(out).toContain('factory blocks: active, paused false, PAT unknown');
-    expect(out).toContain('factory delta: active, paused false, PAT unknown');
+    expect(out).toContain('factory blocks: active, paused false, gh gh-blocks unknown');
+    expect(out).toContain('factory delta: active, paused false, gh gh-delta unknown');
   });
 
   test('a health write failure is logged and status still succeeds', async () => {
@@ -399,7 +430,7 @@ describe('factories, status health and --factory', () => {
     store.setFactoryHealth = async () => { throw new Error('refused'); };
     expect(await go('status')).toBe(0);
     expect(err).toEqual(['health of blocks not written: refused']);
-    expect(out[1]).toBe('factory blocks: active, paused false, PAT present');
+    expect(out[1]).toBe('factory blocks: active, paused false, gh gh-blocks logged in');
   });
 
   test('status probes and records only the loaded, valid factories', async () => {

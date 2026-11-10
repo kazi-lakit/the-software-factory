@@ -1282,7 +1282,7 @@ describe('status', () => {
         { taskId: 'T-2', title: 'Add widget', repo: 'data', status: 'build', stage: 'build', blockedReason: null, question: null, prUrl: null },
         { taskId: 'T-3', title: 'Add widget', repo: 'data', status: 'blocked', stage: 'verify', blockedReason: null, question: 'which API?', prUrl: 'u' },
       ],
-      factories: [{ factoryId: 'blocks', name: 'blocks', active: true, paused: false, counts: { build: 2, blocked: 1 }, ghLoggedIn: null }],
+      factories: [{ factoryId: 'blocks', name: 'blocks', active: true, paused: false, counts: { build: 2, blocked: 1 }, ghUser: 'gh-blocks', ghLoggedIn: null }],
     });
   });
 });
@@ -1295,7 +1295,7 @@ describe('status per factory', () => {
     await store.setFactoryHealth({ factoryId: 'b', ghLoggedIn: false, checkedAt: '2026-11-10T00:00:00Z' });
     const s = await engine.status(['b']);
     expect(s.tasks.map((t) => t.taskId)).toEqual(['T-2']);
-    expect(s.factories).toEqual([{ factoryId: 'b', name: 'b', active: true, paused: false, counts: { ready: 1 }, ghLoggedIn: false }]);
+    expect(s.factories).toEqual([{ factoryId: 'b', name: 'b', active: true, paused: false, counts: { ready: 1 }, ghUser: 'gh-b', ghLoggedIn: false }]);
     expect((await engine.status()).factories.map((f) => [f.factoryId, f.ghLoggedIn])).toEqual([['a', null], ['b', false]]);
   });
 });

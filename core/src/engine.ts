@@ -64,6 +64,8 @@ export interface FactoryStatus {
   active: boolean;
   paused: boolean;
   counts: Partial<Record<Status, number>>;
+  /** The gh CLI login the factory uses (its validated `ghUser`). */
+  ghUser: string;
   /** Whether the factory's gh login was found when last checked; null when it was never checked. */
   ghLoggedIn: boolean | null;
 }
@@ -426,6 +428,7 @@ export class Engine {
       active: f.active,
       paused: factorySettings(stored, f.factoryId).paused,
       counts: count(tasks.filter((t) => t.factoryId === f.factoryId)),
+      ghUser: f.ghUser,
       ghLoggedIn: health.get(f.factoryId) ?? null,
     }));
     return { paused: factories.length > 0 && factories.every((f) => f.paused), active, counts: count(tasks), tasks: list, factories };

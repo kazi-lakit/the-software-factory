@@ -52,3 +52,26 @@ export async function readGhToken(user: string, exec: ExecFile = realExecFile): 
   if (code !== 0 || !token) throw new GhLoginMissingError(user);
   return token;
 }
+
+/**
+ * The gh CLI logins on github.com whose state is `success`, lower-cased, from `gh auth status --json hosts` (no token is
+ * read). Empty when gh fails or prints something unreadable, so every login counts as not logged in.
+ */
+export async function ghLoggedInUsers(exec: ExecFile = realExecFile): Promise<Set<string>> {
+  const users = new Set<string>();
+  try {
+    const { code, stdout } = await exec('gh', ['auth', 'status', '--hostname', 'github.com', '--json', 'hosts']);
+    if (code !== 0) return users;
+    const accounts = (JSON.parse(stdout) as { hosts?: Record<string, unknown> } | null)?.hosts?.['github.com'];
+    if (!Array.isArray(accounts)) return users;
+    for (const a of accounts as Array<{ login?: unknown; state?: unknown } | null>) {
+      if (typeof a?.login === 'string' && a.state === 'success') users.add(a.login.toLowerCase());
+    }
+  } catch {
+    users.clear();
+  }
+  return users;
+}
+
+/** True when `ghUser` is among `users` (from `ghLoggedInUsers`), ignoring case. */
+export const isGhLoggedIn = (users: ReadonlySet<string>, ghUser: string): boolean => users.has(ghUser.toLowerCase());

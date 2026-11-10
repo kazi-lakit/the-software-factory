@@ -7,9 +7,9 @@ import { parseAgentReply } from './agentReply.js';
 import { NO_FACTORIES, UnknownFactoryError, type Engine } from './engine.js';
 import { GATE_DOC } from './gates.js';
 import * as owner from './owner.js';
-import { realExecFile, type ExecFile } from './secrets.js';
+import { ghLoggedInUsers, isGhLoggedIn, realExecFile, type ExecFile } from './secrets.js';
 import { isValidId } from './factories.js';
-import { buildImport, checkMigration, hasEntry, migrate } from './migrate.js';
+import { buildImport, checkMigration, migrate } from './migrate.js';
 import { ForbiddenError, OwnerOnlyError } from './boardStore.js';
 import type { BoardStore } from './store.js';
 import type { AgentStep, Gate, Mode, RepoId } from './types.js';
@@ -69,7 +69,7 @@ function factoryFilter(ids: string[] | undefined): string[] | undefined {
 }
 
 export interface CliDeps {
-  /** Runs `security` (Keychain reads for `status`, the PAT copy of `migrate`). Tests pass a fake. */
+  /** Runs `gh auth status` (the login check of `status` and `migrate`). Tests pass a fake. */
   exec?: ExecFile;
   home?: string;
 }
@@ -162,25 +162,27 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .action(async (o: { json?: boolean; factory?: string[] }, cmd: Command) => {
       const { engine, store } = await open(cmd);
       const s = await engine.status(factoryFilter(o.factory));
-      // Check that each factory's PAT entry exists (the value is never read) and record it for the Board page.
-      const present = new Map<string, boolean>();
-      const loaded = new Set(s.factories.map((f) => f.factoryId));
+      // Check each factory's gh login with one `gh auth status` (no token is read) and record it for the Board page.
+      const loggedIn = new Map<string, boolean>();
+      const loaded = new Map(s.factories.map((f) => [f.factoryId, f]));
+      const users = await ghLoggedInUsers(exec);
       for (const d of await store.listFactoryDefs()) {
-        if (!loaded.has(d.factoryId)) continue;
-        const ok = await hasEntry(exec, d.ghUser).catch(() => false);
-        present.set(d.factoryId, ok);
+        const f = loaded.get(d.factoryId);
+        if (!f) continue;
+        const ok = isGhLoggedIn(users, f.ghUser);
+        loggedIn.set(d.factoryId, ok);
         try {
           await store.setFactoryHealth({ factoryId: d.factoryId, ghLoggedIn: ok, checkedAt: new Date().toISOString() });
         } catch (e) {
           io.err(`health of ${d.factoryId} not written: ${(e instanceof Error ? e.message : String(e)).split('\n')[0]}`);
         }
       }
-      for (const f of s.factories) f.ghLoggedIn = present.get(f.factoryId) ?? f.ghLoggedIn;
+      for (const f of s.factories) f.ghLoggedIn = loggedIn.get(f.factoryId) ?? f.ghLoggedIn;
       if (o.json) return printJson(s);
       io.out(`paused: ${s.paused}`);
       for (const f of s.factories) {
         const counts = Object.entries(f.counts).filter(([, n]) => n > 0).map(([status, n]) => `${status}=${n}`);
-        io.out(`factory ${f.factoryId}: ${f.active ? 'active' : 'inactive'}, paused ${f.paused}, PAT ${f.ghLoggedIn === null ? 'unknown' : f.ghLoggedIn ? 'present' : 'missing'}${counts.map((c) => `, ${c}`).join('')}`);
+        io.out(`factory ${f.factoryId}: ${f.active ? 'active' : 'inactive'}, paused ${f.paused}, gh ${f.ghUser} ${f.ghLoggedIn === null ? 'unknown' : f.ghLoggedIn ? 'logged in' : 'not logged in'}${counts.map((c) => `, ${c}`).join('')}`);
       }
       for (const [status, n] of Object.entries(s.counts)) io.out(`${status}: ${n}`);
       for (const a of s.active) io.out(`active: ${a.taskId} ${a.step ?? '-'} by ${a.claimBy ?? '-'} until ${a.claimUntil ?? '-'}`);
