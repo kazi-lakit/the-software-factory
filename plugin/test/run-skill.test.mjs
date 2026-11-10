@@ -105,6 +105,10 @@ describe('run skill', () => {
     expect(body).toMatch(/If the output is `no factories on the Board; run factory migrate --check`, reply `factory: no factories on the Board; run factory migrate --check` and stop\./);
   });
 
+  it('reports a task that is waiting on its dependencies and stops', () => {
+    expect(body).toContain('If the output contains ` is waiting on `, reply `factory: <output>` and stop.');
+  });
+
   it('reports a paused factory (M2)', () => {
     expect(body).toContain('`paused`');
     expect(body).toContain('factory: paused');

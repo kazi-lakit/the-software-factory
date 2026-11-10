@@ -1369,3 +1369,54 @@ describe('withRetry', () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('next with dependencies', () => {
+  const dep = (ids: string[]): Partial<Task> => ({ status: 'ready', dependsOn: ids });
+
+  test('a task waits while its dependency is in spec; the dependency is claimed first', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'a');
+    await putIn(store, 'a', dep(['T-1']));
+    expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-1' });
+    expect(await engine.next()).toEqual({ kind: 'none', reason: 'nothing to do' });
+    expect(await store.getTask('T-2')).toMatchObject({ status: 'ready', claimBy: null });
+  });
+
+  test('a dependency still in inbox leaves nothing to do', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'a', { status: 'inbox' });
+    await putIn(store, 'a', dep(['T-1']));
+    expect(await engine.next()).toEqual({ kind: 'none', reason: 'nothing to do' });
+  });
+
+  test.each(['pr_open', 'cancelled'] as const)('a dependency in %s releases the task', async (status) => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'a', { status });
+    await putIn(store, 'a', dep(['T-1']));
+    expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-2' });
+  });
+
+  test('a blocked dependency keeps the task waiting', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'a', { status: 'blocked', stage: 'build' });
+    await putIn(store, 'a', dep(['T-1']));
+    expect(await engine.next()).toEqual({ kind: 'none', reason: 'nothing to do' });
+  });
+
+  test('a named waiting task reports what it waits on and is not claimed', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'a', { status: 'inbox' });
+    await putIn(store, 'a', dep(['T-1']));
+    expect(await engine.next('T-2')).toEqual({ kind: 'none', reason: 'waiting', taskId: 'T-2', waitingOn: ['T-1'] });
+    expect(await store.getTask('T-2')).toMatchObject({ status: 'ready', claimBy: null });
+  });
+
+  test('a task past ready is still picked when its dependency went back to build', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'a', { status: 'build', stage: 'build', claimBy: 'other', claimUntil: '2000-01-01T00:00:00.000Z' });
+    const t = await putIn(store, 'a', { status: 'plan', stage: 'plan', branch: 'factory/T-2-a', dependsOn: ['T-1'] });
+    await store.addDoc(t.taskId, 'spec', 'spec', 'a');
+    const o = await engine.next('T-2');
+    expect(o.kind).toBe('ticket');
+  });
+});

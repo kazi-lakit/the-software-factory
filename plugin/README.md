@@ -53,7 +53,7 @@ A factory session needs a built core: run `cd core && npm run build` once (and a
 
 - Mode 3, one step by hand: `/factory:run`, or `/factory:run T-12` for one task, or `/factory:run <factory>` to take work from one factory only (one factory per run; the skill passes it to the CLI as `--factory "<factory>"`, and the runner's `--factory` is repeatable). With no argument every active factory is considered.
 - Mode 2, steady loop: `/loop 2m /factory:run --loop`, or `/loop 2m /factory:run <factory> --loop` for one factory.
-- The runner prints `factory: paused`, `factory: inactive` or `factory: nothing to do` from the CLI. The build prompt takes the repo's check commands from the ticket's `context.checks`, and the spec prompt gets the factory's docs folder (`context.factory.docsPath`), or is told there are none.
+- The runner prints `factory: paused`, `factory: inactive`, `factory: nothing to do` or, for a named task whose dependencies are unfinished, `factory: T-n is waiting on T-m` from the CLI. The build prompt takes the repo's check commands from the ticket's `context.checks`, and the spec prompt gets the factory's docs folder (`context.factory.docsPath`), or is told there are none.
 
 Each run does one step of one task and stops. Pause stops new claims and the skill reports `factory: paused`; a step that is already running still finishes. If the skill reports `factory: factory root not found or session env missing` or `factory: session env missing`, the session start hook's environment did not apply (for example after `/clear` or a resume) or no factory root resolved: set `FACTORY_ROOT` in the shell that starts `claude` if the factory is not at the default path, and restart the session.
 
