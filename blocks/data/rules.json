@@ -291,6 +291,7 @@
         "repo",
         "baseBranch",
         "gateOverrides",
+        "dependsOn",
         "factoryId"
       ]
     }
@@ -1274,7 +1275,7 @@
     {
       "schemaName": "FactoryTask",
       "policyName": "factory-task-edit-fields-factory-owner",
-      "policyDescription": "Only factory-owner changes title, description, repo, baseBranch, gateOverrides, factoryId.",
+      "policyDescription": "Only factory-owner changes title, description, repo, baseBranch, gateOverrides, dependsOn, factoryId.",
       "policyType": 1,
       "operation": 2,
       "fieldNames": [
@@ -1283,6 +1284,7 @@
         "repo",
         "baseBranch",
         "gateOverrides",
+        "dependsOn",
         "factoryId"
       ],
       "ruleGroup": {

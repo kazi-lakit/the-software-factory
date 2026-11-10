@@ -299,6 +299,18 @@ describe('BlocksStore', () => {
     expect(data.calls).toBe(0);
   });
 
+  it('dependsOn decodes any non-string-array to [] and is inserted as JSON text', async () => {
+    const data = new FakeBlocksData('any');
+    const s = new BlocksStore(data, 'owner');
+    for (let i = 0; i < 6; i++) await s.createTask({ factoryId: 'blocks', title: 't', description: '', repo: 'data' });
+    expect(data.rows('FactoryTask')[0]!.dependsOn).toBe('[]');
+    const raws = [undefined, null, 'not json', '{"a":1}', '[1,2]', '["T-3"]'];
+    for (const [i, v] of raws.entries()) {
+      expect(await data.update('FactoryTask', { taskId: `T-${i + 1}` }, { dependsOn: v as string })).toEqual({ kind: 'applied' });
+    }
+    expect((await s.listTasks()).map((t) => t.dependsOn)).toEqual([[], [], [], [], [], ['T-3']]);
+  });
+
   it('core identity can update core fields of an owner-created task', async () => {
     const owner = new FakeBlocksData('any');
     const t = await new BlocksStore(owner, 'owner').createTask({ factoryId: 'blocks', title: 't', description: '', repo: 'data' });

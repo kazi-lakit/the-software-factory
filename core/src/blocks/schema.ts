@@ -15,7 +15,7 @@ export const FIELDS: Record<SchemaName, Field[]> = {
     s('taskId', 'Unique id of the task.'), s('factoryId', 'Id of the factory the task belongs to.'), s('title', 'Task title.'), s('description', 'Task description.'), s('repo', 'Repo id the task targets.'),
     s('baseBranch', 'Branch the task branches from.'), s('status', 'Task status.'), s('stage', 'Current pipeline stage.'), s('branch', 'Task branch name.'),
     s('prUrl', 'Pull request URL.'), s('blockedReason', 'Why the task is blocked.'), s('question', 'Open question for the owner.'), s('answer', 'Owner answer to the question.'),
-    s('gateOverrides', 'JSON text of the gate overrides.'), s('claimBy', 'Worker that holds the claim.'), s('claimUntil', 'ISO time the claim expires.'),
+    s('gateOverrides', 'JSON text of the gate overrides.'), s('dependsOn', 'JSON text of the task ids this task depends on.'), s('claimBy', 'Worker that holds the claim.'), s('claimUntil', 'ISO time the claim expires.'),
     s('costUsd', 'Total cost in USD, as decimal text.'), i('attempt', 'Attempt counter.'), i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
   ],
   FactoryDoc: [
@@ -89,7 +89,7 @@ const OPERATIONS: { key: Operation; number: number; verb: string }[] = [
  * FactoryTask fields only factory-owner may change. A column write rule (CLS, EDIT) makes Blocks refuse a core
  * update that changes one of them. Must stay disjoint from the store's CORE_TASK_FIELDS.
  */
-export const PROTECTED_TASK_FIELDS: readonly string[] = ['title', 'description', 'repo', 'baseBranch', 'gateOverrides', 'factoryId'];
+export const PROTECTED_TASK_FIELDS: readonly string[] = ['title', 'description', 'repo', 'baseBranch', 'gateOverrides', 'dependsOn', 'factoryId'];
 
 export const collectionOf = (schema: SchemaName): string => `${schema}s`;
 const kebab = (schema: SchemaName) => schema.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();

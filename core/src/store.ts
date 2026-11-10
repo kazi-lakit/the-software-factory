@@ -119,6 +119,7 @@ export class MemoryStore implements BoardStore {
         question: null,
         answer: null,
         gateOverrides: {},
+        dependsOn: [...(t.dependsOn ?? [])],
         claimBy: null,
         claimUntil: null,
         costUsd: 0,
@@ -380,7 +381,7 @@ export class FileStore extends MemoryStore {
    */
   private upgrade(raw: Record<string, unknown>): State {
     const state = { ...emptyState(), ...raw } as State;
-    state.tasks = state.tasks.map((t) => ({ ...t, factoryId: t.factoryId ?? LEGACY_FACTORY }));
+    state.tasks = state.tasks.map((t) => ({ ...t, factoryId: t.factoryId ?? LEGACY_FACTORY, dependsOn: t.dependsOn ?? [] }));
     state.events = state.events.map((e) => ({ ...e, factoryId: e.factoryId ?? LEGACY_FACTORY }));
     const legacy = state.settings as unknown as { global?: Settings; repos?: Record<string, RepoSettings> } | null;
     if (legacy && 'global' in legacy) {

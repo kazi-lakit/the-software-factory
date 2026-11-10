@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { ACCESS, FIELDS, UNIQUE, TABLES, PROTECTED_TASK_FIELDS, generateIndexes, generateRules, collectionOf } from '../../src/blocks/schema.js';
+import { ACCESS, FIELDS, generateFields, UNIQUE, TABLES, PROTECTED_TASK_FIELDS, generateIndexes, generateRules, collectionOf } from '../../src/blocks/schema.js';
 import { CORE_TASK_FIELDS } from '../../src/blocks/store.js';
 
 const coreRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -18,7 +18,7 @@ const MATRIX = {
   FactoryRepo: { read: ['factory-owner', 'factory-core'], insert: ['factory-owner'], edit: ['factory-owner'] },
   FactoryHealth: { read: ['factory-owner', 'factory-core'], insert: ['factory-core'], edit: ['factory-core'] },
 };
-const CLS_FIELDS = ['title', 'description', 'repo', 'baseBranch', 'gateOverrides', 'factoryId'];
+const CLS_FIELDS = ['title', 'description', 'repo', 'baseBranch', 'gateOverrides', 'dependsOn', 'factoryId'];
 
 type Policy = { schemaName: string; policyName: string; policyType: number; operation: number; fieldNames: unknown[]; ruleGroup: { rules: { staticValue: string[] }[] } };
 type Rules = { security: { schemaName: string; operation: number; policyType: number; accessLevel: number; fieldNames: string[] }[]; policies: Policy[] };
@@ -28,6 +28,11 @@ describe('blocks schema', () => {
     expect(ACCESS).toEqual(MATRIX);
     expect(TABLES).toHaveLength(10);
     expect(collectionOf('FactoryTask')).toBe('FactoryTasks');
+  });
+
+  it('dependsOn is a protected String field', () => {
+    expect(PROTECTED_TASK_FIELDS).toContain('dependsOn');
+    expect(generateFields('FactoryTask').fields).toContainEqual(expect.objectContaining({ name: 'dependsOn', type: 'String' }));
   });
 
   it('rules: no delete policy except FactorySpike, every row-level policy has empty fieldNames', () => {
@@ -49,7 +54,7 @@ describe('blocks schema', () => {
     expect(actual).toEqual(expected);
   });
 
-  it('exactly one column write rule: owner-only CLS EDIT on the six protected fields (factoryId included), none for the core', () => {
+  it('exactly one column write rule: owner-only CLS EDIT on the seven protected fields (factoryId included), none for the core', () => {
     const rules = generateRules() as Rules;
     const cls = rules.policies.filter(p => p.policyType === 1);
     expect(cls).toHaveLength(1);
