@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decide } from '../hooks/decide.mjs';
-import { isFactoryAgent, factoryRoot, sessionFile } from '../hooks/lib.mjs';
+import { isFactoryAgent, resolveFactoryRoot, sessionFile } from '../hooks/lib.mjs';
 
 const root = '/f/root';
 const home = '/h';
@@ -177,6 +177,12 @@ describe('guard decide', () => {
     }
   });
 
+  it('allows everything when no factory work is active', () => {
+    expect(decide(bash('git push'), { root, home, session: null, active: false })).toEqual({ deny: false });
+    expect(decide({}, { root, home, session: null, active: false })).toEqual({ deny: false });
+    expect(decide(bash('git push'), { root, home, session: null, active: true }).deny).toBe(true);
+  });
+
   it('implementer write with null session is denied', () => {
     const r = run(write(`${wt}/a`, impl), null);
     expect(r).toEqual({ deny: true, reason: expect.stringContaining('no active factory step') });
@@ -257,10 +263,45 @@ describe('lib', () => {
     expect(isFactoryAgent({})).toBe(false);
     expect(isFactoryAgent({ agent_type: 'other:x' })).toBe(false);
   });
-  it('factoryRoot', () => {
-    expect(factoryRoot({ CLAUDE_PROJECT_DIR: '/a', FACTORY_ROOT: '/b' })).toBe('/a');
-    expect(factoryRoot({ FACTORY_ROOT: '/b' })).toBe('/b');
-    expect(() => factoryRoot({})).toThrow();
+  describe('resolveFactoryRoot', () => {
+    // A fake file system: a folder is a factory root when repos/, core/ and plugin/ exist in it.
+    const fsWith = (...roots) => {
+      const paths = new Set(roots.flatMap((r) => ['repos', 'core', 'plugin'].map((d) => path.join(r, d))));
+      return (p) => paths.has(p);
+    };
+    const home = '/h';
+    const dflt = '/h/scratchpad/selise/the-software-factory';
+    const exists = fsWith('/env', '/proj', dflt);
+
+    it('FACTORY_ROOT wins first', () => {
+      expect(resolveFactoryRoot({ FACTORY_ROOT: '/env', CLAUDE_PROJECT_DIR: '/proj' }, home, exists))
+        .toEqual({ root: '/env', projectMode: false });
+    });
+    it('CLAUDE_PROJECT_DIR wins second, in project mode', () => {
+      expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/proj' }, home, exists))
+        .toEqual({ root: '/proj', projectMode: true });
+    });
+    it('the default path under home wins third', () => {
+      expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/elsewhere' }, home, exists))
+        .toEqual({ root: dflt, projectMode: false });
+      expect(resolveFactoryRoot({}, home, exists)).toEqual({ root: dflt, projectMode: false });
+    });
+    it('a set but invalid FACTORY_ROOT returns null without falling through', () => {
+      expect(resolveFactoryRoot({ FACTORY_ROOT: '/nope', CLAUDE_PROJECT_DIR: '/proj' }, home, exists)).toBeNull();
+    });
+    it('projectMode only when the root is the project dir', () => {
+      expect(resolveFactoryRoot({ FACTORY_ROOT: '/proj', CLAUDE_PROJECT_DIR: '/proj' }, home, exists).projectMode).toBe(true);
+      expect(resolveFactoryRoot({ FACTORY_ROOT: '/env', CLAUDE_PROJECT_DIR: '/proj' }, home, exists).projectMode).toBe(false);
+      expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/nofactory' }, home, exists).projectMode).toBe(false);
+    });
+    it('a folder missing one of repos/, core/, plugin/ is not a factory root', () => {
+      const partial = (p) => p === '/proj/repos' || p === '/proj/core';
+      expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/proj' }, home, partial)).toBeNull();
+    });
+    it('null when nothing qualifies', () => {
+      expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: '/proj' }, home, () => false)).toBeNull();
+      expect(resolveFactoryRoot({}, home, fsWith('/env'))).toBeNull();
+    });
   });
   it('sessionFile', () => {
     expect(sessionFile('/r', 's1')).toBe('/r/runs/.sessions/s1.json');
@@ -269,33 +310,105 @@ describe('lib', () => {
 
 describe('entry script', () => {
   const pluginDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'guard-'));
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'guard-')));
   const link = path.join(tmp, 'link');
   fs.symlinkSync(pluginDir, link);
-  const runScript = (dir, stdin, env = { CLAUDE_PROJECT_DIR: tmp }) =>
-    spawnSync('node', [path.join(dir, 'hooks', 'guard.mjs')], { input: stdin, env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' });
-  const gitPush = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'git push' }, session_id: 's' });
+  const makeRoot = (r) => { for (const d of ['repos', 'core', 'plugin', 'runs/.sessions']) fs.mkdirSync(path.join(r, d), { recursive: true }); return r; };
+  // A home whose default factory root exists, a home without one, a project root, and a plain project folder.
+  const home = path.join(tmp, 'home');
+  const dfltRoot = makeRoot(path.join(home, 'scratchpad', 'selise', 'the-software-factory'));
+  const bareHome = path.join(tmp, 'bare-home');
+  fs.mkdirSync(bareHome);
+  const projRoot = makeRoot(path.join(tmp, 'factory'));
+  const plain = path.join(tmp, 'plain');
+  fs.mkdirSync(plain);
+  const projectMode = { HOME: bareHome, CLAUDE_PROJECT_DIR: projRoot };
+  const elsewhere = { HOME: home, CLAUDE_PROJECT_DIR: plain };
 
-  it('denies through a symlinked plugin dir', () => {
-    const r = runScript(link, gitPush);
-    expect(r.status).toBe(0);
-    expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision).toBe('deny');
+  const runScript = (dir, stdin, env = projectMode) =>
+    spawnSync('node', [path.join(dir, 'hooks', 'guard.mjs')], { input: stdin, env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' });
+  const call = (tool_input, extra = {}, tool_name = 'Bash') => JSON.stringify({ tool_name, tool_input, ...extra });
+  const gitPush = call({ command: 'git push' }, { session_id: 's' });
+  const reason = (r) => JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason;
+  const denied = (r) => r.status === 0 && JSON.parse(r.stdout).hookSpecificOutput.permissionDecision === 'deny';
+
+  describe('project mode', () => {
+    it('denies through a symlinked plugin dir', () => {
+      expect(denied(runScript(link, gitPush))).toBe(true);
+    });
+    it('denies git push by the main session with no step file', () => {
+      expect(reason(runScript(pluginDir, call({ command: 'git push' }, { session_id: 'no-step' })))).toBe('factory guard: Bash denied (git push)');
+    });
+    it('allows a harmless call with no output', () => {
+      const r = runScript(pluginDir, call({ command: 'ls' }));
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe('');
+    });
+    it('denies on empty stdin', () => {
+      expect(reason(runScript(pluginDir, ''))).toContain('no tool name');
+    });
+    it('denies on invalid stdin with a guard error', () => {
+      expect(reason(runScript(pluginDir, '{not json'))).toMatch(/^factory guard error:/);
+    });
   });
-  it('allows a harmless call with no output', () => {
-    const r = runScript(pluginDir, JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls' } }));
-    expect(r.status).toBe(0);
-    expect(r.stdout).toBe('');
+
+  describe('outside factory work (user-scoped install)', () => {
+    it('allows git push by the main session in a non-factory project, with no output', () => {
+      const r = runScript(pluginDir, call({ command: 'git push' }, { session_id: 'idle' }), elsewhere);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe('');
+    });
+    it('allows a Write to the home folder, with no output', () => {
+      const r = runScript(pluginDir, call({ file_path: path.join(home, 'x.txt') }, { session_id: 'idle' }, 'Write'), elsewhere);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toBe('');
+    });
+    it('allows malformed input without output', () => {
+      for (const stdin of ['', '{not json', '{}']) {
+        const r = runScript(pluginDir, stdin, elsewhere);
+        expect(r.status).toBe(0);
+        expect(r.stdout).toBe('');
+      }
+    });
+    it('allows the main session when no factory root resolves', () => {
+      const r = runScript(pluginDir, gitPush, { HOME: bareHome, CLAUDE_PROJECT_DIR: plain });
+      expect(r.stdout).toBe('');
+    });
   });
-  it('denies on empty stdin', () => {
-    const r = runScript(pluginDir, '');
-    expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason).toContain('no tool name');
+
+  describe('during a /factory:run step', () => {
+    const sid = 'stepping';
+    fs.writeFileSync(path.join(dfltRoot, 'runs', '.sessions', `${sid}.json`), JSON.stringify({ taskId: 'T-1', step: 'build' }));
+
+    it('denies git push by the main session whose step file exists', () => {
+      expect(reason(runScript(pluginDir, call({ command: 'git push' }, { session_id: sid }), elsewhere))).toBe('factory guard: Bash denied (git push)');
+    });
+    it('denies a main-session Write outside runs/ and .clones/worktrees/', () => {
+      const r = runScript(pluginDir, call({ file_path: path.join(home, 'x.txt') }, { session_id: sid }, 'Write'), elsewhere);
+      expect(reason(r)).toContain('main session may write only');
+    });
+    it('finds the step file under FACTORY_ROOT', () => {
+      fs.writeFileSync(path.join(projRoot, 'runs', '.sessions', 'via-env.json'), '{}');
+      const env = { HOME: bareHome, CLAUDE_PROJECT_DIR: plain, FACTORY_ROOT: projRoot };
+      expect(denied(runScript(pluginDir, call({ command: 'git push' }, { session_id: 'via-env' }), env))).toBe(true);
+      expect(runScript(pluginDir, call({ command: 'git push' }, { session_id: 'other' }), env).stdout).toBe('');
+    });
   });
-  it('denies on invalid stdin with a guard error', () => {
-    const r = runScript(pluginDir, '{not json');
-    expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason).toMatch(/^factory guard error:/);
-  });
-  it('fails closed when the factory root is unknown', () => {
-    const r = runScript(pluginDir, gitPush.replace('git push', 'ls'), {});
-    expect(JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason).toMatch(/^factory guard error:/);
+
+  describe('factory agents', () => {
+    const agentPush = call({ command: 'git push' }, { session_id: 'idle', agent_type: 'factory:implementer' });
+    it('are denied git push everywhere', () => {
+      for (const env of [projectMode, elsewhere, { HOME: bareHome, CLAUDE_PROJECT_DIR: plain, FACTORY_ROOT: projRoot }]) {
+        expect(reason(runScript(pluginDir, agentPush, env))).toMatch(/^factory guard: Bash denied/);
+      }
+    });
+    it('are denied with factory root not found when no root resolves', () => {
+      const r = runScript(pluginDir, call({ command: 'ls' }, { agent_type: 'factory:verifier' }), { HOME: bareHome, CLAUDE_PROJECT_DIR: plain });
+      expect(reason(r)).toBe('factory guard: factory root not found');
+    });
+    it('are denied when FACTORY_ROOT is set but not a factory root', () => {
+      const r = runScript(pluginDir, call({ command: 'ls' }, { agent_type: 'factory:verifier' }), { ...elsewhere, FACTORY_ROOT: plain });
+      expect(reason(r)).toBe('factory guard: factory root not found');
+    });
   });
 });

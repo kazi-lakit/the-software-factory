@@ -7,10 +7,24 @@ export async function readHookInput() {
   return data.trim() ? JSON.parse(data) : {};
 }
 
-export function factoryRoot(env) {
-  const root = env.CLAUDE_PROJECT_DIR || env.FACTORY_ROOT;
-  if (!root) throw new Error('neither CLAUDE_PROJECT_DIR nor FACTORY_ROOT is set');
-  return root;
+const isFactoryRoot = (dir, exists) => ['repos', 'core', 'plugin'].every((d) => exists(path.join(dir, d)));
+
+/**
+ * Finds the factory root: FACTORY_ROOT if set (null when it is not a factory root), else
+ * CLAUDE_PROJECT_DIR, else <home>/scratchpad/selise/the-software-factory. projectMode is true
+ * when the root is the session's project dir, that is, the session started in the factory folder.
+ */
+export function resolveFactoryRoot(env, home, exists = fs.existsSync) {
+  const project = env.CLAUDE_PROJECT_DIR ? path.resolve(env.CLAUDE_PROJECT_DIR) : null;
+  const found = (dir) => ({ root: dir, projectMode: dir === project });
+  if (env.FACTORY_ROOT) {
+    const dir = path.resolve(env.FACTORY_ROOT);
+    return isFactoryRoot(dir, exists) ? found(dir) : null;
+  }
+  for (const dir of [project, home && path.join(home, 'scratchpad', 'selise', 'the-software-factory')]) {
+    if (dir && isFactoryRoot(dir, exists)) return found(dir);
+  }
+  return null;
 }
 
 export function sessionFile(root, sessionId) {

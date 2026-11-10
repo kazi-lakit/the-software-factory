@@ -2,13 +2,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { readHookInput, factoryRoot, readSession, isFactoryAgent, shouldRenew, renewFile, renewCommand } from './lib.mjs';
+import { readHookInput, resolveFactoryRoot, readSession, isFactoryAgent, shouldRenew, renewFile, renewCommand } from './lib.mjs';
 
 try {
   const input = await readHookInput();
   if (isFactoryAgent(input)) {
-    const root = factoryRoot(process.env);
-    const session = readSession(root, input.session_id);
+    const root = resolveFactoryRoot(process.env, os.homedir())?.root;
+    const session = root ? readSession(root, input.session_id) : null;
     if (session?.taskId && session.mode && session.store) {
       const marker = renewFile(root, input.session_id);
       let last = null;

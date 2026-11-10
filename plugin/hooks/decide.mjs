@@ -62,7 +62,9 @@ function namesWorktree(cmd, wt) {
   return re.test(cmd);
 }
 
+/** ctx.active false means no factory work is under way (see guard.mjs): allow everything. */
 export function decide(input, ctx) {
+  if (ctx.active === false) return { deny: false };
   const { root, home, session } = ctx;
   const real = (p) => realish(p, ctx.realpath);
   const tool = input?.tool_name;
