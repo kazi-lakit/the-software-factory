@@ -43,7 +43,7 @@ describe('stage agents', () => {
         expect(fm.maxTurns).toBe('60');
       });
       it('has exactly the stage tools', () => {
-        expect(fm.tools).toEqual(TOOLS[agent]);
+        expect(fm.tools.split(',').map((t) => t.trim())).toEqual(TOOLS[agent]);
       });
       it('preloads its stage skill and reply-format, both existing', () => {
         expect(fm.skills).toEqual([skillDir(step), 'reply-format'].map((s) => s));
