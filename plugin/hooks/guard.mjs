@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
-import { readHookInput, resolveFactoryRoot, readSession, sessionFile, isFactoryAgent } from './lib.mjs';
+import path from 'node:path';
+import { readHookInput, resolveFactoryRoot, isFactoryRoot, readSession, sessionFile, isFactoryAgent } from './lib.mjs';
 import { decide } from './decide.mjs';
 
 function emitDeny(reason) {
@@ -9,26 +10,39 @@ function emitDeny(reason) {
   }) + '\n');
 }
 
-// The guard enforces only during factory work: for factory agents, in a session started in the
-// factory folder (project mode), and while this session's /factory:run step file exists.
-// Anything else, such as normal work with a user-scoped install, is allowed without output.
-// While enforcing, an error denies (fail closed).
+/** The project dir, resolved through symlinks, when it is itself a factory root; else null. */
+function factoryProjectDir(env) {
+  if (!env.CLAUDE_PROJECT_DIR) return null;
+  let dir = path.resolve(env.CLAUDE_PROJECT_DIR);
+  try { dir = fs.realpathSync(dir); } catch {}
+  return isFactoryRoot(dir) ? dir : null;
+}
+
+// The guard enforces only during factory work: for factory agents, in a session started in a
+// factory folder (whatever FACTORY_ROOT says), and while this session's /factory:run step file
+// exists. Anything else, such as normal work with a user-scoped install, is allowed without
+// output. While enforcing, an error denies (fail closed).
 let enforcing = false;
 
 async function main() {
   const home = os.homedir();
   const found = resolveFactoryRoot(process.env, home);
-  enforcing = Boolean(found?.projectMode);
+  const project = factoryProjectDir(process.env);
+  enforcing = Boolean(project);
   const input = await readHookInput();
   if (isFactoryAgent(input)) {
     enforcing = true;
     if (!found) return emitDeny('factory guard: factory root not found');
   }
-  const stepRunning = Boolean(found && input?.session_id && fs.existsSync(sessionFile(found.root, input.session_id)));
+  const stepFile = found && input?.session_id ? sessionFile(found.root, input.session_id) : null;
+  const stepRunning = Boolean(stepFile && fs.existsSync(stepFile));
+  // Name the step file when it alone turns the guard on, so a stale one is easy to find.
+  const byStepFileOnly = !enforcing && stepRunning;
   enforcing ||= stepRunning;
-  const session = found ? readSession(found.root, input?.session_id) : null;
-  const result = decide(input, { root: found?.root, home, platform: process.platform, session, active: enforcing });
-  if (result.deny) emitDeny(result.reason);
+  const root = found?.root ?? project;
+  const session = root ? readSession(root, input?.session_id) : null;
+  const result = decide(input, { root, home, platform: process.platform, session, active: enforcing });
+  if (result.deny) emitDeny(byStepFileOnly ? `${result.reason} (step file ${stepFile} exists)` : result.reason);
 }
 
 try {

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decide } from '../hooks/decide.mjs';
-import { isFactoryAgent, resolveFactoryRoot, sessionFile } from '../hooks/lib.mjs';
+import { isFactoryAgent, isFactoryRoot, resolveFactoryRoot, sessionFile } from '../hooks/lib.mjs';
 
 const root = '/f/root';
 const home = '/h';
@@ -118,6 +118,8 @@ describe('guard decide', () => {
     ['impl git -C other commit', bash('git -C /f/root commit -m x', impl), true],
     ['impl cd other commit', bash('cd /f/root && git commit -m x', impl), true],
     ['impl cd wt quoted commit', bash(`cd "${wt}" && git commit -m x`, impl), false],
+    ['impl cd wt export HUSKY=0 npm ci', bash(`cd "${wt}" && export HUSKY=0 && npm ci`, inWt), false],
+    ['impl cd wt/client export HUSKY=0 npm test', bash(`cd "${wt}/client" && export HUSKY=0 && npm test`, impl), false],
     ['impl cd wt HUSKY=0 commit', bash(`cd "${wt}" && HUSKY=0 git commit -m x`, impl), false],
     ['impl HUSKY=0 commit no wt', bash('HUSKY=0 git commit -m x', impl), true],
     ['main HUSKY=0 core cli ok', bash('HUSKY=0 node "/f/root/core/dist/cli.js" --mode session next --json'), false],
@@ -306,6 +308,11 @@ describe('lib', () => {
       expect(resolveFactoryRoot({}, home, fsWith('/env'))).toBeNull();
     });
   });
+  it('isFactoryRoot needs repos/, core/ and plugin/', () => {
+    const has = (...ds) => (p) => ds.some((d) => p === `/r/${d}`);
+    expect(isFactoryRoot('/r', has('repos', 'core', 'plugin'))).toBe(true);
+    expect(isFactoryRoot('/r', has('repos', 'core'))).toBe(false);
+  });
   it('sessionFile', () => {
     expect(sessionFile('/r', 's1')).toBe('/r/runs/.sessions/s1.json');
   });
@@ -341,6 +348,20 @@ describe('entry script', () => {
     });
     it('denies git push by the main session with no step file', () => {
       expect(reason(runScript(pluginDir, call({ command: 'git push' }, { session_id: 'no-step' })))).toBe('factory guard: Bash denied (git push)');
+    });
+    it('stays on when FACTORY_ROOT is set but not a factory root', () => {
+      expect(denied(runScript(pluginDir, call({ command: 'git push' }, { session_id: 'no-step' }), { ...projectMode, FACTORY_ROOT: plain }))).toBe(true);
+    });
+    it('stays on when FACTORY_ROOT names another factory', () => {
+      const other = makeRoot(path.join(tmp, 'other-factory'));
+      expect(denied(runScript(pluginDir, call({ command: 'git push' }, { session_id: 'no-step' }), { ...projectMode, FACTORY_ROOT: other }))).toBe(true);
+    });
+    it('stays on when the project dir is a symlink to the factory', () => {
+      const alias = path.join(tmp, 'factory-alias');
+      fs.symlinkSync(projRoot, alias);
+      const push = call({ command: 'git push' }, { session_id: 'no-step' });
+      expect(denied(runScript(pluginDir, push, { ...projectMode, CLAUDE_PROJECT_DIR: alias }))).toBe(true);
+      expect(denied(runScript(pluginDir, push, { ...projectMode, CLAUDE_PROJECT_DIR: alias, FACTORY_ROOT: projRoot }))).toBe(true);
     });
     it('allows a harmless call with no output', () => {
       const r = runScript(pluginDir, call({ command: 'ls' }));
@@ -383,8 +404,10 @@ describe('entry script', () => {
     const sid = 'stepping';
     fs.writeFileSync(path.join(dfltRoot, 'runs', '.sessions', `${sid}.json`), JSON.stringify({ taskId: 'T-1', step: 'build' }));
 
-    it('denies git push by the main session whose step file exists', () => {
-      expect(reason(runScript(pluginDir, call({ command: 'git push' }, { session_id: sid }), elsewhere))).toBe('factory guard: Bash denied (git push)');
+    it('denies git push by the main session whose step file exists, naming the step file', () => {
+      const file = path.join(dfltRoot, 'runs', '.sessions', `${sid}.json`);
+      expect(reason(runScript(pluginDir, call({ command: 'git push' }, { session_id: sid }), elsewhere)))
+        .toBe(`factory guard: Bash denied (git push) (step file ${file} exists)`);
     });
     it('denies a main-session Write outside runs/ and .clones/worktrees/', () => {
       const r = runScript(pluginDir, call({ file_path: path.join(home, 'x.txt') }, { session_id: sid }, 'Write'), elsewhere);

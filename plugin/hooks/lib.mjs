@@ -7,7 +7,10 @@ export async function readHookInput() {
   return data.trim() ? JSON.parse(data) : {};
 }
 
-const isFactoryRoot = (dir, exists) => ['repos', 'core', 'plugin'].every((d) => exists(path.join(dir, d)));
+/** True when dir holds repos/, core/ and plugin/. */
+export function isFactoryRoot(dir, exists = fs.existsSync) {
+  return ['repos', 'core', 'plugin'].every((d) => exists(path.join(dir, d)));
+}
 
 /**
  * Finds the factory root: FACTORY_ROOT if set (null when it is not a factory root), else

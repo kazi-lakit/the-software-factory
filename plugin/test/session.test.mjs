@@ -81,7 +81,7 @@ describe('session-start.mjs', () => {
   const envFile = () => path.join(fs.mkdtempSync(path.join(tmp, 'ss-')), 'env');
   const start = (env) => runHook('session-start.mjs', { session_id: 'abcdef123456' }, env);
 
-  it('writes the three export lines, and no HUSKY', () => {
+  it('writes the export lines with HUSKY=0 in project mode', () => {
     const file = envFile();
     const r = start({ ...baseEnv(), CLAUDE_ENV_FILE: file, CLAUDE_PROJECT_DIR: froot });
     expect(r.status).toBe(0);
@@ -89,12 +89,17 @@ describe('session-start.mjs', () => {
       `export FACTORY_ROOT="${froot}"`,
       `export FACTORY_CLAIMANT=claude:${os.hostname()}:abcdef12`,
       'export FACTORY_STORE="${FACTORY_STORE:-blocks}"',
+      'export HUSKY=0',
     ]);
   });
-  it('exports the root found through FACTORY_ROOT from another folder', () => {
+  it('exports the root found through FACTORY_ROOT from another folder, without HUSKY', () => {
     const file = envFile();
     start({ ...baseEnv(), CLAUDE_ENV_FILE: file, CLAUDE_PROJECT_DIR: plain, FACTORY_ROOT: froot });
-    expect(fs.readFileSync(file, 'utf8')).toContain(`export FACTORY_ROOT="${froot}"\n`);
+    expect(fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)).toEqual([
+      `export FACTORY_ROOT="${froot}"`,
+      `export FACTORY_CLAIMANT=claude:${os.hostname()}:abcdef12`,
+      'export FACTORY_STORE="${FACTORY_STORE:-blocks}"',
+    ]);
   });
   it('exports the default root under home', () => {
     const home = path.join(tmp, 'home2');
@@ -102,6 +107,7 @@ describe('session-start.mjs', () => {
     const file = envFile();
     start({ ...baseEnv(), HOME: home, CLAUDE_ENV_FILE: file, CLAUDE_PROJECT_DIR: plain });
     expect(fs.readFileSync(file, 'utf8')).toContain(`export FACTORY_ROOT="${dflt}"\n`);
+    expect(fs.readFileSync(file, 'utf8')).not.toContain('HUSKY');
   });
   it('writes nothing when no root resolves', () => {
     const file = envFile();

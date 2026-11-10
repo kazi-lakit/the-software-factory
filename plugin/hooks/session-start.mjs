@@ -6,8 +6,8 @@ import { readHookInput, resolveFactoryRoot, claimantFor } from './lib.mjs';
 const shellQuoted = (s) => s.replace(/[\\"$`]/g, '\\$&');
 
 // Exports the factory env to this session's Bash calls, only when a factory root resolves.
-// No HUSKY=0 here: with a user-scoped install it would leak into normal work; the run skill
-// prefixes the factory's own commands instead.
+// HUSKY=0 only in project mode: elsewhere it would leak into normal work, so the skills
+// prefix the factory's own commands instead.
 try {
   const input = await readHookInput();
   const found = resolveFactoryRoot(process.env, os.homedir());
@@ -21,6 +21,7 @@ try {
         `export FACTORY_CLAIMANT=${claimantFor(input.session_id, os.hostname())}`,
         'export FACTORY_STORE="${FACTORY_STORE:-blocks}"',
       ];
+      if (found.projectMode) lines.push('export HUSKY=0');
       fs.appendFileSync(envFile, lines.join('\n') + '\n');
     }
   }
