@@ -34,7 +34,7 @@ export const blocksFactories = (): Factories => factory("blocks", BLOCKS_REPOS, 
 export function seedBlocksFactories(data: FakeBlocksData, factories: Factories): void {
   for (const d of factories.defs) {
     data.seed("FactoryDef", {
-      active: d.active ? 1 : 0, docsPath: d.docsPath, factoryId: d.factoryId, gitEmail: d.gitEmail, gitName: d.gitName, name: d.name,
+      active: d.active ? 1 : 0, agentModels: JSON.stringify(d.agentModels ?? {}), docsPath: d.docsPath, factoryId: d.factoryId, gitEmail: d.gitEmail, gitName: d.gitName, name: d.name,
       ghUser: d.ghUser, protectedBranches: JSON.stringify(d.protectedBranches), version: d.version, writeId: ""
     });
   }
