@@ -1,7 +1,10 @@
 import type { MouseEvent, ReactNode } from "react";
 import { useAuth } from "./providers/AuthProvider";
-import { useCurrentUser, userDisplayName } from "../features/profile/useCurrentUser";
+import { useCurrentUser, userDisplayName, userInitials } from "../features/profile/useCurrentUser";
 import { useFactories, useSelectedFactory } from "../features/factories/useFactories";
+import { useBoard } from "../features/board/useBoard";
+import { NEEDS_YOU } from "../features/board/status";
+import { ThemeSwitch } from "../shared/ui/ThemeSwitch";
 import { useSettings } from "../features/settings/useSettings";
 import { clearAllUnsent } from "../lib/unsent";
 
@@ -25,8 +28,13 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
   const { logout } = useAuth();
   const me = useCurrentUser();
   const settings = useSettings();
-  const user = userDisplayName(me.data?.data);
+  const profile = me.data?.data;
+  const user = userDisplayName(profile);
+  const first = profile?.firstName?.trim() || user;
   const [picked] = useSelectedFactory();
+  // While tasks load or fail there is no data, so nothing waits and no badge shows.
+  const board = useBoard();
+  const waiting = (board.data ?? []).filter((t) => NEEDS_YOU.has(t.status) && (picked === "all" || t.factoryId === picked)).length;
   const factories = useFactories();
   const stored = settings.data?.factories ?? {};
   // One factory picked: its own pause. All: every paused factory, by id. A factory without stored settings is running.
@@ -67,7 +75,7 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
   return (
     <div className="sf-app">
       <header className="sf-topbar">
-        <span className="sf-project">{PROJECT_NAME}</span>
+        <span className="sf-project sf-label">{PROJECT_NAME}</span>
         <nav className="sf-views" aria-label="Views">
           {views.map((view) => (
             <a
@@ -82,10 +90,20 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
           ))}
         </nav>
         <div className="sf-topbar-end">
+          <ThemeSwitch />
+          {waiting > 0 ? <span className="sf-badge">{`${waiting} waiting for you`}</span> : null}
           {/* Always present, so a screen reader hears the change when the factory pauses. */}
           <span className={pauseClass} role="status">{pauseText}</span>
-          {user ? <span className="sf-user" title={user}>{user}</span> : null}
-          <button type="button" className="sf-button" onClick={() => void signOut()}>Sign out</button>
+          <button
+            type="button"
+            className="sf-account"
+            title={user || undefined}
+            aria-label={first ? `Sign out (${first})` : "Sign out"}
+            onClick={() => void signOut()}
+          >
+            <span className="sf-avatar" aria-hidden="true">{userInitials(profile)}</span>
+            <span className="sf-account-name">{first}</span>
+          </button>
         </div>
       </header>
       <main className="sf-main">{children}</main>

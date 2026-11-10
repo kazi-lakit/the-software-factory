@@ -42,7 +42,7 @@
   --sf-label-line: 16px;
   --sf-label-tracking: 0.16em;
   --sf-radius: 3px;
-  --sf-bar-height: 44px;
+  --sf-bar-height: 52px;
 }
 
 :root[data-theme="dark"] {
@@ -153,8 +153,8 @@ body {
 
 .sf-topbar {
   align-items: center;
-  background: var(--sf-surface);
-  border-bottom: 1px solid var(--sf-border);
+  background: transparent;
+  border-bottom: 1px solid var(--sf-chrome-border);
   display: flex;
   flex-wrap: wrap;
   gap: 4px 20px;
@@ -166,9 +166,11 @@ body {
 }
 
 .sf-project {
+  color: var(--sf-text);
   font-family: var(--sf-mono);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   white-space: nowrap;
 }
 
@@ -184,19 +186,22 @@ body {
   border-bottom: 2px solid transparent;
   color: var(--sf-muted);
   display: flex;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
   padding: 0 10px;
   text-decoration: none;
 }
 
 .sf-view-link:hover {
-  color: var(--sf-text);
+  text-decoration: underline;
 }
 
 /* The current view: text weight and a rule in the text colour, not the accent. */
 .sf-view-link[aria-current="page"] {
   border-bottom-color: var(--sf-text);
   color: var(--sf-text);
-  font-weight: 600;
 }
 
 .sf-view-link:focus-visible {
@@ -223,9 +228,45 @@ body {
   white-space: nowrap;
 }
 
-.sf-user {
-  color: var(--sf-muted);
-  max-width: 24ch;
+/* The account pill: outlined, initials in a circle, then the first name. 999px is a justified
+   exception to the single 3px radius: a pill and a circle are round by definition. */
+.sf-account {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--sf-border);
+  border-radius: 999px;
+  color: var(--sf-text);
+  display: inline-flex;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  gap: 8px;
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 4px 12px 4px 4px;
+  white-space: nowrap;
+}
+
+.sf-account:hover {
+  background: var(--sf-primary-soft);
+  color: var(--sf-on-primary-soft);
+  text-decoration: underline;
+}
+
+.sf-avatar {
+  align-items: center;
+  background: var(--sf-primary-soft);
+  border-radius: 999px;
+  color: var(--sf-on-primary-soft);
+  display: inline-flex;
+  flex: none;
+  font-size: var(--sf-label-size);
+  height: 22px;
+  justify-content: center;
+  width: 22px;
+}
+
+.sf-account-name {
+  max-width: 16ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -957,6 +998,7 @@ textarea.sf-input {
 .sf-chip,
 .sf-badge,
 .sf-view-link,
+.sf-account,
 .sf-tab {
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }

@@ -353,7 +353,7 @@ describe("board_css_select", () => {
 describe("board_css_motion", () => {
   it("shared_controls_transition_colours_in_150ms", () => {
     const css = read("board.css");
-    const sel = [".sf-button", ".sf-select", ".sf-input", ".sf-chip", ".sf-badge", ".sf-view-link", ".sf-tab"];
+    const sel = [".sf-button", ".sf-select", ".sf-input", ".sf-chip", ".sf-badge", ".sf-view-link", ".sf-tab", ".sf-account"];
     const list = selectorLists(css).find((l) => sel.every((s) => l.split(",").map((x) => x.trim()).includes(s)));
     expect(list).toBeDefined();
     expect(tokens(css, list ?? "").transition).toBe(
@@ -369,5 +369,90 @@ describe("board_css_motion", () => {
 
   it("switch_thumb_reduced_motion_block_still_present", () => {
     expect(tokens(read("board.css"), ".sf-switch input::before").transition).toBe("transform 120ms ease");
+  });
+});
+
+const labelLine = { ...labelType, "line-height": "var(--sf-label-line)" };
+
+describe("board_css_topbar", () => {
+  it("topbar_is_transparent_with_one_chrome_border_hairline", () => {
+    const t = tokens(read("board.css"), ".sf-topbar");
+    expect(t.background).toBe("transparent");
+    expect(t["border-bottom"]).toBe("1px solid var(--sf-chrome-border)");
+    for (const k of ["border", "border-top", "border-left", "border-right", "box-shadow"]) expect(t).not.toHaveProperty(k);
+  });
+
+  it("topbar_height_token_is_52px", () => {
+    const css = read("board.css");
+    expect(tokens(css, ":root")["--sf-bar-height"]).toBe("52px");
+    expect(tokens(css, ".sf-topbar")["min-height"]).toBe("var(--sf-bar-height)");
+  });
+
+  it("project_name_uses_label_type", () => {
+    const t = tokens(read("board.css"), ".sf-project");
+    expect(t).toMatchObject(labelLine);
+    expect(t).not.toHaveProperty("font-weight");
+    expect(t.color).toBe("var(--sf-text)");
+  });
+
+  it("nav_links_are_label_type_muted", () => {
+    const t = tokens(read("board.css"), ".sf-view-link");
+    expect(t).toMatchObject(labelLine);
+    expect(t.color).toBe("var(--sf-muted)");
+    expect(t["border-bottom"]).toBe("2px solid transparent");
+  });
+
+  it("nav_hover_underlines", () => {
+    expect(tokens(read("board.css"), ".sf-view-link:hover")["text-decoration"]).toBe("underline");
+  });
+
+  it("current_nav_link_is_text_colour_with_2px_underline", () => {
+    const t = tokens(read("board.css"), '.sf-view-link[aria-current="page"]');
+    expect(t.color).toBe("var(--sf-text)");
+    expect(t["border-bottom-color"]).toBe("var(--sf-text)");
+    expect(t).not.toHaveProperty("font-weight");
+  });
+});
+
+describe("board_css_account_pill", () => {
+  it("account_pill_is_an_outlined_label_type_pill", () => {
+    const t = tokens(read("board.css"), ".sf-account");
+    expect(t.background).toBe("transparent");
+    expect(t.border).toBe("1px solid var(--sf-border)");
+    expect(t["border-radius"]).toBe("999px");
+    expect(t).toMatchObject(labelLine);
+    expect(t.color).toBe("var(--sf-text)");
+    expect(t["white-space"]).toBe("nowrap");
+  });
+
+  it("account_pill_hover_is_primary_soft_with_underline", () => {
+    const t = tokens(read("board.css"), ".sf-account:hover");
+    expect(t.background).toBe("var(--sf-primary-soft)");
+    expect(t.color).toBe("var(--sf-on-primary-soft)");
+    expect(t["text-decoration"]).toBe("underline");
+  });
+
+  it("avatar_is_a_22px_circle_in_primary_soft", () => {
+    const t = tokens(read("board.css"), ".sf-avatar");
+    expect(t.width).toBe("22px");
+    expect(t.height).toBe("22px");
+    expect(t["border-radius"]).toBe("999px");
+    expect(t.background).toBe("var(--sf-primary-soft)");
+    expect(t.color).toBe("var(--sf-on-primary-soft)");
+    expect(t["font-size"]).toBe("var(--sf-label-size)");
+  });
+
+  it("account_name_truncates_at_16ch", () => {
+    const t = tokens(read("board.css"), ".sf-account-name");
+    expect(t["max-width"]).toBe("16ch");
+    expect(t.overflow).toBe("hidden");
+    expect(t["text-overflow"]).toBe("ellipsis");
+    expect(t["white-space"]).toBe("nowrap");
+  });
+
+  it("topbar_end_has_12px_gap_and_auto_margin", () => {
+    const t = tokens(read("board.css"), ".sf-topbar-end");
+    expect(t.gap).toBe("12px");
+    expect(t["margin-left"]).toBe("auto");
   });
 });
