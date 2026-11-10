@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { ClaimError, Engine, StageError, withRetry, type EngineDeps } from '../src/engine.js';
 import type { Exec } from '../src/checks.js';
 import type { GitRepos } from '../src/git.js';
-import { FakeGitHub } from '../src/github.js';
+import { FakeGitHub, type GitHub } from '../src/github.js';
 import { IllegalInputError } from '../src/machine.js';
 import { FactoryConfig, type FactoryDef, type FactoryRepo } from '../src/factories.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
@@ -56,7 +56,7 @@ class FakeGit implements GitRepos {
 }
 
 function setup(
-  opts: { failing?: string[]; git?: FakeGit; onExec?: () => Promise<void>; log?: (msg: string) => void; store?: (now: () => Date) => BoardStore; defs?: FactoryDef[]; repos?: FactoryRepo[] } = {},
+  opts: { githubFor?: (patAccount: string) => GitHub; failing?: string[]; git?: FakeGit; onExec?: () => Promise<void>; log?: (msg: string) => void; store?: (now: () => Date) => BoardStore; defs?: FactoryDef[]; repos?: FactoryRepo[] } = {},
 ) {
   const clock = { t: new Date('2026-11-09T10:00:00Z') };
   const store: BoardStore = opts.store?.(() => clock.t) ?? new MemoryStore();
@@ -69,7 +69,7 @@ function setup(
   const deps: EngineDeps = {
     store,
     git,
-    github,
+    githubFor: opts.githubFor ?? (() => github),
     factories: async () => new FactoryConfig(opts.defs ?? DEFS, opts.repos ?? REPOS),
     exec,
     now: () => clock.t,
@@ -142,7 +142,7 @@ describe('next across factories', () => {
     await store.setSettings({ factories: { b: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } });
     const t = await putIn(store, 'b', { status: 'spec_review', stage: null, branch: 'factory/T-1-a' });
     await store.addDoc(t.taskId, 'spec', 'spec', 'a');
-    await store.addApproval({ taskId: t.taskId, factoryId: 'b', gate: 'spec', docVersion: 1, decision: 'approve', comment: '', by: 'you', at: '2026-11-09T10:00:00Z' } as never);
+    await store.addApproval({ taskId: t.taskId, gate: 'spec', docVersion: 1, decision: 'approve', comment: '' });
     expect(await engine.next(undefined, ['b'])).toEqual({ kind: 'none', reason: 'paused' });
     expect((await store.getTask(t.taskId)).status).toBe('plan');
   });
@@ -205,6 +205,64 @@ describe('next across factories', () => {
     expect(await store.getTask('T-1')).toMatchObject({ status: 'blocked', blockedReason: 'repo gone no longer exists in b' });
     expect(await store.getTask('T-2')).toMatchObject({ status: 'blocked', blockedReason: 'factory x no longer exists' });
     expect((await store.getTask('T-3')).status).toBe('done');
+  });
+
+  test('a factory that is gone but left an invalid repo row blocks its tasks, not idles them', async () => {
+    const { store, engine } = setup({ defs: [defFixture('a')], repos: [repoFixture('a', 'api'), repoFixture('x', 'api', { remote: '' })] });
+    await putIn(store, 'x', { status: 'build', stage: 'build', branch: 'factory/T-1-a' });
+    await engine.sync();
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'blocked', blockedReason: 'factory x no longer exists' });
+  });
+
+  test('check and ship on a claimed task of an invalid factory or repo say it is invalid, not gone', async () => {
+    const bad = { ...defFixture('b'), gitEmail: 'no-at-sign' };
+    const { store, engine, clock } = setup({ defs: [defFixture('a'), bad], repos: [repoFixture('a', 'api'), repoFixture('a', 'web', { remote: '' }), repoFixture('b', 'api')] });
+    await putIn(store, 'b', { status: 'verify', stage: 'check', branch: 'factory/T-1-a', ...claimedBy('me', clock) });
+    await putIn(store, 'a', { status: 'review', stage: 'ship', branch: 'factory/T-2-a', ...claimedBy('me', clock) }, 'web');
+    await expect(engine.check('T-1')).rejects.toThrow('factory b is invalid (skipped)');
+    await expect(engine.ship('T-2')).rejects.toThrow('repo a/web is invalid (skipped)');
+  });
+
+  describe('ship per factory', () => {
+    class AccountGitHub extends FakeGitHub {
+      constructor(readonly account: string) { super(); }
+    }
+    class MissingPatGitHub extends FakeGitHub {
+      constructor(private readonly account: string) { super(); }
+      private missing(): never { throw new SecretMissingError(`${this.account} not found in Keychain`); }
+      override openPr(): never { return this.missing(); }
+      override findOpenPr(): never { return this.missing(); }
+      override prState(): never { return this.missing(); }
+      override mergePr(): never { return this.missing(); }
+    }
+
+    test('a missing PAT blocks only that factory\'s task; the other factory opens its PR with its own client', async () => {
+      const clients = new Map<string, GitHub>([['github-pat:a', new MissingPatGitHub('github-pat:a')], ['github-pat:b', new AccountGitHub('github-pat:b')]]);
+      const asked: string[] = [];
+      const { store, engine } = setup({ ...TWO(), githubFor: (acct) => { asked.push(acct); return clients.get(acct)!; } });
+      await putIn(store, 'a', { status: 'review', stage: 'ship', branch: 'factory/T-1-x' });
+      await putIn(store, 'b', { status: 'review', stage: 'ship', branch: 'factory/T-2-x' });
+      await store.setSettings({ factories: { b: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: true } }, repos: {} } } });
+      await nextTicket(engine, 'T-1');
+      expect(await engine.ship('T-1')).toMatchObject({ status: 'blocked', blockedReason: 'PAT github-pat:a not in Keychain' });
+      await nextTicket(engine, 'T-2');
+      expect(await engine.ship('T-2')).toMatchObject({ status: 'pr_open', prUrl: 'https://github.com/org/api/pull/1' });
+      expect([...(clients.get('github-pat:b') as AccountGitHub).prs.values()]).toHaveLength(1);
+      expect(new Set(asked)).toEqual(new Set(['github-pat:a', 'github-pat:b']));
+    });
+
+    test('the factory\'s protected list decides: a push to rel is refused, dev is mergeable', async () => {
+      const { store, engine, git, github } = setup(TWO({ a: { protectedBranches: ['rel', 'main'] } }));
+      await store.setSettings({ factories: { a: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: false } }, repos: {} } } });
+      await putIn(store, 'a', { status: 'review', stage: 'ship', branch: 'rel' });
+      await nextTicket(engine, 'T-1');
+      await expect(engine.ship('T-1')).rejects.toThrow('push to rel refused');
+      expect(git.pushes).toEqual([]);
+      await putIn(store, 'a', { status: 'review', stage: 'ship', branch: 'factory/T-2-x' });
+      await nextTicket(engine, 'T-2');
+      expect((await engine.ship('T-2')).status).toBe('done');
+      expect([...github.prs.values()][0]).toMatchObject({ base: 'dev', state: 'merged' });
+    });
   });
 
   test('a gate resolved from b/api repo settings overrides b', async () => {

@@ -32,9 +32,9 @@ export function validApproval(approvals: Approval[], gate: Gate, currentDocVersi
   return best;
 }
 
-/** Merge automatically only when the PR gate is off and the base is not protected. */
-export function shouldMerge(baseBranch: string, prGateOn: boolean): boolean {
-  return !prGateOn && !isProtected(baseBranch);
+/** Merge automatically only when the PR gate is off and the base is not protected (in the factory's list). */
+export function shouldMerge(baseBranch: string, prGateOn: boolean, protectedBranches?: readonly string[]): boolean {
+  return !prGateOn && !isProtected(baseBranch, protectedBranches);
 }
 
 /** Compare ISO timestamps as dates; fall back to string order when unparsable. Ties go to the later entry. */

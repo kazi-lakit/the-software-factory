@@ -1,9 +1,9 @@
 import { execFileSync, spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
 import {
   HOOK_PATH,
   ProtectedBranchError,
@@ -73,5 +73,29 @@ describe('pre-push hook', () => {
 
   test('allows task branches', () => {
     expect(push('factory/T-1-x').status).toBe(0);
+  });
+
+  describe('with the factory list file', () => {
+    const file = () => join(clone, '.git', 'factory-protected-branches');
+    afterEach(() => rmSync(file(), { force: true }));
+
+    test('refuses the listed branches and main, allows dev', () => {
+      writeFileSync(file(), 'rel\n');
+      for (const b of ['rel', 'main']) {
+        const r = push(b);
+        expect(r.status).not.toBe(0);
+        expect(r.stderr).toContain(`factory: push to ${b} refused`);
+      }
+      expect(push('dev').status).toBe(0);
+    });
+
+    test('reads the file from a worktree through the common dir', () => {
+      writeFileSync(file(), 'rel\n');
+      const wt = join(root, 'wt');
+      git(clone, 'worktree', 'add', '-b', 'task', wt);
+      const r = spawnSync('git', ['-c', `core.hooksPath=${join(clone, '.git', 'hooks')}`, 'push', 'origin', 'HEAD:refs/heads/rel'], { cwd: wt, encoding: 'utf8' });
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toContain('factory: push to rel refused');
+    });
   });
 });

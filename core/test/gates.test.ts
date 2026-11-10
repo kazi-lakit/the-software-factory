@@ -24,6 +24,9 @@ test('PR gate off never merges into a protected branch', () => {
   expect(shouldMerge('main', false)).toBe(false);
   expect(shouldMerge('feature/x', false)).toBe(true);
   expect(shouldMerge('feature/x', true)).toBe(false);
+  expect(shouldMerge('dev', false, ['rel', 'main'])).toBe(true);
+  expect(shouldMerge('rel', false, ['rel', 'main'])).toBe(false);
+  expect(shouldMerge('main', false, [])).toBe(false);
 });
 
 test('isProtected strips refs/heads/ and origin/', () => {

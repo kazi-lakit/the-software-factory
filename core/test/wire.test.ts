@@ -1,7 +1,8 @@
 import { resolve } from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 import type { BlocksCredential } from '../src/blocks/credential.js';
-import { LazyBlocksStore, wire } from '../src/wire.js';
+import { FakeGitHub } from '../src/github.js';
+import { lazyGitHubFor, LazyBlocksStore, wire } from '../src/wire.js';
 import { MemoryStore, type BoardStore } from '../src/store.js';
 
 const cred: BlocksCredential = { clientId: 'i', clientSecret: 's', projectKey: 'p', apiUrl: 'u' };
@@ -76,5 +77,29 @@ describe('findRoot', () => {
     mkdirSync(join(root, 'plugin'));
     mkdirSync(join(root, 'core', 'src'), { recursive: true });
     expect(findRoot(join(root, 'core', 'src'), {})).toBe(root);
+  });
+});
+
+describe('lazyGitHubFor', () => {
+  test('reads no secret until a call, then once per account, and one client per account', async () => {
+    const reads: string[] = [];
+    const made: string[] = [];
+    const githubFor = lazyGitHubFor(async (acct) => { reads.push(acct); return `pat-${acct}`; }, (pat) => { made.push(pat); return new FakeGitHub(); });
+    const a = githubFor('github-pat:a');
+    expect(githubFor('github-pat:a')).toBe(a);
+    expect(githubFor('github-pat:b')).not.toBe(a);
+    expect(reads).toEqual([]);
+    await a.prState('https://github.com/o/r/pull/1').catch(() => undefined);
+    await a.prState('https://github.com/o/r/pull/1').catch(() => undefined);
+    expect(reads).toEqual(['github-pat:a']);
+    expect(made).toEqual(['pat-github-pat:a']);
+  });
+
+  test('a failed read is not cached', async () => {
+    const read = vi.fn<(acct: string) => Promise<string>>().mockRejectedValueOnce(new Error('missing')).mockResolvedValue('t');
+    const a = lazyGitHubFor(read, () => new FakeGitHub())('x');
+    await expect(a.prState('https://github.com/o/r/pull/1')).rejects.toThrow('missing');
+    await expect(a.prState('https://github.com/o/r/pull/1')).rejects.toThrow('unknown pull request');
+    expect(read).toHaveBeenCalledTimes(2);
   });
 });

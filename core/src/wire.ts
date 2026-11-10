@@ -8,7 +8,7 @@ import { BlocksStore } from './blocks/store.js';
 import { shellExec } from './checks.js';
 import { Engine } from './engine.js';
 import { LocalGitRepos } from './git.js';
-import { OctokitGitHub, type GitHub } from './github.js';
+import { OctokitGitHub, type GitHub, type GitHubFor } from './github.js';
 import { FactoryConfig } from './factories.js';
 import { readSecret } from './secrets.js';
 import { FileStore, type BoardStore } from './store.js';
@@ -33,11 +33,20 @@ export function findRoot(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = p
   }
 }
 
-/** Creates the real GitHub client on first use, so commands that never touch GitHub need no PAT. */
+/** One GitHub client per Keychain account, each created on its first call, so commands that never touch GitHub need no PAT. A failed read is not cached. */
 class LazyGitHub implements GitHub {
   private inner: Promise<GitHub> | undefined;
+  constructor(
+    private readonly account: string,
+    private readonly read: (account: string) => Promise<string>,
+    private readonly make: (pat: string) => GitHub,
+  ) {}
   private get gh(): Promise<GitHub> {
-    this.inner ??= readSecret('github-pat').then((pat) => new OctokitGitHub(pat));
+    if (!this.inner) {
+      const loading = this.read(this.account).then((pat) => this.make(pat));
+      loading.catch(() => { if (this.inner === loading) this.inner = undefined; });
+      this.inner = loading;
+    }
     return this.inner;
   }
   async openPr(p: Parameters<GitHub['openPr']>[0]) {
@@ -49,9 +58,22 @@ class LazyGitHub implements GitHub {
   async prState(url: string) {
     return (await this.gh).prState(url);
   }
-  async mergePr(url: string, base: string) {
-    return (await this.gh).mergePr(url, base);
+  async mergePr(url: string, base: string, protectedBranches?: readonly string[]) {
+    return (await this.gh).mergePr(url, base, protectedBranches);
   }
+}
+
+/** `GitHubFor` over the Keychain: lazy, and one client per account. */
+export function lazyGitHubFor(
+  read: (account: string) => Promise<string> = (account) => readSecret(account),
+  make: (pat: string) => GitHub = (pat) => new OctokitGitHub(pat),
+): GitHubFor {
+  const clients = new Map<string, GitHub>();
+  return (account) => {
+    let c = clients.get(account);
+    if (!c) clients.set(account, (c = new LazyGitHub(account, read, make)));
+    return c;
+  };
 }
 
 /** Builds the Blocks store on the first call (one credential read, a failure is not cached), so file-store commands never touch the Keychain. */
@@ -106,7 +128,7 @@ export async function wire(o: WireOptions): Promise<{ engine: Engine; store: Boa
   const engine = new Engine({
     store,
     git: new LocalGitRepos(o.root),
-    github: new LazyGitHub(),
+    githubFor: lazyGitHubFor(),
     factories: async () => new FactoryConfig(await store.listFactoryDefs(), await store.listFactoryRepos()),
     exec: shellExec,
     now: () => new Date(),

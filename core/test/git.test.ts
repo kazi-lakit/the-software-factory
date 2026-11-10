@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { accessSync, constants, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, test } from 'vitest';
@@ -41,6 +41,14 @@ describe('LocalGitRepos', () => {
     const hook = join(a, '.git', 'hooks', 'pre-push');
     expect(existsSync(hook)).toBe(true);
     accessSync(hook, constants.X_OK);
+  });
+
+  test('ensureClone writes the factory list the hook reads, and a changed list is rewritten', async () => {
+    const clone = await repos.ensureClone('lists', repoFixture('lists', 'api', { remote: bare }), ['rel', 'main']);
+    const file = join(clone, '.git', 'factory-protected-branches');
+    expect(readFileSync(file, 'utf8').split('\n').filter(Boolean)).toEqual(['rel', 'main']);
+    await repos.ensureClone('lists', repoFixture('lists', 'api', { remote: bare }), ['dev', 'main']);
+    expect(readFileSync(file, 'utf8').split('\n').filter(Boolean)).toEqual(['dev', 'main']);
   });
 
   test('the same repo id in two factories gets two clones', async () => {
@@ -97,5 +105,46 @@ describe('LocalGitRepos', () => {
     expect(() =>
       execFileSync('git', ['-c', `core.hooksPath=${join(root, '.clones', 'blocks', 'os', '.git', 'hooks')}`, 'push', 'origin', 'HEAD:refs/heads/dev'], { cwd: wt, stdio: 'pipe' }),
     ).toThrow();
+  });
+
+  describe('git identity', () => {
+    const OTHER = { ...process.env };
+    let home: string;
+    const globalConfig = () => execFileSync('git', ['config', '--global', '--list'], { env: { ...process.env, HOME: home }, stdio: 'pipe' }).toString();
+
+    beforeAll(() => {
+      home = mkdtempSync(join(tmpdir(), 'home-'));
+      writeFileSync(join(home, '.gitconfig'), '[user]\n\tname = Owner\n\temail = owner@example.com\n');
+      process.env.HOME = home;
+      process.env.GIT_CONFIG_GLOBAL = join(home, '.gitconfig');
+    });
+    afterAll(() => {
+      process.env.HOME = OTHER.HOME;
+      if (OTHER.GIT_CONFIG_GLOBAL === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = OTHER.GIT_CONFIG_GLOBAL;
+      rmSync(home, { recursive: true, force: true });
+    });
+
+    test('a factory identity is set on the worktree only; the global config is untouched', async () => {
+      const before = globalConfig();
+      const api = repoFixture('ident', 'api', { remote: bare });
+      const identity = { gitName: 'Factory A', gitEmail: 'a@example.com' };
+      const wt = await repos.worktree('ident', api, 'T-10', 'factory/T-10-x', ['dev', 'main'], identity);
+      const read = (key: string) => execFileSync('git', ['config', '--worktree', key], { cwd: wt, stdio: 'pipe' }).toString().trim();
+      expect(read('user.email')).toBe('a@example.com');
+      expect(read('user.name')).toBe('Factory A');
+      const clone = join(root, '.clones', 'ident', 'api');
+      expect(execFileSync('git', ['config', '--get', 'extensions.worktreeConfig'], { cwd: clone, stdio: 'pipe' }).toString().trim()).toBe('true');
+      const another = await repos.worktree('ident', api, 'T-11', 'factory/T-11-x', ['dev', 'main'], { gitName: '', gitEmail: 'b@example.com' });
+      expect(execFileSync('git', ['config', '--worktree', 'user.email'], { cwd: another, stdio: 'pipe' }).toString().trim()).toBe('b@example.com');
+      expect(read('user.email')).toBe('a@example.com');
+      expect(globalConfig()).toBe(before);
+    });
+
+    test('without an identity nothing is written and worktreeConfig stays off', async () => {
+      const wt = await repos.worktree('plain', repoFixture('plain', 'api', { remote: bare }), 'T-12', 'factory/T-12-x', ['dev', 'main'], { gitName: '', gitEmail: '' });
+      expect(existsSync(join(wt, '.git'))).toBe(true);
+      const clone = join(root, '.clones', 'plain', 'api');
+      expect(() => execFileSync('git', ['config', '--get', 'extensions.worktreeConfig'], { cwd: clone, stdio: 'pipe' })).toThrow();
+    });
   });
 });

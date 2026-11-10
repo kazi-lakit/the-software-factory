@@ -62,7 +62,7 @@ function setup(clientTest = 'true') {
   const deps: EngineDeps = {
     store,
     git: new LocalGitRepos(join(tmp, 'factory')),
-    github,
+    githubFor: () => github,
     factories: async () => new FactoryConfig([defFixture('blocks')], [cfg]),
     exec: shellExec,
     now: () => new Date(),

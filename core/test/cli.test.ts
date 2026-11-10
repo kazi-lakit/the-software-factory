@@ -27,7 +27,7 @@ function setup() {
   const store = new MemoryStore({ factories: seed() });
   const exec: Exec = async () => ({ code: 0, output: '' });
   const engine = new Engine({
-    store, git, github: new FakeGitHub(), factories: async () => new FactoryConfig(seed().defs, seed().repos),
+    store, git, githubFor: () => new FakeGitHub(), factories: async () => new FactoryConfig(seed().defs, seed().repos),
     exec, now: () => new Date(), mode: 'session', claimant: 'me',
   });
   const wired: WireOptions[] = [];
@@ -169,7 +169,7 @@ describe('factory cli', () => {
     const { out, wired } = setup();
     const store = new BlocksStore(new FakeBlocksData('factory-core'), 'core');
     const engine = new Engine({
-      store, git, github: new FakeGitHub(), factories: async () => new FactoryConfig(seed().defs, seed().repos),
+      store, git, githubFor: () => new FakeGitHub(), factories: async () => new FactoryConfig(seed().defs, seed().repos),
       exec: async () => ({ code: 0, output: '' }), now: () => new Date(), mode: 'session', claimant: 'me',
     });
     const go = (...argv: string[]) =>
@@ -354,7 +354,7 @@ describe('new', () => {
     const store = new BlocksStore(data, 'core');
     const out: string[] = [];
     const engine = new Engine({
-      store, git, github: new FakeGitHub(), factories: async () => new FactoryConfig(seed().defs, seed().repos),
+      store, git, githubFor: () => new FakeGitHub(), factories: async () => new FactoryConfig(seed().defs, seed().repos),
       exec: async () => ({ code: 0, output: '' }), now: () => new Date(), mode: 'session', claimant: 'me',
     });
     const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: () => {} }, async () => ({ engine, store }));

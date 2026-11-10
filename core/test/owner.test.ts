@@ -116,7 +116,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
         you({ field: 'claimBy', from: 'w', to: null, reason: 'cancelled' }),
       ]);
       const engine = new Engine({
-        store: core, git: {} as never, github: new FakeGitHub(), factories,
+        store: core, git: {} as never, githubFor: () => new FakeGitHub(), factories,
         exec: async () => ({ code: 0, output: '' }), now, mode: 'session', claimant: 'w',
       });
       await expect(engine.complete('T-1', 'build', JSON.stringify({ status: 'done', summary: 's' }))).rejects.toBeInstanceOf(ClaimError);
@@ -172,7 +172,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       await put({ status: 'blocked', stage: 'build', question: 'which API?', blockedReason: 'needs input' });
       await answerTask(owner, now, 'T-1', 'the v2 one', (await owner.getTask('T-1')).version);
       const engine = new Engine({
-        store: core, git: {} as never, github: new FakeGitHub(), factories,
+        store: core, git: {} as never, githubFor: () => new FakeGitHub(), factories,
         exec: async () => ({ code: 0, output: '' }), now, mode: 'session', claimant: 'me',
       });
       await engine.sync();

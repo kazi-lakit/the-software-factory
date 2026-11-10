@@ -20,8 +20,8 @@ export class SecretMissingError extends Error {
 
 const SERVICE = 'the-software-factory';
 
-/** Reads a secret from the macOS Keychain. Error messages never include command output. */
-export async function readSecret(name: 'github-pat' | 'blocks-credential', exec: ExecFile = realExecFile): Promise<string> {
+/** Reads a secret from the macOS Keychain; `name` is the account (`blocks-credential`, or a factory's `patAccount`). Error messages never include command output. */
+export async function readSecret(name: string, exec: ExecFile = realExecFile): Promise<string> {
   const { code, stdout } = await exec('security', ['find-generic-password', '-s', SERVICE, '-a', name, '-w']);
   if (code !== 0) throw new SecretMissingError(`${name} not found in Keychain (service ${SERVICE})`);
   return stdout.replace(/\r?\n$/, '');
