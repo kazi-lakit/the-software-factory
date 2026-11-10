@@ -18,8 +18,9 @@ const write = (file_path, who = {}, tool_name = 'Write') => ({ ...who, tool_name
 const run = (input, s = session) => decide(input, { root, home, session: s });
 
 describe('guard decide', () => {
+  const inWt = { ...impl, cwd: wt };
   const cases = [
-    ['implementer git commit', bash('git commit -m x', impl), false],
+    ['implementer git commit in wt cwd', bash('git commit -m x', inWt), false],
     ['main git push', bash('git push origin x'), true],
     ['security keychain', bash('security find-generic-password -s x'), true],
     ['gh pr list', bash('gh pr list'), true],
@@ -38,7 +39,7 @@ describe('guard decide', () => {
     ['main cli', bash('node core/dist/cli.js next'), false],
     ['impl cli', bash('node core/dist/cli.js next', impl), true],
     ['impl factory cmd', bash('factory next', impl), true],
-    ['impl checkout file', bash('git checkout -- file.ts', impl), false],
+    ['impl checkout file', bash('git checkout -- file.ts', inWt), false],
     ['impl checkout -b', bash('git checkout -b other', impl), true],
     ['impl switch', bash('git switch x', impl), true],
     ['impl rebase', bash('git rebase main', impl), true],
@@ -60,7 +61,7 @@ describe('guard decide', () => {
     ['git -C remote add', bash('git -C wt remote add o u'), true],
     ['git -C config set', bash('git -C wt config user.email x'), true],
     ['git -C config get', bash('git -C wt config --get x'), false],
-    ['git -C commit', bash('git -C wt commit -m x', impl), false],
+    ['git -C wt commit', bash(`git -C ${wt} commit -m x`, impl), false],
     ['impl git -C checkout -b', bash('git -C wt checkout -b y', impl), true],
     ['impl git -c switch', bash('git -c k=v switch y', impl), true],
     ['impl git -C rebase', bash('git -C wt rebase main', impl), true],
@@ -69,6 +70,7 @@ describe('guard decide', () => {
     ['vaults casing bash', bash('cat ~/scratchpad/selise/vaults/x'), true],
     ['BLOCKS casing bash', bash('ls ~/scratchpad/selise/BLOCKS'), true],
     ['grep security ok', bash('grep -rn security src', impl), false],
+    ['grep -r security ok', bash('grep -r security .', impl), false],
     ['vitest src/security ok', bash('npx vitest run src/security', impl), false],
     ['security add', bash('security add-generic-password -s x'), true],
     ['impl relative write', { ...impl, tool_name: 'Write', tool_input: { file_path: 'core/src/x.ts' } }, true],
@@ -78,6 +80,60 @@ describe('guard decide', () => {
     ['notebook in wt', { ...impl, tool_name: 'NotebookEdit', tool_input: { notebook_path: `${wt}/n.ipynb` } }, false],
     ['no tool name', {}, true],
     ['other tool', { tool_name: 'WebFetch', tool_input: {} }, false],
+
+    // I7: vault and checkouts by any path, Keychain, hooks
+    ['vaultS anywhere', bash('cat /some/where/vaultS/a.md'), true],
+    ['VAULTS casing anywhere', bash('ls /x/VAULTS'), true],
+    ['relative vault append', bash('echo x >> ../vaultS/j.md'), true],
+    ['relative vault append impl', bash('echo x >> ../vaultS/j.md', impl), true],
+    ['relative checkout cd', bash('cd ../blocks/blocks-data && git status'), true],
+    ['relative checkout ../../', bash('ls ../../blocks'), true],
+    ['relative checkout quoted', bash('ls "../blocks/x"'), true],
+    ['relative checkout =', bash('X=../blocks/x node a.js'), true],
+    ['relative checkout ..//', bash('ls ..//blocks'), true],
+    ['relative checkout casing', bash('ls ../BLOCKS'), true],
+    ['blocks word ok', bash('npm test -- blocks'), false],
+    ['relative other dir ok', bash('ls ../other'), false],
+    ['security -v find', bash('security -v find-generic-password -s x'), true],
+    ['security -i dump', bash('security -q dump-keychain'), true],
+    ['find-internet-password anywhere', bash('/usr/bin/x find-internet-password'), true],
+    ['dump-keychain anywhere', bash('echo dump-keychain'), true],
+    ['.git/hooks', bash('rm .clones/data/.git/hooks/pre-push'), true],
+    ['hooksPath', bash('git -c core.hooksPath=/dev/null commit -m x'), true],
+    ['--no-verify', bash(`cd "${wt}" && git commit --no-verify -m x`, impl), true],
+    ['main core/dist/cli.js ok', bash('node "/f/root/core/dist/cli.js" --mode session next --json'), false],
+    ['impl core/dist secrets', bash(`node -e "import('/f/root/core/dist/secrets.js').then(m=>m.readSecret('github-pat'))"`, impl), true],
+    ['impl core/src', bash('cat core/src/secrets.ts', impl), true],
+    ['impl git --work-tree push', bash('git --work-tree x push', impl), true],
+    ['impl git -C quoted push', bash('git -C "a b" push', impl), true],
+    ['impl git push after cd', bash(`cd "${wt}" && git push origin x`, impl), true],
+    ['impl git log --grep push (over-deny ok)', bash('git log --grep push', impl), true],
+    ['impl echo push ok', bash('echo push', impl), false],
+    ['impl git status then push word ok', bash('git status; echo push', impl), false],
+
+    // I2: state-changing git for factory agents needs the step worktree
+    ['impl git commit no wt', bash('git commit -m x', impl), true],
+    ['impl git add no wt', bash('git add -A', impl), true],
+    ['impl git cherry-pick no wt', bash('git cherry-pick abc', impl), true],
+    ['impl git -C other commit', bash('git -C /f/root commit -m x', impl), true],
+    ['impl cd other commit', bash('cd /f/root && git commit -m x', impl), true],
+    ['impl cd wt quoted commit', bash(`cd "${wt}" && git commit -m x`, impl), false],
+    ['impl cd wt bare commit', bash(`cd ${wt} && git add -A && git commit -m x`, impl), false],
+    ['impl -C wt quoted add', bash(`git -C "${wt}" add a.ts`, impl), false],
+    ['impl cd wt prefix lookalike', bash(`cd ${wt}0 && git commit -m x`, impl), true],
+    ['impl cwd outside wt', bash('git commit -m x', { ...impl, cwd: root }), true],
+    ['impl cwd inside wt subdir', bash('git commit -m x', { ...impl, cwd: `${wt}/src` }), false],
+    ['impl git status no wt ok', bash('git status', impl), false],
+    ['impl git diff no wt ok', bash('git diff HEAD', impl), false],
+    ['impl git log no wt ok', bash('git log --oneline -5', impl), false],
+    ['main git commit no wt ok', bash('git commit -m x'), false],
+
+    // M8: only branch-creating or deleting forms of git branch
+    ['impl git branch --show-current ok', bash(`git -C ${wt} branch --show-current`, impl), false],
+    ['impl git branch list ok', bash('git branch', impl), false],
+    ['impl git branch -D', bash('git branch -D x', impl), true],
+    ['impl git branch -m', bash('git branch -m x y', impl), true],
+    ['impl git branch create', bash('git branch newb', impl), true],
   ];
   for (const [name, input, deny] of cases) {
     it(name, () => {
@@ -105,10 +161,59 @@ describe('guard decide', () => {
     expect(r.reason).toContain('no active factory step');
   });
 
+  it('state-changing git without the worktree names the subcommand', () => {
+    expect(run(bash('git commit -m x', impl)).reason).toBe('factory guard: git commit must run in the step worktree');
+    expect(run(bash('git -C x stash', impl)).reason).toBe('factory guard: git stash must run in the step worktree');
+  });
+
+  it('state-changing git with no active step is denied', () => {
+    expect(run(bash(`cd "${wt}" && git commit -m x`, impl), null).deny).toBe(true);
+  });
+
   it('darwin compares protected roots case-insensitively', () => {
     const input = write(`${home}/scratchpad/selise/VAULTS/x.md`);
     expect(decide(input, { root, home, session: null, platform: 'darwin' }).deny).toBe(true);
     expect(decide(input, { root, home, session: null, platform: 'linux' }).reason).toContain('main session may write only');
+  });
+});
+
+describe('guard symlinks (M3)', () => {
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'guard-ln-')));
+  const fhome = path.join(tmp, 'home');
+  const froot = path.join(tmp, 'root');
+  const fwt = path.join(froot, '.clones', 'worktrees', 'T-1');
+  const vault = path.join(fhome, 'scratchpad', 'selise', 'vaultS');
+  fs.mkdirSync(fwt, { recursive: true });
+  fs.mkdirSync(vault, { recursive: true });
+  fs.mkdirSync(path.join(froot, 'core'), { recursive: true });
+  fs.symlinkSync(froot, path.join(fwt, 'up'));
+  fs.symlinkSync(vault, path.join(fwt, 'v'));
+  // The same worktree reached through a symlinked parent still counts as the worktree.
+  fs.symlinkSync(froot, path.join(tmp, 'alias'));
+  const ctx = { root: froot, home: fhome, session: { taskId: 'T-1', step: 'build', worktree: fwt } };
+  const go = (p, who = impl) => decide(write(p, who), ctx);
+
+  it('a plain write in the worktree is allowed', () => {
+    expect(go(path.join(fwt, 'src', 'a.ts')).deny).toBe(false);
+  });
+  it('a write through a worktree symlink that leaves it is denied', () => {
+    const r = go(path.join(fwt, 'up', 'core', 'x.ts'));
+    expect(r.deny).toBe(true);
+    expect(r.reason).toContain('inside the step worktree');
+  });
+  it('a write through a symlink to a missing deeper path is denied', () => {
+    expect(go(path.join(fwt, 'up', 'newdir', 'deeper', 'x.ts')).deny).toBe(true);
+  });
+  it('a write through a worktree symlink into the vault is denied for everyone', () => {
+    expect(go(path.join(fwt, 'v', 'journal', 'x.md')).reason).toContain('writes under vaultS');
+    expect(go(path.join(fwt, 'v', 'x.md'), {}).reason).toContain('writes under vaultS');
+  });
+  it('the worktree through a symlinked parent is still the worktree', () => {
+    expect(go(path.join(tmp, 'alias', '.clones', 'worktrees', 'T-1', 'a.ts')).deny).toBe(false);
+  });
+  it('a git commit from a symlinked cwd inside the worktree is allowed', () => {
+    const cwd = path.join(tmp, 'alias', '.clones', 'worktrees', 'T-1');
+    expect(decide(bash('git commit -m x', { ...impl, cwd }), ctx).deny).toBe(false);
   });
 });
 
