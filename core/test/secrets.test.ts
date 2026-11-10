@@ -20,3 +20,11 @@ describe('readSecret', () => {
     expect((err as Error).message).not.toContain('SECRET-LEAK');
   });
 });
+
+describe('realExecFile', () => {
+  test('resolves with a failure code, not a crash, when the command cannot be spawned (with stdin)', async () => {
+    const { realExecFile } = await import('../src/secrets.js');
+    const r = await realExecFile('/nonexistent/factory-test-binary', [], 'input');
+    expect(r.code).not.toBe(0);
+  });
+});

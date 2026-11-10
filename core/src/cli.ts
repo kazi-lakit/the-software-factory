@@ -160,8 +160,9 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       const s = await engine.status(factoryFilter(o.factory));
       // Check each factory's PAT entry (the value is read and dropped) and record it for the Board page.
       const present = new Map<string, boolean>();
+      const loaded = new Set(s.factories.map((f) => f.factoryId));
       for (const d of await store.listFactoryDefs()) {
-        if (o.factory && !o.factory.includes(d.factoryId)) continue;
+        if (!loaded.has(d.factoryId)) continue;
         const ok = !isReservedPatAccount(d.patAccount) && (await readSecret(d.patAccount, exec).then(() => true, () => false));
         present.set(d.factoryId, ok);
         try {
@@ -174,7 +175,8 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       if (o.json) return printJson(s);
       io.out(`paused: ${s.paused}`);
       for (const f of s.factories) {
-        io.out(`factory ${f.factoryId}: ${f.active ? 'active' : 'inactive'}, paused ${f.paused}, PAT ${f.patPresent === true ? 'present' : 'missing'}`);
+        const counts = Object.entries(f.counts).filter(([, n]) => n > 0).map(([status, n]) => `${status}=${n}`);
+        io.out(`factory ${f.factoryId}: ${f.active ? 'active' : 'inactive'}, paused ${f.paused}, PAT ${f.patPresent === true ? 'present' : 'missing'}${counts.map((c) => `, ${c}`).join('')}`);
       }
       for (const [status, n] of Object.entries(s.counts)) io.out(`${status}: ${n}`);
       for (const a of s.active) io.out(`active: ${a.taskId} ${a.step ?? '-'} by ${a.claimBy ?? '-'} until ${a.claimUntil ?? '-'}`);
@@ -244,22 +246,23 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
         return io.out(`wrote ${o.export}`);
       }
       if (o.check !== true && o.dryRun !== true && o.yes !== true) throw new CliExit('migrate changes the Board: pass --check or --dry-run to preview, --yes to run, or --export <file>', 1);
+      const ownerSteps = (cmd.optsWithGlobals() as { store: string }).store !== 'blocks';
       const { store } = await open(cmd);
       const line = (s: { name: string; done: string; detail: string }) => io.out(`${s.name}: ${s.done} - ${s.detail}`);
       if (o.check === true) {
-        const report = await checkMigration(store, findRoot(), home, exec);
+        const report = await checkMigration(store, findRoot(), home, exec, { blocks: !ownerSteps });
         report.steps.forEach(line);
+        for (const n of report.notes) io.out(`note: ${n}`);
         if (report.steps.some((s) => s.done === 'pending')) throw new CliExit('migration pending', 2);
         return;
       }
-      const ownerSteps = (cmd.optsWithGlobals() as { store: string }).store !== 'blocks';
       try {
         const report = await migrate(store, findRoot(), home, exec, { dryRun: o.dryRun === true, ownerSteps, onStep: line });
         for (const n of report.notes) io.out(`note: ${n}`);
       } catch (e) {
         // The Blocks store with the core's credential refuses owner-only writes (factory definitions, settings, task factoryId).
         if (e instanceof OwnerOnlyError || e instanceof ForbiddenError) {
-          throw new CliExit(`migrate writes owner-only rows, which the factory core's Blocks credential cannot: ${e.message}. Use --store file, or have the owner run the Board steps`, 1);
+          throw new CliExit(`this step is done on the Board: Settings → Factories → Import (${e.message})`, 1);
         }
         throw e;
       }

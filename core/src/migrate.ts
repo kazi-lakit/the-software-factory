@@ -33,14 +33,14 @@ export interface MigrateOptions {
 }
 
 /** What the stored board looked like before this run wrote anything (a FileStore converts the old shape on load). */
-function readLegacyFlags(root: string): { settings: boolean; untagged: boolean } {
+function readLegacyFlags(root: string): { settings: boolean; untaggedTasks: number; untaggedEvents: number } {
   try {
     const raw = JSON.parse(readFileSync(join(root, '.factory', 'board.json'), 'utf8')) as Record<string, unknown>;
-    const missing = (list: unknown) => Array.isArray(list) && list.some((x) => (x as { factoryId?: unknown } | null)?.factoryId == null);
+    const missing = (list: unknown) => (Array.isArray(list) ? list.filter((x) => (x as { factoryId?: unknown } | null)?.factoryId == null).length : 0);
     const settings = raw.settings as { global?: unknown } | null | undefined;
-    return { settings: settings != null && typeof settings === 'object' && 'global' in settings, untagged: missing(raw.tasks) || missing(raw.events) };
+    return { settings: settings != null && typeof settings === 'object' && 'global' in settings, untaggedTasks: missing(raw.tasks), untaggedEvents: missing(raw.events) };
   } catch {
-    return { settings: false, untagged: false };
+    return { settings: false, untaggedTasks: 0, untaggedEvents: 0 };
   }
 }
 
@@ -90,28 +90,69 @@ async function copyPat(exec: ExecFile, dry: boolean, push: (name: string, done: 
     push('copy-pat', 'skipped', `${SOURCE_ACCOUNT} not in Keychain; add ${TARGET_ACCOUNT} by hand`);
     return false;
   }
-  if (/[\r\n]/.test(pat)) throw new Error(`${SOURCE_ACCOUNT} holds a line break; copy it to ${TARGET_ACCOUNT} by hand`);
-  const { code } = await exec('security', ['-i'], `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${TARGET_ACCOUNT} -w ${quote(pat)}\n`);
+  // The GitHub token alphabet only: nothing that needs quoting on the `security -i` line.
+  if (!/^[A-Za-z0-9_]+$/.test(pat)) {
+    throw new Error(`PAT has unexpected characters; copy it by hand with security add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${TARGET_ACCOUNT} -w`);
+  }
+  const { code } = await exec('security', ['-i'], `add-generic-password -U -s ${KEYCHAIN_SERVICE} -a ${TARGET_ACCOUNT} -w ${pat}\n`);
   if (code !== 0) throw new Error(`could not write ${TARGET_ACCOUNT} to Keychain`);
+  // Read it back: a write that "succeeded" must hold the same value (compared in memory, never printed).
+  const back = await readSecret(TARGET_ACCOUNT, exec).catch(() => undefined);
+  if (back !== pat) throw new Error(`${TARGET_ACCOUNT} does not match ${SOURCE_ACCOUNT} after the copy`);
   push('copy-pat', 'now', `copied ${SOURCE_ACCOUNT} to ${TARGET_ACCOUNT}`);
   return true;
 }
 
-/** Read-only: where each step stands (`already` or `pending`, `skipped` when there is nothing to act on). Nothing is written or read from the Keychain but entry names. */
-export async function checkMigration(store: BoardStore, root: string, home: string, exec: ExecFile): Promise<MigrateReport> {
+/** Repo ids that are missing from `have` or differ from `want` (remote, base branch, checks). */
+function repoDiffs(have: FactoryRepo[], want: FactoryRepo[]): { missing: string[]; differ: string[] } {
+  const missing: string[] = [];
+  const differ: string[] = [];
+  for (const r of want) {
+    const got = have.find((x) => x.repoId === r.repoId);
+    if (!got) missing.push(r.repoId);
+    else if (got.remote !== r.remote || got.baseBranch !== r.baseBranch || canonicalJson(got.checks) !== canonicalJson(r.checks)) differ.push(r.repoId);
+  }
+  return { missing, differ };
+}
+
+/** Old-layout clones (`.clones/<repo>`, a clone itself) are not moved; the new layout is `.clones/<factory>/<repo>`. */
+function oldLayoutNote(root: string): string | undefined {
+  const clones = join(root, '.clones');
+  if (!existsSync(clones)) return undefined;
+  const old = sorted(readdirSync(clones, { withFileTypes: true }).filter((e) => e.isDirectory() && e.name !== 'worktrees' && existsSync(join(clones, e.name, '.git'))), (e) => e.name);
+  return old.length > 0 ? `old-layout clones not moved (a clone is made at .clones/<factory>/<repo> when needed): ${old.map((e) => `.clones/${e.name}`).join(', ')}` : undefined;
+}
+
+/**
+ * Read-only: where each step stands (`already` or `pending`, `skipped` when there is nothing to act on). Only entry names are
+ * read from the Keychain. `blocks: true` (the Blocks store) leaves out the file-store checks: the raw board file and tag-tasks.
+ */
+export async function checkMigration(store: BoardStore, root: string, home: string, exec: ExecFile, opts: { blocks?: boolean } = {}): Promise<MigrateReport> {
   const steps: MigrateStep[] = [];
   const notes: string[] = [];
-  const flags = readLegacyFlags(root);
+  const blocks = opts.blocks === true;
+  const flags = blocks ? { settings: false, untaggedTasks: 0, untaggedEvents: 0 } : readLegacyFlags(root);
   const add = (name: string, done: MigrateStep['done'], detail: string) => steps.push({ name, done, detail });
   const ID = LEGACY_FACTORY_ID;
-  legacyDef(home); // the defaults must be valid
+  const def = legacyDef(home);
 
-  if ((await store.listFactoryDefs()).some((d) => d.factoryId === ID)) add('create-factory', 'already', `factory ${ID} exists`);
-  else add('create-factory', 'pending', `${ID} factory not on the Board → import it on the Board (Settings → Factories → Import)`);
+  if (!(await store.listFactoryDefs()).some((d) => d.factoryId === ID)) {
+    add('create-factory', 'pending', `${ID} factory not on the Board → import it on the Board (Settings → Factories → Import)`);
+  } else {
+    const d = repoDiffs(await store.listFactoryRepos(ID), loadLegacyRepos(root, def));
+    if (d.missing.length + d.differ.length > 0) {
+      const parts = [d.missing.length ? `missing: ${d.missing.join(', ')}` : '', d.differ.length ? `different from repos/*.yaml: ${d.differ.join(', ')}` : ''].filter(Boolean);
+      add('create-factory', 'pending', `factory ${ID} is on the Board but its repos are incomplete (${parts.join('; ')}) → import it again on the Board`);
+    } else {
+      add('create-factory', 'already', `factory ${ID} and its repos exist`);
+    }
+  }
 
-  const untagged = (await store.listTasks()).filter((t) => !t.factoryId).length;
-  if (untagged > 0 || flags.untagged) add('tag-tasks', 'pending', `${untagged} tasks without a factory`);
-  else add('tag-tasks', 'already', 'every task has a factory');
+  if (!blocks) {
+    const untagged = Math.max((await store.listTasks()).filter((t) => !t.factoryId).length, flags.untaggedTasks);
+    if (untagged > 0) add('tag-tasks', 'pending', `${untagged} tasks without a factory`);
+    else add('tag-tasks', 'already', 'every task has a factory');
+  }
 
   const stored = (await store.getSettings()) as unknown as { global?: unknown; factories?: Record<string, unknown> };
   const legacy = await store.legacySettingsStatus();
@@ -124,6 +165,8 @@ export async function checkMigration(store: BoardStore, root: string, home: stri
   else if (await hasEntry(exec, SOURCE_ACCOUNT)) add('copy-pat', 'pending', `${SOURCE_ACCOUNT} not yet copied to ${TARGET_ACCOUNT}: run factory migrate --yes`);
   else add('copy-pat', 'skipped', `${SOURCE_ACCOUNT} not in Keychain`);
 
+  const clones = oldLayoutNote(root);
+  if (clones) notes.push(clones);
   return { steps, notes };
 }
 
@@ -134,8 +177,6 @@ export function buildImport(root: string, home: string): ImportFile {
   if (!r.ok) throw new Error(`import file: ${r.error}`);
   return r.value;
 }
-
-const quote = (v: string): string => `"${v.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 
 async function hasEntry(exec: ExecFile, account: string): Promise<boolean> {
   // No -w: this only asks whether the entry exists, it never reads the value.
@@ -160,11 +201,11 @@ export async function migrate(store: BoardStore, root: string, home: string, exe
   if (opts.ownerSteps === false) {
     // The factory core's half: the Keychain copy. Definitions, settings and task tags are the owner's (the Board's Import action).
     await copyPat(exec, dry, push);
-    const check = await checkMigration(store, root, home, exec);
+    const check = await checkMigration(store, root, home, exec, { blocks: true });
     const owner = check.steps.filter((s) => s.name !== 'copy-pat');
     for (const s of owner) push(s.name, s.done, s.detail);
     if (owner.every((s) => s.done !== 'pending') && existsSync(join(root, 'repos'))) push('repos-folder', 'now', 'repos/ is no longer read; remove it with: git rm -r repos');
-    return { steps, notes };
+    return { steps, notes: check.notes };
   }
   const flags = readLegacyFlags(root);
   const would = dry ? 'would ' : '';
@@ -185,11 +226,14 @@ export async function migrate(store: BoardStore, root: string, home: string, exe
     push('create-factory', 'now', `${would}create ${LEGACY_FACTORY_ID} with ${repos.length} repos (${repos.map((r) => r.repoId).join(', ') || 'none'})`);
   }
 
-  // 2. Tasks without a factory belong to `blocks`.
+  // 2. Tasks without a factory belong to `blocks`. A FileStore converts on load, so the raw file says how many there were.
   const untagged = (await store.listTasks()).filter((t) => !t.factoryId);
   if (!dry) for (const t of untagged) await store.updateTask(t.taskId, t.version, { factoryId: LEGACY_FACTORY_ID });
-  if (untagged.length > 0 || flags.untagged) {
-    push('tag-tasks', 'now', `${would}tag ${untagged.length} tasks as ${LEGACY_FACTORY_ID}; events without a factory are read as ${LEGACY_FACTORY_ID}`);
+  const taskCount = Math.max(untagged.length, flags.untaggedTasks);
+  if (taskCount > 0) {
+    push('tag-tasks', 'now', `${would}tag ${taskCount} tasks as ${LEGACY_FACTORY_ID}; events without a factory are read as ${LEGACY_FACTORY_ID}`);
+  } else if (flags.untaggedEvents > 0) {
+    push('tag-tasks', 'now', `${would}save ${flags.untaggedEvents} events without a factory as ${LEGACY_FACTORY_ID}`);
   } else {
     push('tag-tasks', 'already', 'every task has a factory');
   }
@@ -221,7 +265,7 @@ export async function migrate(store: BoardStore, root: string, home: string, exe
   }
 
   // 4. The Keychain PAT. The value only passes through memory and the child's stdin; it is never printed.
-  const copied = await copyPat(exec, dry, push);
+  await copyPat(exec, dry, push);
 
   // 5. Read back and compare with the source. Nothing is removed before this matches.
   const changed = steps.some((s) => s.done === 'now');
@@ -233,20 +277,14 @@ export async function migrate(store: BoardStore, root: string, home: string, exe
     const stored1 = nowDefs.find((d) => d.factoryId === LEGACY_FACTORY_ID);
     if (!stored1) bad.push(`factory ${LEGACY_FACTORY_ID} is missing`);
     const nowRepos = await store.listFactoryRepos(LEGACY_FACTORY_ID);
-    for (const r of repos) {
-      const got = nowRepos.find((x) => x.repoId === r.repoId);
-      if (!got) bad.push(`repo ${r.repoId} is missing`);
-      else if (got.remote !== r.remote || got.baseBranch !== r.baseBranch || canonicalJson(got.checks) !== canonicalJson(r.checks)) bad.push(`repo ${r.repoId} differs from repos/${r.repoId}.yaml`);
-    }
+    const diffs = repoDiffs(nowRepos, repos);
+    for (const id of diffs.missing) bad.push(`repo ${id} is missing`);
+    for (const id of diffs.differ) bad.push(`repo ${id} differs from repos/${id}.yaml`);
     const left = (await store.listTasks()).filter((t) => !t.factoryId).length;
     if (left > 0) bad.push(`${left} tasks still have no factory`);
     if (blocksSettings) {
       const now = (await store.getSettings()).factories[LEGACY_FACTORY_ID];
       if (!now || canonicalJson(now) !== canonicalJson(blocksSettings)) bad.push(`settings of ${LEGACY_FACTORY_ID} differ from the source`);
-    }
-    if (copied) {
-      const [a, b] = await Promise.all([readSecret(SOURCE_ACCOUNT, exec), readSecret(TARGET_ACCOUNT, exec)]).catch(() => [undefined, undefined]);
-      if (a === undefined || a !== b) bad.push(`${TARGET_ACCOUNT} does not match ${SOURCE_ACCOUNT}`);
     }
     if (bad.length > 0) throw new Error(`read-back failed: ${bad.join('; ')}`);
     push('read-back', changed ? 'now' : 'already', 'the Board copy matches the source');
@@ -256,11 +294,7 @@ export async function migrate(store: BoardStore, root: string, home: string, exe
   if (existsSync(join(root, 'repos'))) push('repos-folder', dry || changed ? 'now' : 'already', 'repos/ is no longer read; remove it with: git rm -r repos');
   else push('repos-folder', 'skipped', 'repos/ is not present');
 
-  // Old-layout clones (`.clones/<repo>`, a clone itself) are not moved; the new layout is `.clones/<factory>/<repo>`.
-  const clones = join(root, '.clones');
-  if (existsSync(clones)) {
-    const old = sorted(readdirSync(clones, { withFileTypes: true }).filter((e) => e.isDirectory() && e.name !== 'worktrees' && existsSync(join(clones, e.name, '.git'))), (e) => e.name);
-    if (old.length > 0) notes.push(`old-layout clones not moved (a clone is made at .clones/<factory>/<repo> when needed): ${old.map((e) => `.clones/${e.name}`).join(', ')}`);
-  }
+  const clones = oldLayoutNote(root);
+  if (clones) notes.push(clones);
   return { steps, notes };
 }

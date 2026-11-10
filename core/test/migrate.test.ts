@@ -8,7 +8,7 @@ import { validateImportFile } from '../src/importFile.js';
 import type { ExecFile } from '../src/secrets.js';
 import { FileStore, MemoryStore, type BoardStore } from '../src/store.js';
 
-const SECRET = 'ghp_s3cr3t"value\\x';
+const SECRET = 'ghp_s3cr3tvalue';
 const REPOS = join(__dirname, '..', '..', 'repos');
 
 /** A Memory store holding the pre-factories shape: untagged tasks and `{ global, repos }` settings. */
@@ -32,14 +32,25 @@ function fakeKeychain(initial: Record<string, string>) {
       return { code: 0, stdout: args.includes('-w') ? `${v}\n` : '', stderr: '' };
     }
     if (args[0] === '-i') {
-      const m = /^add-generic-password -U -s \S+ -a (\S+) -w "((?:[^"\\]|\\.)*)"\n$/.exec(stdin ?? '');
+      const m = /^add-generic-password -U -s \S+ -a (\S+) -w (\S+)\n$/.exec(stdin ?? '');
       if (!m) return { code: 1, stdout: '', stderr: '' };
-      entries.set(m[1]!, m[2]!.replace(/\\(.)/g, '$1'));
+      entries.set(m[1]!, m[2]!);
       return { code: 0, stdout: '', stderr: '' };
     }
     throw new Error(`unexpected security ${args[0]}`);
   };
   return { exec, entries, calls };
+}
+
+/** A keychain whose `security -i` write "succeeds" but stores a different value. */
+function lyingKeychain(initial: Record<string, string>) {
+  const kc = fakeKeychain(initial);
+  const inner = kc.exec;
+  const exec: ExecFile = async (f, a, i) => {
+    if (a[0] === '-i') { kc.entries.set('github-pat:blocks', 'something-else'); return { code: 0, stdout: '', stderr: '' }; }
+    return inner(f, a, i);
+  };
+  return { ...kc, exec };
 }
 
 const names = (r: MigrateReport) => r.steps.map((s) => `${s.name}:${s.done}`);
@@ -216,4 +227,71 @@ test('checkMigration is read-only and reports pending then done', async () => {
   expect(await store.listFactoryDefs()).toEqual([]);
   await migrate(store, root, home, kc.exec);
   expect(names(await checkMigration(store, root, home, kc.exec))).toEqual(['create-factory:already', 'tag-tasks:already', 'move-settings:already', 'copy-pat:already']);
+});
+
+describe('R10 fix round', () => {
+  test('Blocks run: a copy that stores another value throws without printing either value', async () => {
+    const store = new LegacyMemory();
+    const kc = lyingKeychain({ 'github-pat': SECRET });
+    const err = await migrate(store, root, home, kc.exec, { ownerSteps: false }).catch((e: Error) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as Error).message).toBe('github-pat:blocks does not match github-pat after the copy');
+    expect((err as Error).message).not.toMatch(/s3cr3t|something-else/);
+  });
+
+  test('a PAT outside the GitHub alphabet is refused and not written', async () => {
+    const kc = fakeKeychain({ 'github-pat': 'bad value"x' });
+    await expect(migrate(new LegacyMemory(), root, home, kc.exec, { ownerSteps: false })).rejects.toThrow(
+      'PAT has unexpected characters; copy it by hand with security add-generic-password -U -s the-software-factory -a github-pat:blocks -w',
+    );
+    expect(kc.calls.some((c) => c.args[0] === '-i')).toBe(false);
+  });
+
+  test('check: a partial Board import (missing or different repos) is pending, not done', async () => {
+    const store = new MemoryStore();
+    const imp = buildImport(root, home);
+    await store.saveFactoryDef(null, imp.factory);
+    for (const r of imp.repos.slice(2)) await store.saveFactoryRepo(null, r);
+    const kc = fakeKeychain({ 'github-pat:blocks': 'x' });
+    const miss = (await checkMigration(store, root, home, kc.exec, { blocks: true })).steps[0]!;
+    expect(miss.done).toBe('pending');
+    expect(miss.detail).toContain('missing: data, iam');
+    for (const r of imp.repos.slice(0, 2)) await store.saveFactoryRepo(null, r);
+    expect((await checkMigration(store, root, home, kc.exec, { blocks: true })).steps[0]!.done).toBe('already');
+    const stored = (await store.listFactoryRepos('blocks')).find((r) => r.repoId === 'data')!;
+    await store.saveFactoryRepo(stored, { ...stored, remote: 'git@example.com:x/y.git' });
+    const diff = (await checkMigration(store, root, home, kc.exec, { blocks: true })).steps[0]!;
+    expect(diff).toMatchObject({ done: 'pending' });
+    expect(diff.detail).toContain('different from repos/*.yaml: data');
+  });
+
+  test('old-layout clones appear as a note in check and in the Blocks run, not as a step', async () => {
+    mkdirSync(join(root, '.clones', 'os', '.git'), { recursive: true });
+    const kc = fakeKeychain({});
+    const check = await checkMigration(new MemoryStore(), root, home, kc.exec, { blocks: true });
+    expect(check.notes).toEqual([expect.stringContaining('.clones/os')]);
+    const run = await migrate(new MemoryStore(), root, home, kc.exec, { ownerSteps: false });
+    expect(run.notes).toEqual([expect.stringContaining('.clones/os')]);
+    expect(run.steps.map((s) => s.name)).not.toContain('old-layout');
+  });
+
+  test('a stray board.json does not keep Blocks pending, and Blocks has no tag-tasks step', async () => {
+    kinds[1]![1](); // writes a legacy board.json under root
+    const kc = fakeKeychain({ 'github-pat:blocks': 'x' });
+    const store = new MemoryStore();
+    const imp = buildImport(root, home);
+    for (const r of imp.repos) await store.saveFactoryRepo(null, r);
+    await store.saveFactoryDef(null, imp.factory);
+    const check = await checkMigration(store, root, home, kc.exec, { blocks: true });
+    expect(check.steps.map((s) => s.name)).toEqual(['create-factory', 'move-settings', 'copy-pat']);
+    expect(check.steps.every((s) => s.done !== 'pending')).toBe(true);
+  });
+
+  test('a file store counts the untagged tasks from the raw file', async () => {
+    const store = kinds[1]![1]();
+    const check = await checkMigration(store, root, home, fakeKeychain({}).exec);
+    expect(check.steps.find((s) => s.name === 'tag-tasks')).toMatchObject({ done: 'pending', detail: '1 tasks without a factory' });
+    const report = await migrate(store, root, home, fakeKeychain({}).exec, { dryRun: true });
+    expect(report.steps[1]!.detail).toContain('tag 1 tasks');
+  });
 });

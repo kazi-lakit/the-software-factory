@@ -6,10 +6,17 @@ export type ExecFile = (file: string, args: string[], stdin?: string) => Promise
 /** Real implementation: never rejects on a non-zero exit, returns the code instead. */
 export const realExecFile: ExecFile = (file, args, stdin) =>
   new Promise((resolve) => {
+    let settled = false;
+    const done = (r: { code: number; stdout: string; stderr: string }) => {
+      if (!settled) { settled = true; resolve(r); }
+    };
     const child = execFile(file, args, { encoding: 'utf8' }, (error, stdout, stderr) => {
       const code = error === null ? 0 : typeof error.code === 'number' ? error.code : 1;
-      resolve({ code, stdout, stderr });
+      done({ code, stdout, stderr });
     });
+    // A spawn failure or a closed pipe (EPIPE) resolves with a failure code instead of crashing the process.
+    child.on('error', () => done({ code: 1, stdout: '', stderr: '' }));
+    child.stdin?.on('error', () => done({ code: 1, stdout: '', stderr: '' }));
     if (stdin !== undefined) child.stdin?.end(stdin);
   });
 

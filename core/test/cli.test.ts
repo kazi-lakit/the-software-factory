@@ -6,6 +6,7 @@ import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { defFixture, repoFixture, seed, seedBlocksFactories } from './factoryFixtures.js';
 import type { Exec } from '../src/checks.js';
 import type { ExecFile } from '../src/secrets.js';
+import { buildImport } from '../src/migrate.js';
 import { run, type WireOptions } from '../src/cli.js';
 import { Engine } from '../src/engine.js';
 import { FactoryConfig } from '../src/factories.js';
@@ -186,7 +187,7 @@ describe('factory cli', () => {
       exec: async () => ({ code: 0, output: '' }), now: () => new Date(), mode: 'session', claimant: 'me',
     });
     const go = (...argv: string[]) =>
-      run(argv, { out: (s) => out.push(s), err: () => {} }, async (o) => { wired.push(o); return { engine, store }; });
+      run(argv, { out: (s) => out.push(s), err: () => {} }, async (o) => { wired.push(o); return { engine, store }; }, { exec: fakeSecurity() });
     expect(await go('--store', 'blocks', 'status')).toBe(0);
     expect(wired[0]).toMatchObject({ store: 'blocks' });
     expect(out.length).toBeGreaterThan(0);
@@ -303,7 +304,7 @@ describe('factory cli', () => {
     expect(json.tasks).toMatchObject([{ taskId: 'T-1', status: 'ready' }]);
     expect(json.factories).toMatchObject([{ factoryId: 'blocks', name: 'blocks', active: true, paused: false, counts: { ready: 1 }, patPresent: true }]);
     await go('status');
-    expect(out.slice(1).join('\n')).toMatch(/factory blocks: active, paused false, PAT present\n.*ready: 1/s);
+    expect(out.slice(1).join('\n')).toMatch(/factory blocks: active, paused false, PAT present, ready=1\n.*ready: 1/s);
   });
 });
 
@@ -368,6 +369,12 @@ describe('factories, status health and --factory', () => {
     expect(out[1]).toBe('factory blocks: active, paused false, PAT present');
   });
 
+  test('status probes and records only the loaded, valid factories', async () => {
+    const { store, go } = setup({ defs: [defFixture('blocks'), defFixture('bad', { name: '' })], repos: [] });
+    expect(await go('status')).toBe(0);
+    expect((await store.listFactoryHealth()).map((h) => h.factoryId)).toEqual(['blocks']);
+  });
+
   test('status --factory limits the health check to the named factories', async () => {
     const { store, go } = setup(two());
     expect(await go('status', '--factory', 'delta')).toBe(0);
@@ -417,7 +424,7 @@ describe('migrate', () => {
     const { store, out, err, go, calls } = blocksCli(['github-pat']);
     expect(await go('migrate', '--yes')).toBe(0);
     expect(err).toEqual([]);
-    expect(out.map((l) => l.split(':')[0])).toEqual(['copy-pat', 'create-factory', 'tag-tasks', 'move-settings']);
+    expect(out.map((l) => l.split(':')[0])).toEqual(['copy-pat', 'create-factory', 'move-settings']);
     expect(out[0]).toMatch(/^copy-pat: now/);
     expect(out[1]).toBe('create-factory: pending - blocks factory not on the Board → import it on the Board (Settings → Factories → Import)');
     expect(calls.some((a) => a[0] === '-i')).toBe(true);
@@ -431,6 +438,8 @@ describe('migrate', () => {
     expect(out[0]).toMatch(/^create-factory: pending/);
     expect(calls.some((a) => a[0] === '-i')).toBe(false);
     const done = setup({ defs: [defFixture('blocks')], repos: [] }, ['github-pat', 'github-pat:blocks']);
+    // a Board import that holds the factory and every repo
+    for (const r of buildImport(process.env.FACTORY_ROOT!, '/h').repos) await done.store.saveFactoryRepo(null, r);
     expect(await done.go('migrate', '--check')).toBe(0);
     expect(done.out.every((l) => !l.includes(': pending'))).toBe(true);
   });
