@@ -31,6 +31,14 @@ describe("AnswerPanel", () => {
     expect(screen.getByText("agent asked")).toBeInTheDocument();
   });
 
+  it("send_answer_uses_the_accent_fill", async () => {
+    const task = await blockedTask();
+    renderWithClient(<AnswerPanel task={task} onReload={vi.fn()} />);
+    const send = screen.getByRole("button", { name: "Send answer" });
+    expect(send).toHaveClass("sf-button-accent");
+    expect(send).not.toHaveClass("sf-button-primary");
+  });
+
   it("needs_non_blank_text", async () => {
     const task = await blockedTask();
     renderWithClient(<AnswerPanel task={task} onReload={vi.fn()} />);

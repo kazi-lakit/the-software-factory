@@ -166,7 +166,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
         <button
           ref={newTaskButton}
           type="button"
-          className="sf-button sf-toolbar-end"
+          className={`sf-button sf-toolbar-end${creating ? "" : " sf-button-primary"}`}
           aria-expanded={creating}
           aria-controls={creating ? formId : undefined}
           onClick={() => {

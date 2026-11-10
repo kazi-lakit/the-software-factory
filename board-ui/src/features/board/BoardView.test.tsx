@@ -82,6 +82,16 @@ describe("BoardView", () => {
     expect(screen.getByText("IAM work")).toBeInTheDocument();
   });
 
+  it("new_task_is_primary_only_while_the_form_is_closed", async () => {
+    renderBoard();
+    const open = await screen.findByRole("button", { name: "New task" });
+    expect(open).toHaveClass("sf-button-primary");
+    fireEvent.click(open);
+    expect(screen.getByRole("button", { name: "New task" })).not.toHaveClass("sf-button-primary");
+    expect(screen.getByRole("button", { name: "Create task" })).toHaveClass("sf-button-primary");
+    expect(document.querySelector(".sf-button-accent")).toBeNull();
+  });
+
   it("creates_a_task_from_the_new_task_form_and_shows_its_card", async () => {
     renderBoard();
     fireEvent.click(await screen.findByRole("button", { name: "New task" }));

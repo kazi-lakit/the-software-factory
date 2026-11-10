@@ -35,6 +35,18 @@ afterEach(() => {
 });
 
 describe("GatePanel", () => {
+  it("approve_button_uses_the_accent_fill", async () => {
+    const seeded = await atSpecGate();
+    task = seeded.task;
+    renderPanel(seeded.docs);
+    const approve = screen.getByRole("button", { name: "Approve" });
+    expect(approve).toHaveClass("sf-button-accent");
+    expect(approve).not.toHaveClass("sf-button-primary");
+    const changes = screen.getByRole("button", { name: "Request changes" });
+    expect(changes).not.toHaveClass("sf-button-accent");
+    expect(changes).not.toHaveClass("sf-button-primary");
+  });
+
   it("approves_the_version_shown", async () => {
     const seeded = await atSpecGate();
     task = seeded.task;

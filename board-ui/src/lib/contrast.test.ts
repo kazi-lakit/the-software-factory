@@ -43,7 +43,7 @@ const textPairs: [string, string][] = [
   ["muted", "bg"], ["muted", "surface"], ["muted", "surface-sunk"],
   ["done", "bg"], ["done", "surface"], ["done", "surface-sunk"], ["done", "done-soft"],
   ["accent-text", "accent-soft"], ["accent-text", "bg"], ["accent-text", "surface"],
-  ["on-accent", "accent"], ["on-primary", "primary"], ["on-primary-soft", "primary-soft"],
+  ["on-accent", "accent"], ["on-primary", "primary"], ["on-primary", "primary-hover"], ["on-primary-soft", "primary-soft"],
   ["added", "added-soft"], ["removed", "removed-soft"]
 ];
 
