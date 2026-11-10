@@ -130,11 +130,48 @@ describe('next across factories', () => {
 
   test('a factory at maxParallel does not stop the other', async () => {
     const { store, engine, clock } = setup(TWO());
-    await store.setSettings({ factories: { a: { factory: { ...DEFAULT_SETTINGS, maxParallel: 1 }, repos: {} } } });
+    await store.setSettings({ factories: { a: { factory: { ...DEFAULT_SETTINGS, maxParallel: 1 }, repos: {} }, b: { factory: { ...DEFAULT_SETTINGS, maxParallel: 1 }, repos: {} } } });
     await putIn(store, 'a', { status: 'build', stage: 'build', branch: 'factory/T-1-a', ...claimedBy('other', clock) });
     await putIn(store, 'a');
     await putIn(store, 'b');
     expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-3', context: { factory: { factoryId: 'b' } } });
+  });
+
+  test('a paused factory still advances approved work on next, which then reports paused', async () => {
+    const { store, engine } = setup(TWO());
+    await store.setSettings({ factories: { b: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: {} } } });
+    const t = await putIn(store, 'b', { status: 'spec_review', stage: null, branch: 'factory/T-1-a' });
+    await store.addDoc(t.taskId, 'spec', 'spec', 'a');
+    await store.addApproval({ taskId: t.taskId, factoryId: 'b', gate: 'spec', docVersion: 1, decision: 'approve', comment: '', by: 'you', at: '2026-11-09T10:00:00Z' } as never);
+    expect(await engine.next(undefined, ['b'])).toEqual({ kind: 'none', reason: 'paused' });
+    expect((await store.getTask(t.taskId)).status).toBe('plan');
+  });
+
+  test('an invalid factory definition leaves its tasks untouched and is logged once', async () => {
+    const logs: string[] = [];
+    const bad = { ...defFixture('b'), gitEmail: 'no-at-sign' };
+    const { store, engine, github } = setup({ defs: [defFixture('a'), bad], repos: [repoFixture('a', 'api'), repoFixture('b', 'api')], log: (m) => logs.push(m) });
+    const pr = await github.openPr({ remote: REMOTE, head: 'factory/T-1-a', base: 'dev', title: 't', body: 'b' });
+    await putIn(store, 'b', { status: 'pr_open', branch: 'factory/T-1-a', prUrl: pr.url });
+    await putIn(store, 'b', { status: 'build', stage: 'build', branch: 'factory/T-2-a', costUsd: 999 });
+    github.setState(pr.url, 'merged');
+    const before = await store.listTasks();
+    await engine.sync();
+    await engine.next();
+    expect(await store.listTasks()).toEqual(before);
+    expect(logs.filter((l) => l.startsWith('factory b skipped: '))).toHaveLength(1);
+  });
+
+  test('an invalid repo row leaves its tasks untouched; other repos of the factory work', async () => {
+    const logs: string[] = [];
+    const { store, engine } = setup({ defs: [defFixture('b')], repos: [repoFixture('b', 'api', { remote: '' }), repoFixture('b', 'web')], log: (m) => logs.push(m) });
+    await putIn(store, 'b', { status: 'build', stage: 'build', branch: 'factory/T-1-a' }, 'api');
+    await putIn(store, 'b', { status: 'ready' }, 'web');
+    const before = await store.getTask('T-1');
+    expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-2' });
+    await engine.next();
+    expect(await store.getTask('T-1')).toEqual(before);
+    expect(logs.filter((l) => l.startsWith('repo b/api skipped: '))).toHaveLength(1);
   });
 
   test('paused and inactive are reported only when every factory in the filter is', async () => {
@@ -1124,6 +1161,17 @@ describe('status per factory', () => {
     expect(s.tasks.map((t) => t.taskId)).toEqual(['T-2']);
     expect(s.factories).toEqual([{ factoryId: 'b', name: 'b', active: true, paused: false, counts: { ready: 1 }, patPresent: false }]);
     expect((await engine.status()).factories.map((f) => [f.factoryId, f.patPresent])).toEqual([['a', null], ['b', false]]);
+  });
+});
+
+describe('status settings isolation', () => {
+  test('paused in a/api does not touch b/api', async () => {
+    const { store, engine } = setup(TWO());
+    await store.setSettings({ factories: { a: { factory: DEFAULT_SETTINGS, repos: { api: { paused: true } } } } });
+    await putIn(store, 'a');
+    await putIn(store, 'b');
+    expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-2' });
+    expect((await engine.status()).factories.map((f) => f.paused)).toEqual([false, false]);
   });
 });
 

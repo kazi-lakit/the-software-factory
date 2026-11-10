@@ -10,7 +10,7 @@ const execFileP = promisify(execFile);
 export interface GitRepos {
   /** The clone is at `.clones/<factoryId>/<repoId>`. */
   ensureClone(factoryId: string, repo: FactoryRepo, protectedBranches: string[]): Promise<string>;
-  worktree(factoryId: string, repo: FactoryRepo, taskId: string, branch: string): Promise<string>;
+  worktree(factoryId: string, repo: FactoryRepo, taskId: string, branch: string, protectedBranches: string[]): Promise<string>;
   push(worktreePath: string, branch: string): Promise<void>;
   isClean(path: string): Promise<boolean>;
 }
@@ -54,10 +54,10 @@ export class LocalGitRepos implements GitRepos {
     return clone;
   }
 
-  async worktree(factoryId: string, repo: FactoryRepo, taskId: string, branch: string): Promise<string> {
+  async worktree(factoryId: string, repo: FactoryRepo, taskId: string, branch: string, protectedBranches: string[]): Promise<string> {
     const path = join(this.root, '.clones', 'worktrees', taskId);
     if (existsSync(path)) return path;
-    const clone = await this.ensureClone(factoryId, repo, []);
+    const clone = await this.ensureClone(factoryId, repo, protectedBranches);
     mkdirSync(join(this.root, '.clones', 'worktrees'), { recursive: true });
     // A worktree folder deleted by hand still holds its branch until pruned.
     await git(clone, ['worktree', 'prune']);

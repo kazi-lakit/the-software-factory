@@ -65,6 +65,11 @@ describe('run skill', () => {
     expect(body).toMatch(/first 8 characters of `\$\{CLAUDE_SESSION_ID\}`/);
   });
 
+  it('reports an inactive factory', () => {
+    expect(body).toContain('`inactive`');
+    expect(body).toContain('factory: inactive');
+  });
+
   it('reports a paused factory (M2)', () => {
     expect(body).toContain('`paused`');
     expect(body).toContain('factory: paused');

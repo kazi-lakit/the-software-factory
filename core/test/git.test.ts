@@ -55,27 +55,27 @@ describe('LocalGitRepos', () => {
 
   test('worktree branches from origin/dev and is reused', async () => {
     const branch = 'factory/T-1-x';
-    const wt = await repos.worktree('blocks', cfg, 'T-1', branch);
+    const wt = await repos.worktree('blocks', cfg, 'T-1', branch, ['dev', 'main']);
     expect(wt).toBe(join(root, '.clones', 'worktrees', 'T-1'));
     expect(git(wt, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(branch);
     expect(git(wt, 'rev-parse', 'HEAD').trim()).toBe(git(wt, 'rev-parse', 'origin/dev').trim());
-    expect(await repos.worktree('blocks', cfg, 'T-1', branch)).toBe(wt);
+    expect(await repos.worktree('blocks', cfg, 'T-1', branch, ['dev', 'main'])).toBe(wt);
   });
 
   test('worktree reuses an existing local branch when its worktree folder is gone', async () => {
     const branch = 'factory/T-2-y';
-    const wt = await repos.worktree('blocks', cfg, 'T-2', branch);
+    const wt = await repos.worktree('blocks', cfg, 'T-2', branch, ['dev', 'main']);
     git(wt, 'commit', '--allow-empty', '-m', 'kept work');
     const head = git(wt, 'rev-parse', 'HEAD').trim();
     rmSync(wt, { recursive: true, force: true }); // the folder was deleted; git still lists the worktree
-    const again = await repos.worktree('blocks', cfg, 'T-2', branch);
+    const again = await repos.worktree('blocks', cfg, 'T-2', branch, ['dev', 'main']);
     expect(again).toBe(wt);
     expect(git(again, 'rev-parse', '--abbrev-ref', 'HEAD').trim()).toBe(branch);
     expect(git(again, 'rev-parse', 'HEAD').trim()).toBe(head);
   });
 
   test('isClean reflects uncommitted files', async () => {
-    const wt = await repos.worktree('blocks', cfg, 'T-1', 'factory/T-1-x');
+    const wt = await repos.worktree('blocks', cfg, 'T-1', 'factory/T-1-x', ['dev', 'main']);
     expect(await repos.isClean(wt)).toBe(true);
     writeFileSync(join(wt, 'f.txt'), 'x');
     expect(await repos.isClean(wt)).toBe(false);
@@ -83,7 +83,7 @@ describe('LocalGitRepos', () => {
   });
 
   test('push publishes a task branch, refuses dev', async () => {
-    const wt = await repos.worktree('blocks', cfg, 'T-1', 'factory/T-1-x');
+    const wt = await repos.worktree('blocks', cfg, 'T-1', 'factory/T-1-x', ['dev', 'main']);
     git(wt, 'commit', '--allow-empty', '-m', 'work');
     await repos.push(wt, 'factory/T-1-x');
     expect(git(tmp, 'ls-remote', bare, 'refs/heads/factory/T-1-x')).toContain('refs/heads/factory/T-1-x');
@@ -93,7 +93,7 @@ describe('LocalGitRepos', () => {
   });
 
   test('hook still guards when pushing a protected refspec via git directly with global hooksPath ignored', async () => {
-    const wt = await repos.worktree('blocks', cfg, 'T-1', 'factory/T-1-x');
+    const wt = await repos.worktree('blocks', cfg, 'T-1', 'factory/T-1-x', ['dev', 'main']);
     expect(() =>
       execFileSync('git', ['-c', `core.hooksPath=${join(root, '.clones', 'blocks', 'os', '.git', 'hooks')}`, 'push', 'origin', 'HEAD:refs/heads/dev'], { cwd: wt, stdio: 'pipe' }),
     ).toThrow();

@@ -127,7 +127,7 @@ export class Engine {
   private async loadFactories(): Promise<FactoryConfig> {
     const cfg = await retry(() => this.deps.factories());
     for (const { id, reason } of cfg.skipped()) {
-      const note = `factory ${id} skipped: ${reason}`;
+      const note = `${id.includes('/') ? 'repo' : 'factory'} ${id} skipped: ${reason}`;
       if (this.loggedSkips.has(note)) continue;
       this.loggedSkips.add(note);
       this.deps.log?.(note);
@@ -139,12 +139,16 @@ export class Engine {
 
   /** `filter` limits the pass to those factories; left out, every factory. */
   async sync(filter?: string[]): Promise<void> {
+    await this.syncWith(await this.loadFactories(), filter);
+  }
+
+  private async syncWith(cfg: FactoryConfig, filter?: string[]): Promise<void> {
     const { store } = this.deps;
-    const cfg = await this.loadFactories();
     const stored = await retry(() => store.getSettings());
     for (const task of await retry(() => store.listTasks())) {
       if (filter && !filter.includes(task.factoryId)) continue;
       try {
+        if (this.skipped(cfg, task)) continue; // its definition is invalid: leave the task as it is until it is fixed
         const gone = this.goneReason(cfg, task);
         if (gone) {
           if (!TERMINAL.has(task.status) && task.status !== 'blocked' && task.status !== 'inbox') {
@@ -166,6 +170,13 @@ export class Engine {
     }
   }
 
+  /** True when the task's factory or repo definition was skipped as invalid (not the same as deleted). */
+  private skipped(cfg: FactoryConfig, task: Task): boolean {
+    const ids = new Set(cfg.skipped().map((s) => s.id));
+    return (!cfg.factory(task.factoryId) && ids.has(task.factoryId)) ||
+      (!cfg.repo(task.factoryId, task.repo) && ids.has(`${task.factoryId}/${task.repo}`));
+  }
+
   /** Why the task's factory or repo cannot be found, or undefined when both are there. */
   private goneReason(cfg: FactoryConfig, task: Task): string | undefined {
     if (!cfg.factory(task.factoryId)) return `factory ${task.factoryId} no longer exists`;
@@ -180,12 +191,13 @@ export class Engine {
     const stored = await retry(() => store.getSettings());
     const scope = cfg.factories().filter((f) => !filter || filter.includes(f.factoryId));
     const paused = (f: FactoryDef) => factorySettings(stored, f.factoryId).paused;
+    // Paused or inactive means no new claims; approvals, PR merges and limits still advance.
+    await this.syncWith(cfg, filter);
     const open = scope.filter((f) => f.active && !paused(f));
     if (open.length === 0) {
       const reason = scope.length === 0 ? 'nothing to do' : scope.some(paused) ? 'paused' : 'inactive';
       return { kind: 'none', reason };
     }
-    await this.sync(filter);
 
     const openIds = new Set(open.map((f) => f.factoryId));
     const tasks = await retry(() => store.listTasks());
@@ -528,7 +540,7 @@ export class Engine {
 
   /** The task's worktree; a new one branches from the task's base, not the repo default. */
   private worktreeFor(def: FactoryDef, repo: FactoryRepo, task: Task, branch: string): Promise<string> {
-    return this.deps.git.worktree(def.factoryId, { ...repo, baseBranch: task.baseBranch }, task.taskId, branch);
+    return this.deps.git.worktree(def.factoryId, { ...repo, baseBranch: task.baseBranch }, task.taskId, branch, def.protectedBranches);
   }
 
   /** The task's factory and repo definitions; throws the blocking reason when either is gone. */
