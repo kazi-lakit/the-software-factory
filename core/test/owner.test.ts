@@ -145,7 +145,7 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
     test('sets the answer of a blocked task', async () => {
       const { owner, put, ownerEvents } = setup();
       await put({ status: 'blocked', stage: 'build', question: 'which API?' });
-      const t = await answerTask(owner, now, 'T-1', 'the v2 one');
+      const t = await answerTask(owner, now, 'T-1', 'the v2 one', (await owner.getTask('T-1')).version);
       expect(t).toMatchObject({ status: 'blocked', answer: 'the v2 one' });
       expect(await ownerEvents()).toEqual([you({ field: 'answer', to: 'the v2 one', reason: 'answered' })]);
     });
@@ -153,22 +153,29 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
     test('refuses a task that is not blocked', async () => {
       const { owner, put } = setup();
       await put({ status: 'build', stage: 'build' });
-      const err = await answerTask(owner, now, 'T-1', 'x').catch((e: unknown) => e);
+      const err = await answerTask(owner, now, 'T-1', 'x', (await owner.getTask('T-1')).version).catch((e: unknown) => e);
       expect(err).toBeInstanceOf(OwnerActionError);
       expect(err).toMatchObject({ code: 'not-blocked', message: 'T-1 is not blocked' });
+    });
+
+    test('refuses an answer to a question the owner did not see', async () => {
+      const { owner, put } = setup();
+      const t = await put({ status: 'blocked', stage: 'build', question: 'which API?' });
+      await expect(answerTask(owner, now, 'T-1', 'x', t.version - 1)).rejects.toBeInstanceOf(VersionConflictError);
+      expect((await owner.getTask('T-1')).answer).toBeNull();
     });
 
     test('refuses a blank answer', async () => {
       const { owner, put } = setup();
       await put({ status: 'blocked', stage: 'build' });
-      await expect(answerTask(owner, now, 'T-1', ' \n')).rejects.toMatchObject({ code: 'invalid' });
+      await expect(answerTask(owner, now, 'T-1', ' \n', 1)).rejects.toMatchObject({ code: 'invalid' });
       expect((await owner.getTask('T-1')).answer).toBeNull();
     });
 
     test("then the engine's sync resumes the task", async () => {
       const { owner, core, put } = setup();
       await put({ status: 'blocked', stage: 'build', question: 'which API?', blockedReason: 'needs input' });
-      await answerTask(owner, now, 'T-1', 'the v2 one');
+      await answerTask(owner, now, 'T-1', 'the v2 one', (await owner.getTask('T-1')).version);
       const engine = new Engine({
         store: core, git: {} as never, github: new FakeGitHub(), repos: { data: cfg } as Record<RepoId, RepoConfig>,
         exec: async () => ({ code: 0, output: '' }), now, mode: 'session', claimant: 'me',

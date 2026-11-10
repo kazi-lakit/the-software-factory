@@ -4,6 +4,7 @@ export { BlocksForbiddenError, BlocksUnauthorizedError, SdkBlocksData } from './
 export type { TokenSource } from './blocks/token.js';
 export { PROTECTED_TASK_FIELDS } from './blocks/schema.js';
 export { assertMove, canMove, IllegalMoveError, STEP_STATUS, TERMINAL } from './status.js';
+export { isProtected } from './branches.js';
 export { GATE_DOC, resolveSettings, resolveGates, validApproval, shouldMerge } from './gates.js';
 export type {
   RepoId, Status, Step, AgentStep, Gate, DocKind, Mode, Task, Doc, Approval, Settings, RepoSettings, Run, FactoryEvent, AgentResult,

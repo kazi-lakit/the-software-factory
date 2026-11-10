@@ -132,10 +132,14 @@ export function cancelTask(store: BoardStore, now: () => Date, taskId: string): 
   return move(store, now, taskId, 'cancelled', 'cancelled');
 }
 
-/** The engine's sync resumes the task once it sees the answer. */
-export async function answerTask(store: BoardStore, now: () => Date, taskId: string, text: string): Promise<Task> {
+/**
+ * The engine's sync resumes the task once it sees the answer. `seenVersion` is the task version the owner saw the
+ * question at: if the task moved on since (another question, a restart), the answer is refused, not applied to it.
+ */
+export async function answerTask(store: BoardStore, now: () => Date, taskId: string, text: string, seenVersion: number): Promise<Task> {
   if (!nonBlank(text)) invalid('answer must not be blank');
   const task = await store.getTask(taskId);
+  if (task.version !== seenVersion) throw new VersionConflictError(taskId, seenVersion, task.version);
   if (task.status !== 'blocked') throw new OwnerActionError('not-blocked', `${taskId} is not blocked`);
   return ownerUpdate(store, now, task, { answer: text }, 'answered');
 }

@@ -169,7 +169,8 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   dev
     .command('answer <task> <text>')
     .action(async (id: string, text: string, _o: object, cmd: Command) => {
-      await owner.answerTask(await openDev(cmd), now, id, text);
+      const store = await openDev(cmd);
+      await owner.answerTask(store, now, id, text, (await store.getTask(id)).version);
       io.out(`${id} answered`);
     });
 

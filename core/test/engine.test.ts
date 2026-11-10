@@ -856,6 +856,13 @@ describe('sync', () => {
     expect(await store.getTask('T-1')).toMatchObject({ status: 'build', stage: 'build', answer: 'rename it', attempt: 1 });
   });
 
+  test('PR changes requested on a protected base return to build', async () => {
+    const { store, engine } = await prOpen('dev');
+    await store.addApproval({ taskId: 'T-1', gate: 'pr', docVersion: 1, decision: 'changes', comment: 'rename it' });
+    await engine.sync();
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'build', stage: 'build', answer: 'rename it' });
+  });
+
   test('PR approve on an unprotected base merges', async () => {
     const { store, engine, github, url } = await prOpen('feature/x');
     await store.addApproval({ taskId: 'T-1', gate: 'pr', docVersion: 1, decision: 'approve', comment: '' });
