@@ -3,10 +3,9 @@ import { useCallback, useEffect, useId, useState } from "react";
 import type { FormEvent } from "react";
 import {
   REPO_IDS, saveSettings, SETTING_RANGES, VersionConflictError,
-  type Gate, type RepoId, type RepoSettings, type RepoSettingsPatch, type Settings, type SettingsScope, type StoredSettings
+  type Gate, type RepoId, type RepoSettings, type RepoSettingsPatch, type Settings, type StoredSettings
 } from "@factory/core";
 import { boardStore } from "../../lib/board";
-import { useUnsent } from "../../lib/unsent";
 import { HISTORY_KEY } from "../history/useHistory";
 import { describeWriteError, now, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 import { SETTINGS_KEY, useSettings } from "./useSettings";
@@ -43,38 +42,40 @@ function useSaved(onNotice: (text: string) => void) {
 
 /**
  * One scope's form text. Each field starts from its stored value (`origin`); the fields whose text differs are the
- * owner's own changes, kept as unsent text (lib/unsent.ts), and only those are saved. When the stored scope changes
- * (a reload, a save elsewhere), the fields the owner did not change take the new stored value.
+ * owner's own changes, and only those are saved. The text lives in this component only: leaving the view drops it
+ * and remounting shows the stored values. When the stored scope changes (a reload, a save elsewhere), the fields
+ * the owner did not change take the new stored value.
  */
-function useScopeDraft<K extends string>(scope: SettingsScope, keys: readonly K[], stored: Record<K, string>) {
+function useScopeDraft<K extends string>(keys: readonly K[], stored: Record<K, string>) {
   const [origin, setOrigin] = useState(stored);
-  const fields = {} as Record<K, ReturnType<typeof useUnsent>>;
-  // `keys` is a module constant, so the hooks run in the same order on every render.
-  for (const key of keys) fields[key] = useUnsent(`settings:${scope}:${key}`, origin[key]);
-  const value = (key: K): string => fields[key][0];
-  const changed = keys.filter((key) => value(key) !== origin[key]);
+  const [values, setValues] = useState(stored);
+  const changed = keys.filter((key) => values[key] !== origin[key]);
 
   const storedKey = JSON.stringify(stored);
   useEffect(() => {
-    const next = { ...origin };
+    const nextOrigin = { ...origin };
+    const nextValues = { ...values };
     let moved = false;
     for (const key of keys) {
-      if (fields[key][0] !== origin[key] || origin[key] === stored[key]) continue;
-      next[key] = stored[key];
-      fields[key][2](stored[key]);
+      if (values[key] !== origin[key] || origin[key] === stored[key]) continue;
+      nextOrigin[key] = stored[key];
+      nextValues[key] = stored[key];
       moved = true;
     }
-    if (moved) setOrigin(next);
+    if (moved) {
+      setOrigin(nextOrigin);
+      setValues(nextValues);
+    }
     // Runs when the stored values change (compared as text), not on every keystroke.
   }, [storedKey]);
 
-  /** After a save: every field shows the saved value and no unsent text remains. */
+  /** After a save: every field shows the saved value. */
   function settle(saved: Record<K, string>) {
-    for (const key of keys) fields[key][2](saved[key]);
+    setValues(saved);
     setOrigin(saved);
   }
 
-  return { changed, set: (key: K, text: string) => fields[key][1](text), settle, value };
+  return { changed, set: (key: K, text: string) => setValues((v) => ({ ...v, [key]: text })), settle, value: (key: K): string => values[key] };
 }
 
 /** Global gates, limits and the pause switch, then each repo's overrides. Each scope saves on its own. */
@@ -170,7 +171,7 @@ const globalDraft = (s: Settings): Record<GlobalKey, string> => ({
 
 function GlobalForm({ global, noteId, onNotice, onReload }: ScopeProps & { global: Settings; noteId: string }) {
   const ids = useId();
-  const draft = useScopeDraft("global", GLOBAL_KEYS, globalDraft(global));
+  const draft = useScopeDraft(GLOBAL_KEYS, globalDraft(global));
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<WriteProblem>();
   const [done, setDone] = useState(false);
@@ -297,7 +298,7 @@ function RepoRow({ global, noteId, onNotice, onReload, repo, stored }: ScopeProp
   global: Settings; noteId: string; repo: RepoId; stored: RepoSettings | undefined;
 }) {
   const formId = useId();
-  const draft = useScopeDraft(repo, REPO_KEYS, repoDraft(stored));
+  const draft = useScopeDraft(REPO_KEYS, repoDraft(stored));
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<WriteProblem>();
   const [done, setDone] = useState(false);

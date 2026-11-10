@@ -57,6 +57,18 @@ describe("SettingsView", () => {
     expect(screen.getByRole("switch", { name: "Pause factory" })).not.toBeChecked();
   });
 
+  it("drops_unsaved_changes_when_the_view_unmounts", async () => {
+    const first = renderSettings();
+    await screen.findByRole("form", { name: "Global settings" });
+    fireEvent.click(within(globalForm()).getByRole("switch", { name: "Plan gate" }));
+    expect(within(globalForm()).getByRole("switch", { name: "Plan gate" })).toBeChecked();
+    first.unmount();
+    expect(sessionStorage.length).toBe(0);
+    renderSettings();
+    await screen.findByRole("form", { name: "Global settings" });
+    expect(within(globalForm()).getByRole("switch", { name: "Plan gate" })).not.toBeChecked();
+  });
+
   it("lists_the_seven_repos_with_inherit_on_off_per_gate", async () => {
     await saveSettings(fakeBoard().owner, now, "iam", { gates: { pr: false }, maxTurnsPerStage: 30 });
     renderSettings();
