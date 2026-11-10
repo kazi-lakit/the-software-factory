@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS } from '../../src/defaults.js';
 import { CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, RereadAfterUpdateError, VersionConflictError } from '../../src/store.js';
 import { PROTECTED_TASK_FIELDS } from '../../src/blocks/schema.js';
 import { defFixture, repoFixture, seedBlocksFactories } from '../factoryFixtures.js';
+import { FactoryConfig } from '../../src/factories.js';
 import { runStoreContract } from '../storeContract.js';
 
 // R1: the contract suite runs on role 'any' (owner identity, no access checks).
@@ -68,6 +69,19 @@ describe('BlocksStore factories', () => {
     expect(data.rows('FactoryDef')[0]).toMatchObject({ active: 0, gitName: '', version: 2 });
     expect(await s.listFactoryDefs()).toEqual([{ ...def, active: false, gitName: '', version: 2 }]);
   });
+
+  it.each([['not json', '[dev'], ['not a list', '"dev"'], ['a list with a non-name', '["dev",7]'], ['missing', undefined]])(
+    'a def whose protectedBranches is %s is skipped with a reason, never read as main only (M1)',
+    async (_what, raw) => {
+      const data = new FakeBlocksData('any');
+      const row = { ...defFixture('delta'), protectedBranches: raw, active: 1, writeId: '' } as Record<string, unknown>;
+      if (raw === undefined) delete row.protectedBranches;
+      data.seed('FactoryDef', row as never);
+      const cfg = new FactoryConfig(await new BlocksStore(data, 'owner').listFactoryDefs(), []);
+      expect(cfg.factory('delta')).toBeUndefined();
+      expect(cfg.skipped()).toEqual([{ id: 'delta', reason: 'protectedBranches must be a list of branch names' }]);
+    },
+  );
 
   it('a repo id may exist in two factories: they are two rows', async () => {
     const s = new BlocksStore(new FakeBlocksData('any'), 'owner');

@@ -149,13 +149,19 @@ const decodeEvent = (r: Row): FactoryEvent => ({
   field: str(r.field), from: str(r.from), to: str(r.to), reason: text(r.reason), at: text(r.at),
 });
 
+/**
+ * A list as stored; anything else (malformed JSON, not a list, missing) decodes to the raw text, which validation
+ * refuses, so FactoryConfig skips the factory with a reason. Never `[]` (ensureMain would make it main only and fail
+ * open) and never null (validation would take the default list: the factory never guesses).
+ */
 const decodeBranches = (v: Value | undefined): string[] => {
   try {
     const parsed: unknown = JSON.parse(text(v));
-    return Array.isArray(parsed) ? parsed.filter((b): b is string => typeof b === 'string') : [];
+    if (Array.isArray(parsed)) return parsed as string[];
   } catch {
-    return [];
+    // falls through to the refused value
   }
+  return text(v) as unknown as string[];
 };
 
 const decodeDef = (r: Row): FactoryDef => ({
