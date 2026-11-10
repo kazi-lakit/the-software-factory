@@ -56,7 +56,7 @@ describe('validateFactoryDef', () => {
   test.each(['octocat', ' Some-User ', 'a', 'a1-b2', 'x'.repeat(39)])('accepts the GitHub login %j, trimmed (R16)', (ghUser) => {
     expect(validateFactoryDef(defInput({ ghUser }))).toMatchObject({ ok: true, value: { ghUser: ghUser.trim() } });
   });
-  test.each(['-lead', 'trail-', 'two--dashes', 'has space', 'under_score', 'x'.repeat(40), 'blocks-credential:x', 'github-pat:delta'])(
+  test.each(['-lead', 'trail-', 'two--dashes', 'has space', 'under_score', 'x'.repeat(40), 'blocks-credential:x', 'keychain:delta'])(
     'refuses %j as ghUser (R16)',
     (ghUser) => {
       expect(validateFactoryDef(defInput({ ghUser }))).toEqual({ ok: false, error: 'ghUser must be a GitHub login' });

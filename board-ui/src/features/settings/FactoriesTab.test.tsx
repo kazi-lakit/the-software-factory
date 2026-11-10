@@ -95,7 +95,7 @@ describe("Factories tab", () => {
     const form = await screen.findByRole("form", { name: "Add factory" });
     changeField("Factory id", "echo");
     changeField("Name", "Echo");
-    changeField("GitHub login", "github-pat:echo");
+    changeField("GitHub login", "keychain:echo");
     fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
     expect(await within(form).findByRole("alert")).toHaveTextContent("ghUser must be a GitHub login");
     expect(save).not.toHaveBeenCalled();
