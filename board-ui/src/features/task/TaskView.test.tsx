@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, ForbiddenError, type StoredSettings } from "@factory/core";
+import { DEFAULT_SETTINGS, ForbiddenError, type FactoryEvent, type StoredSettings } from "@factory/core";
+import { describeEvent } from "../../lib/describeEvent";
+import { formatWhenShort } from "../../lib/formatTime";
 import { setReadyProblem } from "../newTask/createdNotice";
 import { describeWriteError } from "./writeOutcome";
 import { clearAllUnsent } from "../../lib/unsent";
@@ -516,8 +518,8 @@ describe("TaskView body", () => {
   it("last_event_row_is_gone", async () => {
     const task = await seedTask({ title: "Events" });
     renderTask(task.taskId);
-    await screen.findByRole("region", { name: "Details" });
-    expect(screen.queryByText("Last event")).toBeNull();
+    const details = await screen.findByRole("region", { name: "Details" });
+    expect(within(details).queryByText("Last event")).toBeNull();
   });
 
   it("runs_tab_lists_every_run_in_start_order", async () => {
@@ -686,5 +688,81 @@ describe("TaskView after New task", () => {
     renderTask(task.taskId);
     await screen.findByRole("heading", { level: 1, name: "Fresh" });
     expect(screen.queryByText("The task was created but not marked ready.")).not.toBeInTheDocument();
+  });
+});
+
+describe("TaskView phone markup", () => {
+  const more = (container: HTMLElement) => container.querySelector("details.sf-task-more") as HTMLDetailsElement;
+  const moreRow = (container: HTMLElement, term: string) =>
+    [...more(container).querySelectorAll("dt")].find((dt) => dt.textContent === term)?.nextElementSibling as HTMLElement | undefined;
+
+  it("shows_repo_to_base_under_the_title", async () => {
+    const task = await seedTask({ repo: "data", title: "Repo line" }, "build", { stage: "build" });
+    const { container } = renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 1, name: "Repo line" });
+    const line = container.querySelector("p.sf-task-repo") as HTMLElement;
+    expect(line).toHaveClass("sf-mono");
+    expect(line).toHaveTextContent(/^data → dev$/);
+    expect(container.querySelector(".sf-task-title-row")?.nextElementSibling).toBe(line);
+    const chips = within(screen.getByRole("list", { name: "Task summary" })).getAllByRole("listitem");
+    expect(chips[2]).toHaveClass("sf-chip-repo");
+  });
+
+  it("details_and_history_is_a_closed_disclosure", async () => {
+    const prUrl = "https://github.com/SELISEdigitalplatforms/blocks-data/pull/9";
+    const task = await seedTask({ title: "More" }, "pr_open", { branch: "factory/T-1-more", costUsd: 1.5, prUrl, stage: "ship" });
+    const at = "2099-01-02T10:00:00.000Z";
+    const newest: FactoryEvent = { action: "move", actor: "core", at, factoryId: "blocks", field: "status", from: "review", reason: "pr opened", taskId: task.taskId, to: "pr_open" };
+    await fakeBoard().core.addEvents([newest]);
+    const { container } = renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    const details = more(container);
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    const summary = details.querySelector("summary");
+    expect(summary).toHaveClass("sf-label");
+    expect(summary).toHaveTextContent(/^Details and history$/);
+    expect([...details.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Branch", "Cost", "PR", "Last event"]);
+    expect(moreRow(container, "Branch")).toHaveTextContent(/^factory\/T-1-more$/);
+    await waitFor(() => expect(moreRow(container, "Cost")?.textContent).toBe(detail("Cost").textContent));
+    expect(within(details).getByRole("link", { name: /pull\/9/ })).toHaveAttribute("target", "_blank");
+    const last = moreRow(container, "Last event")!;
+    expect(last).toHaveTextContent(describeEvent(newest).text);
+    expect(last).toHaveTextContent(formatWhenShort(at));
+  });
+
+  it("details_and_history_without_pr_or_events", async () => {
+    fakeBoard().ownerData.seed("FactoryTask", {
+      attempt: 0, baseBranch: "dev", costUsd: 0, description: "", gateOverrides: "{}", repo: "data", status: "inbox", taskId: "T-77", title: "Quiet row", version: 1
+    });
+    const { container } = renderTask("T-77");
+    await screen.findByRole("heading", { level: 1, name: "Quiet row" });
+    expect([...more(container).querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Branch", "Cost", "Last event"]);
+    expect(moreRow(container, "Branch")).toHaveTextContent(/^—$/);
+    expect(moreRow(container, "Last event")).toHaveTextContent(/^No history yet\.$/);
+  });
+
+  it("blocked_task_marks_the_main_column_and_shows_earlier", async () => {
+    const task = await seedTask({ title: "Stuck" }, "blocked", { question: "Open now?", stage: "plan" });
+    const ask = (to: string, at: string) => ({ action: "set" as const, actor: "spec-writer · sdk · run R-1", at, factoryId: "blocks", field: "question", from: null, reason: "asked", taskId: task.taskId, to });
+    await fakeBoard().core.addEvents([
+      ask("Which branch?", "2026-11-01T10:00:00.000Z"),
+      { action: "set", actor: "you", at: "2026-11-01T11:00:00.000Z", factoryId: "blocks", field: "answer", from: null, reason: "answered", taskId: task.taskId, to: "main" },
+      ask("Open now?", "2026-11-02T10:00:00.000Z")
+    ]);
+    const first = renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Open now?" });
+    expect(first.container.querySelector(".sf-task-main")).toHaveClass("sf-task-answering");
+    const earlier = first.container.querySelector("details.sf-qa-earlier") as HTMLElement;
+    expect(earlier).not.toHaveAttribute("open");
+    expect(earlier.querySelector("summary")).toHaveTextContent(/^Earlier question \(1\)$/);
+    expect(earlier).toHaveTextContent("You answered main at");
+    first.unmount();
+
+    const other = await seedTask({ title: "Moving" }, "build", { stage: "build" });
+    const { container } = renderTask(other.taskId);
+    await screen.findByRole("heading", { level: 1, name: "Moving" });
+    expect(container.querySelector(".sf-task-main")).not.toHaveClass("sf-task-answering");
+    expect(container.querySelector("details.sf-qa-earlier")).toBeNull();
   });
 });
