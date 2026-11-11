@@ -49,6 +49,52 @@ describe("New factory page", () => {
     expect(tabs[0]).toHaveAttribute("aria-selected", "true");
   });
 
+  it("factories_crumb_goes_to_the_settings_factories_section", () => {
+    const { onNavigate } = renderPage();
+    const crumb = within(screen.getByRole("navigation", { name: "Breadcrumb" })).getByRole("link", { name: "Factories" });
+    expect(crumb).toHaveAttribute("href", "/settings#settings-factories");
+    fireEvent.click(crumb);
+    expect(onNavigate).toHaveBeenCalledWith("/settings#settings-factories");
+  });
+
+  it("keeps_the_draft_when_switching_tabs_and_back", () => {
+    renderPage();
+    changeField("Name", "Echo");
+    changeField("GitHub login", "octocat");
+    fireEvent.click(screen.getByRole("button", { name: "Remove dev" }));
+    changeField("Add a branch", "rel");
+    fireEvent.click(screen.getByRole("tab", { name: "Import from a file" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Set it up" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("Echo");
+    expect(screen.getByLabelText("Factory id")).toHaveValue("echo");
+    expect(screen.getByLabelText("GitHub login")).toHaveValue("octocat");
+    expect(screen.getByLabelText("Add a branch")).toHaveValue("rel");
+    expect(chips()).toEqual(["stg", "main"]);
+    // The id still follows the name: it was never edited.
+    changeField("Name", "Echo Two");
+    expect(screen.getByLabelText("Factory id")).toHaveValue("echo-two");
+  });
+
+  it("keeps_create_disabled_after_a_save_until_the_page_leaves", async () => {
+    const { client, onNavigate } = renderPage();
+    // A refetch that never settles: the page stays up after the save.
+    vi.spyOn(client, "invalidateQueries").mockReturnValue(new Promise<void>(() => {}));
+    const save = vi.spyOn(owner(), "saveFactoryDef");
+    changeField("Name", "Echo");
+    const create = within(form()).getByRole("button", { name: "Create factory" });
+    fireEvent.click(create);
+    await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(create).toBeDisabled());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(create).toBeDisabled();
+    fireEvent.click(create);
+    fireEvent.submit(form());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(within(form()).queryByRole("alert")).not.toBeInTheDocument();
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
   it("has_the_four_h2_sections_with_their_hints_tied_by_aria_describedby", () => {
     renderPage();
     const h2s = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);

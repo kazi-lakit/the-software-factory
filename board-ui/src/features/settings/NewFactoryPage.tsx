@@ -13,6 +13,8 @@ type Navigate = (path: string) => void;
 
 /** /settings/factories/new: set a factory up from a form, or import the file `factory migrate --export` wrote. */
 export function NewFactoryPage({ onNavigate }: { onNavigate: Navigate }) {
+  // Held here, not in the tab: TaskTabs mounts only the selected panel, and a visit to Import keeps the draft.
+  const setUp = useSetUpState(onNavigate);
   return (
     <div className="sf-view sf-new-factory">
       <nav aria-label="Breadcrumb" className="sf-breadcrumb">
@@ -25,7 +27,7 @@ export function NewFactoryPage({ onNavigate }: { onNavigate: Navigate }) {
       <TaskTabs
         label="New factory"
         tabs={[
-          { id: "setup", label: "Set it up", content: <SetUpFactory onNavigate={onNavigate} /> },
+          { id: "setup", label: "Set it up", content: <SetUpFactory state={setUp} onNavigate={onNavigate} /> },
           { id: "import", label: "Import from a file", content: <ImportFactory heading={false} onClose={() => onNavigate("/settings")} /> }
         ]}
       />
@@ -35,8 +37,8 @@ export function NewFactoryPage({ onNavigate }: { onNavigate: Navigate }) {
 
 type TextKey = "docsPath" | "factoryId" | "ghUser" | "gitEmail" | "gitName" | "name";
 
-function SetUpFactory({ onNavigate }: { onNavigate: Navigate }) {
-  const ids = useId();
+/** The Set it up form's state: the draft, whether the id was edited, the branch being typed, and the save. */
+function useSetUpState(onNavigate: Navigate) {
   const client = useQueryClient();
   const [draft, setDraft] = useState(() => draftOf(null));
   // The id follows the name until the owner types in the id field.
@@ -45,8 +47,14 @@ function SetUpFactory({ onNavigate }: { onNavigate: Navigate }) {
   const saving = useFactorySave({
     base: null,
     onSaved: () =>
-      void Promise.all([client.invalidateQueries({ queryKey: FACTORIES_KEY }), client.invalidateQueries({ queryKey: HISTORY_KEY })]).then(() => onNavigate("/settings"))
+      Promise.all([client.invalidateQueries({ queryKey: FACTORIES_KEY }), client.invalidateQueries({ queryKey: HISTORY_KEY })]).then(() => onNavigate("/settings"))
   });
+  return { branch, draft, idEdited, saving, setBranch, setDraft, setIdEdited };
+}
+
+function SetUpFactory({ onNavigate, state }: { onNavigate: Navigate; state: ReturnType<typeof useSetUpState> }) {
+  const ids = useId();
+  const { branch, draft, idEdited, saving, setBranch, setDraft, setIdEdited } = state;
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
   function change(key: TextKey, value: string) {
@@ -176,7 +184,7 @@ function FactorySummary({ draft }: { draft: Draft }) {
   const gitEmail = draft.gitEmail.trim();
   const commits = gitName && gitEmail ? `${gitName} <${gitEmail}>` : gitName || (gitEmail ? `<${gitEmail}>` : DASH);
   return (
-    <aside className="sf-panel sf-new-task-aside sf-new-factory-aside" aria-labelledby={heading}>
+    <aside className="sf-panel sf-side-summary" aria-labelledby={heading}>
       <h2 id={heading}>Summary</h2>
       <dl className="sf-facts">
         <dt>Name (id)</dt>

@@ -51,7 +51,7 @@ export function addProtectedBranch(list: string[], name: string): string[] {
 }
 
 /** Validates and saves a factory draft; `base` null adds one, where a version conflict means the id is taken. */
-export function useFactorySave({ base, onSaved }: { base: FactoryDef | null; onSaved: (saved: FactoryDef) => void }) {
+export function useFactorySave({ base, onSaved }: { base: FactoryDef | null; onSaved: (saved: FactoryDef) => void | Promise<unknown> }) {
   const [problem, setProblem] = useState<WriteProblem>();
   const [invalidText, setInvalidText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -66,13 +66,17 @@ export function useFactorySave({ base, onSaved }: { base: FactoryDef | null; onS
     }
     setInvalidText("");
     setBusy(true);
+    let saved: FactoryDef;
     try {
-      onSaved(await saveFactory(boardStore, now, base, checked.value));
+      saved = await saveFactory(boardStore, now, base, checked.value);
     } catch (error) {
       setProblem(describeDefinitionError(error, base === null ? `Factory ${draft.factoryId} already exists. Pick another id.` : undefined));
-    } finally {
       setBusy(false);
+      return;
     }
+    // Busy stays set: the definition is stored, and onSaved moves on (closes the form or leaves the page), maybe
+    // only after a refetch. Saving the same draft again would only fail.
+    void onSaved(saved);
   }
 
   return { busy, clearProblem: () => setProblem(undefined), invalidText, problem, save };
