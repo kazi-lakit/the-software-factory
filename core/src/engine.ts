@@ -57,7 +57,9 @@ export interface Ticket {
 
 /** `no-factories`: the Board has no factory definition at all (before the first Import); nothing was changed. */
 export type NextOutcome = { kind: 'ticket'; ticket: Ticket } | { kind: 'none'; reason: 'nothing to do' | 'paused' | 'inactive' | 'no-factories' }
-  | { kind: 'none'; reason: 'waiting'; taskId: string; waitingOn: string[] };
+  | { kind: 'none'; reason: 'waiting'; taskId: string; waitingOn: string[] }
+  /** Only with `peek`: the task `next` would claim now. Nothing was claimed. */
+  | { kind: 'work'; taskId: string };
 
 /** What the CLI prints for `no-factories`. */
 export const NO_FACTORIES = 'no factories on the Board; run factory migrate --check';
@@ -223,8 +225,11 @@ export class Engine {
     return undefined;
   }
 
-  /** `filter` limits claiming to those factories; left out, every factory. */
-  async next(taskId?: string, filter?: string[]): Promise<NextOutcome> {
+  /**
+   * `filter` limits claiming to those factories; left out, every factory. With `peek`, it syncs and picks exactly as
+   * it would, but claims nothing and returns the first candidate as `work`: a free check for a watcher.
+   */
+  async next(taskId?: string, filter?: string[], opts: { peek?: boolean } = {}): Promise<NextOutcome> {
     const { store, now, claimant } = this.deps;
     const cfg = await this.loadFactories();
     if (!cfg.hasDefinitions()) return { kind: 'none', reason: 'no-factories' };
@@ -266,6 +271,7 @@ export class Engine {
       .filter((t) => (taskId === undefined ? workable(t) && claimExpired(t, now()) : t.taskId === taskId && workable(t)))
       .sort((a, b) => taskNum(a.taskId) - taskNum(b.taskId));
 
+    if (opts.peek) return candidates[0] ? { kind: 'work', taskId: candidates[0].taskId } : { kind: 'none', reason: 'nothing to do' };
     for (const candidate of candidates) {
       let claimed: Task | null;
       try {

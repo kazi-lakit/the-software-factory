@@ -67,6 +67,18 @@ The factory runs on Linux too (tested on macOS; the Linux paths are unit-tested)
 
 - A stage agent that hits its turn limit (`maxTurns` 60) ends without a `<factory-result>` block. The core then records a malformed reply ("no `<factory-result>` block"), not a turn-limit block: verify and review go back to build (using up one return); spec, plan and build block.
 
+## Watch the Board without a loop
+
+A `/loop` pays for every iteration, even one that ends in `nothing to do`. `tools/watch.sh` checks for free instead and starts Claude only when there is work:
+
+```bash
+tools/watch.sh                      # check every 60 s, one run at a time, every active factory
+tools/watch.sh --max 2 --factory tsf
+tools/watch.sh --once               # one check, for cron or a systemd timer
+```
+
+Each check is `factory next --peek`: the same sync and pick as `next` (paused, `maxParallel`, dependencies), but it claims nothing. It prints `work T-5` and exits 0 when there is work, or the reason and exits 1. Only on 0, and while fewer than `--max` runs are going, the watcher starts `claude -p --permission-mode auto -- "/factory:run --loop"` in the factory root (set other flags with `FACTORY_CLAUDE_ARGS`). That run does one step, as an interactive `/factory:run` does. The watcher logs changes to `runs/.watch/watch.log` and each run to its own `runs/.watch/run-*.log`; one watcher runs per factory root. Stop it with Ctrl-C; runs already started finish on their own.
+
 ## Create a task from a prompt
 
 `/factory:new [--ready] [--depends-on <ids>] [<factory>:] <what you want done>` drafts a task from your words (factory, repo, base branch, title, description with acceptance criteria) and creates it on the Board by running `factory new --factory <id>` from your session. It learns the factories and their repos from `factories --json`. The factory is the `<factory>:` prefix if you give one, else the factory whose repo your prompt names; with no match, or more than one, it asks you. The fallback Board link carries `factory` too. The task starts in **inbox**; click **Mark ready** on the Board, then run `/factory:run`. With `--ready` it starts in ready, so you can run `/factory:run` straight away. With `--depends-on T-19,T-20` (comma-separated task ids, before your words) it passes `--depends-on` to `factory new`, so the task waits until those tasks are PR open, done or cancelled; if your words mention such ids without the flag, it asks first. The fallback Board link doesn't carry dependencies: set **Depends on** in the form. Its history reads `core · new`. After creation the factory still can't edit the title, description, repo, base branch, gate overrides or dependencies; only you can, on the Board. The guard denies the factory CLI to stage agents (regex defence in depth).
