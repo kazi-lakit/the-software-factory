@@ -96,6 +96,7 @@ const SECTIONS = [
   { id: "settings-factories", title: "Factories" }
 ] as const;
 const SECTION_IDS: readonly string[] = SECTIONS.map((s) => s.id);
+const [FACTORY_SECTION, GATES_SECTION, REPOS_SECTION, FACTORIES_SECTION] = SECTIONS;
 const PICK_A_FACTORY = "Pick a factory to see its settings.";
 
 /** Input that means the user scrolls on their own, which ends the hold a clicked link puts on the nav. */
@@ -153,7 +154,7 @@ function useCurrentSection(ids: readonly string[]): [string, (id: string) => voi
 }
 
 /** One settings section: a surface panel named by its h2, the target of a nav link. */
-function SettingsSection({ children, id, title }: { children: ReactNode; id: string; title: string }) {
+function SettingsSection({ children, section: { id, title } }: { children: ReactNode; section: (typeof SECTIONS)[number] }) {
   return (
     <section id={id} className="sf-panel sf-settings-section" aria-labelledby={`${id}-title`}>
       <h2 id={`${id}-title`}>{title}</h2>
@@ -181,7 +182,9 @@ export function SettingsView() {
   const reload = async () => { await settings.refetch(); };
 
   const scoped = (body: (factoryId: string, current: FactoryStored, def: FactoryEntry) => ReactNode): ReactNode => {
-    if (!settings.data || factories.loading || factoriesFailed) return null;
+    // While loading, the status above says so; once a load has failed, each scoped section says why it is empty.
+    if (settings.isPending || factories.loading) return null;
+    if (!settings.data || factoriesFailed) return <p className="sf-empty">Settings are not available.</p>;
     if (!entry) return <p className="sf-empty">{PICK_A_FACTORY}</p>;
     const factoryId = entry.def.factoryId;
     return body(factoryId, settings.data.factories[factoryId] ?? { factory: DEFAULT_SETTINGS, repos: {} }, entry);
@@ -225,12 +228,12 @@ export function SettingsView() {
           </ul>
         </nav>
         <div className="sf-settings-sections">
-          <SettingsSection id="settings-factory" title="Factory">
+          <SettingsSection section={FACTORY_SECTION}>
             {scoped((factoryId, current) => (
               <PauseControl key={`${factoryId}:pause`} factoryId={factoryId} paused={current.factory.paused} onNotice={setNotice} onReload={reload} />
             ))}
           </SettingsSection>
-          <SettingsSection id="settings-gates-and-limits" title="Gates and limits">
+          <SettingsSection section={GATES_SECTION}>
             {scoped((factoryId, current, { def }) => (
               <>
                 <p className="sf-hint">These apply to every repo unless a repo overrides them below.</p>
@@ -238,7 +241,7 @@ export function SettingsView() {
               </>
             ))}
           </SettingsSection>
-          <SettingsSection id="settings-repos" title="Repos">
+          <SettingsSection section={REPOS_SECTION}>
             {scoped((factoryId, current, { repos }) => (
               <>
                 <RepoTable key={`${factoryId}:repos`} factoryId={factoryId} repos={repos} stored={current} noteId={noteId} onNotice={setNotice} onReload={reload} />
@@ -246,7 +249,7 @@ export function SettingsView() {
               </>
             ))}
           </SettingsSection>
-          <SettingsSection id="settings-factories" title="Factories">
+          <SettingsSection section={FACTORIES_SECTION}>
             <FactoriesSection />
           </SettingsSection>
         </div>
@@ -428,6 +431,12 @@ export function checksSummary(c: FactoryRepo["checks"]): string {
 
 function RepoTable({ factoryId, noteId, onNotice, onReload, repos, stored }: ScopeProps & { noteId: string; repos: readonly FactoryRepo[]; stored: FactoryStored }) {
   const [open, setOpen] = useState<string>();
+  // Every form opened once stays mounted (hidden while closed), so closing it or opening another keeps its draft.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (repoId: string) => {
+    setOpened((was) => (was.has(repoId) ? was : new Set(was).add(repoId)));
+    setOpen((was) => (was === repoId ? undefined : repoId));
+  };
   return (
     <>
       <p className="sf-hint">Inherit uses the factory default. An empty limit inherits too.</p>
@@ -452,7 +461,8 @@ function RepoTable({ factoryId, noteId, onNotice, onReload, repos, stored }: Sco
                 stored={stored.repos[repo.repoId]}
                 noteId={noteId}
                 open={open === repo.repoId}
-                onToggle={() => setOpen((was) => (was === repo.repoId ? undefined : repo.repoId))}
+                mounted={opened.has(repo.repoId)}
+                onToggle={() => toggle(repo.repoId)}
                 onNotice={onNotice}
                 onReload={onReload}
               />
@@ -466,7 +476,7 @@ function RepoTable({ factoryId, noteId, onNotice, onReload, repos, stored }: Sco
 
 type RepoRowProps = ScopeProps & { global: Settings; noteId: string; stored: RepoSettings | undefined };
 
-function RepoRow({ open, onToggle, repo, ...rest }: RepoRowProps & { onToggle: () => void; open: boolean; repo: FactoryRepo }) {
+function RepoRow({ mounted, open, onToggle, repo, ...rest }: RepoRowProps & { mounted: boolean; onToggle: () => void; open: boolean; repo: FactoryRepo }) {
   const { repoId } = repo;
   return (
     <>
@@ -479,8 +489,8 @@ function RepoRow({ open, onToggle, repo, ...rest }: RepoRowProps & { onToggle: (
           <button type="button" className="sf-button" aria-label={`Edit overrides for ${repoId}`} aria-expanded={open} onClick={onToggle}>Edit</button>
         </td>
       </tr>
-      {open ? (
-        <tr className="sf-repo-edit-row">
+      {mounted ? (
+        <tr className="sf-repo-edit-row" hidden={!open}>
           <td colSpan={5}>
             <RepoOverrideForm {...rest} repo={repoId} onClose={onToggle} />
           </td>

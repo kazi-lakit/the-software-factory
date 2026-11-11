@@ -21,7 +21,7 @@ function GhStatus({ health }: { health: FactoryHealth | undefined }) {
   const state = health.ghLoggedIn ? "signed-in" : "signed-out";
   return (
     <>
-      <span className={`sf-chip sf-gh sf-gh-${state}`} title={`Checked ${formatTime(health.checkedAt)}`}>{health.ghLoggedIn ? "gh signed in" : "gh signed out"}</span>
+      <span className={`sf-chip sf-gh sf-gh-${state}`}>{health.ghLoggedIn ? "gh signed in" : "gh signed out"}</span>
       <span className="sf-muted">checked <time dateTime={health.checkedAt}>{formatTime(health.checkedAt)}</time></span>
     </>
   );

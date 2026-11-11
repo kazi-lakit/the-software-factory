@@ -1830,16 +1830,6 @@ textarea.sf-input {
   width: 11ch;
 }
 
-.sf-row-save {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-}
-
-.sf-repo-table tbody tr.sf-row-problem:hover {
-  background: transparent;
-}
-
 /* Landing */
 /* The signed-out page (pages/Landing.tsx). Full-bleed on the page field; the WebGL dot field
    (features/landing) sits fixed behind everything, and the body's static dot grid shows when it is off. */
@@ -2214,7 +2204,6 @@ textarea.sf-input {
   white-space: pre-wrap;
 }
 
-.sf-factory,
 .sf-skipped {
   margin-top: 12px;
 }

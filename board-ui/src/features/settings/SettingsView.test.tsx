@@ -232,6 +232,9 @@ describe("SettingsView", () => {
     expect(await screen.findByText("Could not load the settings.")).toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Gates and limits" })).not.toBeInTheDocument();
     expect(region("Factories")).toBeInTheDocument();
+    for (const name of ["Factory", "Gates and limits", "Repos"]) {
+      expect(within(region(name)).getByText("Settings are not available.")).toBeInTheDocument();
+    }
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByRole("form", { name: "Gates and limits" })).toBeInTheDocument();
     expect(getSettings).toHaveBeenCalledTimes(2);
@@ -287,6 +290,22 @@ describe("repos table", () => {
     expect(screen.queryByRole("form", { name: "iam overrides" })).not.toBeInTheDocument();
     fireEvent.click(within(overrides("data")).getByRole("button", { name: "Close" }));
     expect(screen.queryByRole("form", { name: "data overrides" })).not.toBeInTheDocument();
+  });
+
+  it("keeps_a_repo's_unsaved_overrides_when_its_form_is_closed_and_opened_again", async () => {
+    const write = vi.spyOn(fakeBoard().owner, "updateSettingsScope");
+    renderSettings();
+    await screen.findByRole("table", { name: "Repos" });
+    openOverrides("iam");
+    fireEvent.change(within(overrides("iam")).getByLabelText("iam turn limit"), { target: { value: "25" } });
+    openOverrides("data");
+    expect(screen.queryByRole("form", { name: "iam overrides" })).not.toBeInTheDocument();
+    openOverrides("iam");
+    expect(within(overrides("iam")).getByLabelText("iam turn limit")).toHaveValue("25");
+    fireEvent.click(within(overrides("iam")).getByRole("button", { name: "Close" }));
+    openOverrides("iam");
+    expect(within(overrides("iam")).getByLabelText("iam turn limit")).toHaveValue("25");
+    expect(write).not.toHaveBeenCalled();
   });
 });
 
