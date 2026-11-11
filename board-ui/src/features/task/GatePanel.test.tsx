@@ -39,7 +39,7 @@ describe("GatePanel", () => {
     const seeded = await atSpecGate();
     task = seeded.task;
     renderPanel(seeded.docs);
-    const approve = screen.getByRole("button", { name: "Approve" });
+    const approve = screen.getByRole("button", { name: "Approve spec v1" });
     expect(approve).toHaveClass("sf-button-accent");
     expect(approve).not.toHaveClass("sf-button-primary");
     const changes = screen.getByRole("button", { name: "Request changes" });
@@ -53,7 +53,7 @@ describe("GatePanel", () => {
     renderPanel(seeded.docs);
     expect(screen.getByText(/Deciding on spec/)).toHaveTextContent("Deciding on spec v1");
     fireEvent.change(comment(), { target: { value: "Looks right" } });
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve spec v1" }));
     expect(await screen.findByText(/Approval recorded for spec/)).toHaveTextContent("Approval recorded for spec v1");
     expect(await fakeBoard().owner.listApprovals(task.taskId)).toEqual([
       expect.objectContaining({ comment: "Looks right", decision: "approve", docVersion: 1, gate: "spec" })
@@ -67,7 +67,7 @@ describe("GatePanel", () => {
     // The agent rewrites the spec while the owner reads v1.
     await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nNew scope.\nShared", "spec-agent");
     fireEvent.change(comment(), { target: { value: "Ship it" } });
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve spec v1" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The spec changed since you opened it (now v2). Review the new version first.");
     const diff = await screen.findByRole("region", { name: "Spec changes from v1 to v2" });
     expect(within(diff).getByText("− Old scope.")).toBeInTheDocument();
@@ -77,7 +77,7 @@ describe("GatePanel", () => {
     // Reviewing the new version moves the panel to it; approving then records v2.
     fireEvent.click(screen.getByRole("button", { name: "Decide on v2" }));
     expect(screen.getByText(/Deciding on spec/)).toHaveTextContent("Deciding on spec v2");
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve spec v2" }));
     expect(await screen.findByText(/Approval recorded for spec/)).toHaveTextContent("Approval recorded for spec v2");
   });
 
@@ -102,9 +102,9 @@ describe("GatePanel", () => {
     const real = owner.addApproval.bind(owner);
     const spy = vi.spyOn(owner, "addApproval").mockRejectedValueOnce(new Error("blocks: transport error")).mockImplementation(real);
     renderPanel(seeded.docs);
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve spec v1" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("blocks: transport error");
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve spec v1" }));
     expect(await screen.findByText(/Approval recorded for spec/)).toHaveTextContent("Approval recorded for spec v1");
     expect(spy).toHaveBeenCalledTimes(2);
     expect(spy.mock.calls[0]![0].approvalId).toBeTruthy();
@@ -125,7 +125,7 @@ describe("GatePanel", () => {
     task = seeded.task;
     await fakeBoard().core.updateTask(task.taskId, task.version, { status: "plan", stage: "plan" });
     renderPanel(seeded.docs);
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve spec v1" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(`${task.taskId} is not waiting at the spec gate`);
   });
 
@@ -135,7 +135,7 @@ describe("GatePanel", () => {
     const approval: Approval = { at: "2026-11-10T09:00:00.000Z", comment: "", decision: "changes", docVersion: 1, gate: "spec", taskId: task.taskId };
     renderPanel(seeded.docs, [approval]);
     expect(screen.getByText(/Changes requested for spec/)).toHaveTextContent("Changes requested for spec v1");
-    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Approve/ })).not.toBeInTheDocument();
   });
 
   it("offers_the_new_version_only_once_its_diff_is_shown", async () => {
@@ -148,7 +148,7 @@ describe("GatePanel", () => {
     vi.spyOn(owner, "listDocs").mockImplementation(async (...args) => { await gate; return real(...args); });
     renderPanel(seeded.docs);
     await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nNew scope.\nShared", "spec-agent");
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve spec v1" }));
     await screen.findByRole("alert");
     expect(screen.getByText("Loading v2…")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Decide on v2" })).not.toBeInTheDocument();
@@ -163,7 +163,7 @@ describe("GatePanel", () => {
     vi.spyOn(fakeBoard().owner, "listDocs").mockRejectedValueOnce(new Error("blocks: transport error"));
     renderPanel(seeded.docs);
     await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nNew scope.\nShared", "spec-agent");
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Approve spec v1" }));
     const retry = await screen.findByRole("button", { name: "Retry" });
     expect(screen.getByText("Could not load the spec versions.")).toBeInTheDocument();
     expect(screen.queryByText(/No spec yet/)).not.toBeInTheDocument();
@@ -184,7 +184,7 @@ describe("GatePanel", () => {
     const docs = await fakeBoard().owner.listDocs(task.taskId, "spec");
     rerender(<QueryClientProvider client={client}><GatePanel task={task} gate="spec" docs={docs} approvals={[approval]} onReload={vi.fn()} /></QueryClientProvider>);
     expect(await screen.findByText(/Deciding on spec/)).toHaveTextContent("Deciding on spec v2");
-    expect(screen.getByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve spec v2" })).toBeInTheDocument();
   });
 
   it("keeps_an_undecided_panel_on_the_version_it_showed", async () => {
@@ -301,7 +301,7 @@ describe("GatePanel styling", () => {
     task = seeded.task;
     renderPanel(seeded.docs);
     const panel = screen.getByRole("region", { name: /Your decision/ });
-    expect(panel).toHaveClass("sf-panel", "sf-panel-needs-you");
+    expect(panel).toHaveClass("sf-panel", "sf-panel-needs-you", "sf-panel-decision");
   });
 
   it("request_changes_is_outlined_not_filled", async () => {
@@ -319,7 +319,7 @@ describe("GatePanel action bar", () => {
     const seeded = await atSpecGate();
     task = seeded.task;
     renderPanel(seeded.docs);
-    const bar = screen.getByRole("button", { name: "Approve" }).parentElement;
+    const bar = screen.getByRole("button", { name: "Approve spec v1" }).parentElement;
     expect(bar).toHaveClass("sf-actions", "sf-action-bar");
     expect(bar).toContainElement(screen.getByRole("button", { name: "Request changes" }));
   });
@@ -340,9 +340,73 @@ describe("GatePanel action bar", () => {
     const seeded = await atSpecGate();
     task = seeded.task;
     renderPanel(seeded.docs);
-    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-    expect(screen.getByRole("button", { name: "Approve" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Approve spec v1" }));
+    expect(screen.getByRole("button", { name: "Approve spec v1" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Request changes" })).toBeDisabled();
     await screen.findByText(/Approval recorded for spec/);
+  });
+});
+
+describe("GatePanel wording", () => {
+  async function atPrGate(baseBranch: string): Promise<{ docs: Doc[]; task: Task }> {
+    const created = await fakeBoard().owner.createTask({ factoryId: "blocks", baseBranch, description: "", repo: "data", title: "Ship me" });
+    const t = await fakeBoard().core.updateTask(created.taskId, created.version, { prUrl: "https://github.com/x/y/pull/7", stage: "ship", status: "pr_open" });
+    await fakeBoard().core.addDoc(t.taskId, "review", "# Review\nAll good.", "reviewer");
+    return { docs: await fakeBoard().owner.listDocs(t.taskId, "review"), task: t };
+  }
+
+  it("spec_gate_shows_its_heading_label_buttons_and_hint", async () => {
+    const seeded = await atSpecGate();
+    task = seeded.task;
+    renderPanel(seeded.docs);
+    expect(screen.getByRole("heading", { name: "Your decision: approve the spec" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Comment for the spec writer (needed to request changes)").tagName).toBe("TEXTAREA");
+    expect(screen.getByRole("button", { name: "Approve spec v1" })).toHaveClass("sf-button-accent");
+    const changes = screen.getByRole("button", { name: "Request changes" });
+    expect(changes).toHaveClass("sf-button");
+    for (const filled of ["sf-button-accent", "sf-button-primary", "sf-button-danger"]) expect(changes).not.toHaveClass(filled);
+    expect(screen.getByText("Approving moves the task to Plan; the factory picks it up at its next sync.")).toBeInTheDocument();
+  });
+
+  it("plan_gate_shows_its_wording", async () => {
+    const t = await seedTask({ title: "Plan me" }, "plan_review", { stage: "plan" });
+    await fakeBoard().core.addDoc(t.taskId, "plan", "# Plan\nSteps.", "planner");
+    task = t;
+    renderWithClient(<GatePanel task={t} gate="plan" docs={await fakeBoard().owner.listDocs(t.taskId, "plan")} approvals={[]} onReload={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Your decision: approve the plan" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Comment for the planner (needed to request changes)")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve plan v1" })).toBeInTheDocument();
+    expect(screen.getByText("Approving moves the task to Build; the factory picks it up at its next sync.")).toBeInTheDocument();
+  });
+
+  it("pr_gate_keeps_its_wording_and_has_no_hint", async () => {
+    const seeded = await atPrGate("feature/x");
+    task = seeded.task;
+    renderWithClient(<GatePanel task={task} gate="pr" docs={seeded.docs} approvals={[]} onReload={vi.fn()} />);
+    expect(screen.getByRole("heading", { name: "Your decision: review the PR" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Comment (needed to request changes)")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeInTheDocument();
+    expect(screen.queryByText(/Approving moves/)).toBeNull();
+  });
+
+  it("shows_the_gate_doc_with_its_version_dropdown", async () => {
+    const seeded = await atSpecGate();
+    task = seeded.task;
+    renderPanel(seeded.docs);
+    expect(screen.getByLabelText("Spec version")).toHaveValue("1");
+    expect(screen.getByText(/Old scope\./)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Compare with v/ })).toBeNull();
+  });
+
+  it("compare_button_toggles_the_diff_to_the_previous_version", async () => {
+    const seeded = await atSpecGate();
+    task = seeded.task;
+    await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nNew scope.\nShared", "spec-agent");
+    renderPanel(await fakeBoard().owner.listDocs(task.taskId, "spec"));
+    expect(screen.getByRole("button", { name: "Approve spec v2" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Compare with v1" }));
+    expect(screen.getByRole("region", { name: "Spec changes from v1 to v2" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Compare with v1" }));
+    expect(screen.queryByRole("region", { name: "Spec changes from v1 to v2" })).toBeNull();
   });
 });

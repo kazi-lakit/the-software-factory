@@ -10,6 +10,20 @@ import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, t
 
 const GATE_LABEL: Record<Gate, string> = { plan: "plan", pr: "PR", spec: "spec" };
 const KIND_TITLE = { plan: "Plan", review: "Review report", spec: "Spec", verify: "Verify report" } as const;
+const HEADING: Record<Gate, string> = {
+  plan: "Your decision: approve the plan",
+  pr: "Your decision: review the PR",
+  spec: "Your decision: approve the spec"
+};
+const COMMENT_LABEL: Record<Gate, string> = {
+  plan: "Comment for the planner (needed to request changes)",
+  pr: "Comment (needed to request changes)",
+  spec: "Comment for the spec writer (needed to request changes)"
+};
+const HINT: Partial<Record<Gate, string>> = {
+  plan: "Approving moves the task to Build; the factory picks it up at its next sync.",
+  spec: "Approving moves the task to Plan; the factory picks it up at its next sync."
+};
 
 type Props = {
   approvals: readonly Approval[];
@@ -105,8 +119,8 @@ export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
   }
 
   return (
-    <section className="sf-panel sf-panel-needs-you" aria-labelledby={headingId}>
-      <h3 id={headingId}>Your decision: {GATE_LABEL[gate]}</h3>
+    <section className="sf-panel sf-panel-needs-you sf-panel-decision" aria-labelledby={headingId}>
+      <h3 id={headingId}>{HEADING[gate]}</h3>
       {mergeOnGitHub ? (
         <p>
           {protectedBranches === undefined ? (
@@ -122,6 +136,7 @@ export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
           ) : null}
         </p>
       ) : null}
+      {seen !== undefined ? <DocVersions key={seen} label={KIND_TITLE[kind]} docs={docs} to={seen} compare="previous" /> : null}
       {seen === undefined ? (
         <p className="sf-empty">No {kind} to decide on yet.</p>
       ) : decided && !mergeOnGitHub ? (
@@ -142,7 +157,7 @@ export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
               Deciding on {kind} <span className="sf-mono">v{seen}</span>
             </p>
             <label className="sf-field" htmlFor={commentId}>
-              <span>Comment (needed to request changes)</span>
+              <span>{COMMENT_LABEL[gate]}</span>
               <textarea id={commentId} className="sf-input" rows={3} value={comment} onChange={(event) => setComment(event.target.value)} />
             </label>
             <WriteProblemNotice problem={problem} onReload={() => void onReload()} />
@@ -157,9 +172,10 @@ export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
               />
             ) : null}
             <div className="sf-actions sf-action-bar">
-              {mergeOnGitHub ? null : <button type="submit" className="sf-button sf-button-accent" disabled={busy}>Approve</button>}
+              {mergeOnGitHub ? null : <button type="submit" className="sf-button sf-button-accent" disabled={busy}>{gate === "pr" ? "Approve" : `Approve ${GATE_LABEL[gate]} v${seen}`}</button>}
               <button type="button" className="sf-button" disabled={busy} onClick={() => void decide("changes")}>Request changes</button>
             </div>
+            {HINT[gate] ? <p className="sf-gate-hint">{HINT[gate]}</p> : null}
           </form>
         </>
       )}
