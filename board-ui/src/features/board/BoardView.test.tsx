@@ -18,6 +18,12 @@ function renderBoard() {
 }
 
 const column = (name: string) => screen.getByRole("region", { name });
+/** The Show/Hide button of a collapsible All stages column (Done, Cancelled). */
+const toggleOf = (name: string) => within(column(name)).getByRole("button", { name: /^(Show|Hide)$/ });
+const findToggle = async (name: string) => {
+  await screen.findByRole("region", { name });
+  return toggleOf(name);
+};
 
 /** The 13-column tests run in All stages; Lanes is the default. */
 const showStages = () => window.localStorage.setItem(BOARD_VIEW_KEY, "stages");
@@ -70,9 +76,12 @@ describe("BoardView", () => {
     await seedTask({ title: "Shipped" }, "done");
     await seedTask({ title: "Dropped" }, "cancelled");
     renderBoard();
-    const done = await screen.findByRole("button", { name: "Done (1)" });
+    const done = await findToggle("Done");
     expect(done).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByRole("button", { name: "Cancelled (1)" })).toHaveAttribute("aria-expanded", "false");
+    expect(done).toHaveTextContent("Show");
+    expect(toggleOf("Cancelled")).toHaveAttribute("aria-expanded", "false");
+    expect(toggleOf("Cancelled")).toHaveTextContent("Show");
+    expect(column("Done").querySelector(".sf-count")).toHaveTextContent("1");
     expect(screen.queryByText("Shipped")).not.toBeInTheDocument();
     fireEvent.click(done);
     expect(done).toHaveAttribute("aria-expanded", "true");
@@ -90,12 +99,12 @@ describe("BoardView", () => {
     expect(screen.getByText("IAM work")).toBeInTheDocument();
   });
 
-  it("new_task_is_primary_only_while_the_form_is_closed", async () => {
+  it("new_task_is_primary_open_or_closed", async () => {
     renderBoard();
     const open = await screen.findByRole("button", { name: "New task" });
     expect(open).toHaveClass("sf-button-primary");
     fireEvent.click(open);
-    expect(screen.getByRole("button", { name: "New task" })).not.toHaveClass("sf-button-primary");
+    expect(screen.getByRole("button", { name: "New task" })).toHaveClass("sf-button-primary");
     expect(screen.getByRole("button", { name: "Create task" })).toHaveClass("sf-button-primary");
     expect(document.querySelector(".sf-button-accent")).toBeNull();
   });
@@ -154,8 +163,8 @@ describe("BoardView", () => {
   it("points_aria_controls_only_at_a_rendered_list", async () => {
     await seedTask({ title: "Shipped" }, "done");
     renderBoard();
-    const done = await screen.findByRole("button", { name: "Done (1)" });
-    const cancelled = screen.getByRole("button", { name: "Cancelled (0)" });
+    const done = await findToggle("Done");
+    const cancelled = toggleOf("Cancelled");
     expect(done).not.toHaveAttribute("aria-controls");
     fireEvent.click(done);
     const listId = done.getAttribute("aria-controls");
@@ -351,38 +360,102 @@ describe("BoardView with a stored factory pick that is not usable", () => {
   });
 });
 
-describe("BoardView waiting strip", () => {
-  beforeEach(showStages);
-  it("lists_a_blocked_task_of_another_factory_with_a_working_link", async () => {
-    resetFakeBoard(two());
-    await seedTask({ factoryId: "alpha", repo: "api", title: "Quiet" });
-    const blocked = await seedTask({ factoryId: "delta", repo: "ui", title: "Stuck" }, "blocked", { question: "Which way?" });
-    const { onNavigate } = renderBoard();
-    const strip = await screen.findByRole("navigation", { name: "Waiting for you" });
-    expect(within(strip).getByText(`delta · ${blocked.taskId}`)).toBeInTheDocument();
-    expect(within(strip).getByText("Blocked")).toBeInTheDocument();
-    expect(within(strip).queryByText("Quiet")).not.toBeInTheDocument();
-    fireEvent.click(within(strip).getByRole("link", { name: "Stuck" }));
-    expect(onNavigate).toHaveBeenCalledWith(`/tasks/${blocked.taskId}`);
+describe("BoardView Needs you lane order", () => {
+  const needsYouTitles = () =>
+    within(screen.getByRole("region", { name: "Needs you" })).getAllByRole("listitem").map((li) => /First|Second|Third/.exec(li.textContent ?? "")?.[0]);
+
+  it("no_waiting_for_you_navigation_is_rendered", async () => {
+    await seedTask({ title: "Stuck" }, "blocked", { question: "q" });
+    renderBoard();
+    await screen.findByText("Stuck");
+    expect(screen.queryByRole("navigation", { name: "Waiting for you" })).toBeNull();
   });
 
-  it("follows_the_picked_factory_and_lists_oldest_first", async () => {
+  it("needs_you_lists_oldest_first_across_statuses", async () => {
+    await seedTask({ title: "First" }, "blocked", { question: "q" });
+    await seedTask({ title: "Second" }, "spec_review", { stage: "spec" });
+    await seedTask({ title: "Third" }, "pr_open", { stage: "ship" });
+    renderBoard();
+    await screen.findByText("First");
+    expect(needsYouTitles()).toEqual(["First", "Second", "Third"]);
+  });
+
+  it("needs_you_follows_the_picked_factory", async () => {
     resetFakeBoard(two());
     await seedTask({ factoryId: "alpha", repo: "api", title: "First" }, "blocked", { question: "q" });
     await seedTask({ factoryId: "delta", repo: "ui", title: "Second" }, "spec_review", { stage: "spec" });
     await seedTask({ factoryId: "alpha", repo: "web", title: "Third" }, "pr_open", { stage: "ship" });
     renderBoard();
-    const strip = await screen.findByRole("navigation", { name: "Waiting for you" });
-    expect(within(strip).getAllByRole("link").map((a) => a.textContent)).toEqual(["First", "Second", "Third"]);
+    await screen.findByText("First");
     await pickFactory("alpha");
-    expect(within(screen.getByRole("navigation", { name: "Waiting for you" })).getAllByRole("link").map((a) => a.textContent)).toEqual(["First", "Third"]);
+    expect(needsYouTitles()).toEqual(["First", "Third"]);
+  });
+});
+
+describe("BoardView toolbar", () => {
+  const search = () => screen.getByRole("searchbox", { name: "Search tasks by title or id" });
+  const type = (value: string) => fireEvent.change(search(), { target: { value } });
+
+  it("board_title_is_a_28px_page_title_h1", async () => {
+    renderBoard();
+    expect(await screen.findByRole("heading", { level: 1, name: "Board" })).toHaveClass("sf-page-title");
+    expect(screen.queryByRole("heading", { level: 2, name: "Board" })).toBeNull();
   });
 
-  it("is_not_rendered_when_nothing_needs_you", async () => {
-    await seedTask({ title: "Fresh" });
+  it("search_field_is_named_and_has_the_placeholder", async () => {
     renderBoard();
-    await screen.findByText("Fresh");
-    expect(screen.queryByRole("navigation", { name: "Waiting for you" })).not.toBeInTheDocument();
+    await screen.findByRole("region", { name: "Needs you" });
+    expect(search()).toHaveAttribute("placeholder", "Search tasks by title or id");
+    expect(search()).toHaveClass("sf-input");
+  });
+
+  it("search_filters_lanes_by_title_case_insensitive", async () => {
+    await seedTask({ title: "Add paging" });
+    await seedTask({ title: "Fix login" });
+    renderBoard();
+    await screen.findByText("Add paging");
+    const queued = () => screen.getByRole("region", { name: "Queued" });
+    type("PAGING");
+    expect(within(queued()).getByText("Add paging")).toBeInTheDocument();
+    expect(within(queued()).queryByText("Fix login")).toBeNull();
+    expect(queued().querySelector(".sf-count")).toHaveTextContent("1");
+    type("");
+    expect(within(queued()).getByText("Add paging")).toBeInTheDocument();
+    expect(within(queued()).getByText("Fix login")).toBeInTheDocument();
+  });
+
+  it("search_filters_lanes_by_id_lower_case", async () => {
+    const first = await seedTask({ title: "Alpha one" });
+    await seedTask({ title: "Beta two" });
+    renderBoard();
+    await screen.findByText("Alpha one");
+    type(first.taskId.toLowerCase());
+    expect(screen.getByText("Alpha one")).toBeInTheDocument();
+    expect(screen.queryByText("Beta two")).toBeNull();
+  });
+
+  it("search_filters_all_stages_columns_by_title_and_id", async () => {
+    showStages();
+    await seedTask({ title: "Alpha" });
+    const beta = await seedTask({ title: "Beta" }, "spec_review", { stage: "spec" });
+    renderBoard();
+    await screen.findByText("Alpha");
+    type("alpha");
+    expect(within(column("Inbox")).getByText("Alpha")).toBeInTheDocument();
+    expect(within(column("Spec review")).queryByText("Beta")).toBeNull();
+    type(beta.taskId.toLowerCase());
+    expect(screen.queryByText("Alpha")).toBeNull();
+    expect(within(column("Spec review")).getByText("Beta")).toBeInTheDocument();
+  });
+
+  it("search_is_not_persisted", async () => {
+    const first = renderBoard();
+    await screen.findByRole("region", { name: "Needs you" });
+    type("something");
+    first.unmount();
+    renderBoard();
+    await screen.findByRole("region", { name: "Needs you" });
+    expect(search()).toHaveValue("");
   });
 });
 
@@ -539,6 +612,7 @@ describe("BoardView lanes", () => {
     for (const title of ["In inbox", "Is ready"]) expect(within(lane("Queued")).getByText(title)).toBeInTheDocument();
     expect(within(lane("Working")).getByText("Building")).toBeInTheDocument();
     expect(within(lane("Done")).getByText("Shipped")).toBeInTheDocument();
+    fireEvent.click(within(lane("Stopped")).getByRole("button", { name: "Show" }));
     expect(within(lane("Stopped")).getByText("Dropped")).toBeInTheDocument();
     expect(lane("Needs you").querySelector(".sf-count")).toHaveTextContent("3");
     expect(lane("Queued").querySelector(".sf-count")).toHaveTextContent("2");
@@ -558,11 +632,19 @@ describe("BoardView lanes", () => {
     renderBoard();
     await within(await screen.findByRole("region", { name: "Needs you" })).findByText("Stuck");
     const needs = lane("Needs you");
-    expect(within(needs).getByText("Waiting for your review or answer")).toBeInTheDocument();
-    const name = needs.querySelector("h3");
+    expect(within(needs).getByText("Oldest first. Each card says what the factory waits for.")).toBeInTheDocument();
+    const name = needs.querySelector(".sf-lane-name");
+    expect(name?.tagName).toBe("SPAN");
     expect(name).toHaveClass("sf-label");
     expect(name).toHaveTextContent("Needs you");
+    expect(needs.querySelector("h3")).toBeNull();
     expect(needs.querySelector(".sf-count")).toHaveTextContent("3");
+  });
+
+  it("working_lane_has_no_hint", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Working" });
+    expect(lane("Working").querySelector(".sf-lane-hint")).toBeNull();
   });
 
   it("an_empty_lane_still_shows_name_count_and_hint", async () => {
@@ -571,24 +653,58 @@ describe("BoardView lanes", () => {
     await screen.findByText("Only one");
     const stopped = lane("Stopped");
     expect(stopped.querySelector(".sf-count")).toHaveTextContent("0");
-    expect(within(stopped).getByText("Cancelled tasks")).toBeInTheDocument();
+    expect(within(stopped).getByText("Cancelled tasks. Kept for history.")).toBeInTheDocument();
     expect(stopped.querySelector("li")).toBeNull();
   });
 
-  it("done_lane_lists_every_done_task_newest_first_and_is_not_collapsible", async () => {
-    for (const title of ["D1", "D2", "D3"]) await seedTask({ title }, "done");
+  it("done_lane_shows_the_two_most_recent_and_a_history_link", async () => {
+    for (const title of ["D1", "D2", "D3", "D4"]) await seedTask({ title }, "done");
+    const { onNavigate } = renderBoard();
+    await screen.findByText("D4");
+    const done = lane("Done");
+    expect(within(done).getAllByRole("listitem").map((li) => D(li.textContent ?? ""))).toEqual(["D4", "D3"]);
+    expect(done.querySelector(".sf-count")).toHaveTextContent("4");
+    const more = within(done).getByRole("link", { name: "Show all 4 in History" });
+    expect(more).toHaveAttribute("href", "/history");
+    fireEvent.click(more);
+    expect(onNavigate).toHaveBeenCalledWith("/history");
+    expect(done.querySelector("[aria-expanded]")).toBeNull();
+  });
+
+  it("done_lane_with_no_tasks_has_no_history_link", async () => {
     renderBoard();
-    await screen.findByText("D1");
-    const titles = (region: HTMLElement) => within(region).getAllByRole("listitem").map((li) => li.textContent ?? "");
-    const inLanes = titles(lane("Done"));
-    expect(inLanes).toHaveLength(3);
-    expect(within(lane("Done")).queryByRole("button", { expanded: false })).toBeNull();
-    expect(lane("Done").querySelector("[aria-expanded]")).toBeNull();
-    expect(lane("Stopped").querySelector("[aria-expanded]")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "All stages" }));
-    fireEvent.click(screen.getByRole("button", { name: "Done (3)" }));
-    const inColumn = titles(column("Done"));
-    expect(inLanes.map((t) => D(t))).toEqual(inColumn.map((t) => D(t)));
+    await screen.findByRole("region", { name: "Done" });
+    expect(within(lane("Done")).queryByRole("link", { name: /in History/ })).toBeNull();
+  });
+
+  it("stopped_lane_starts_collapsed_and_show_lists_the_cards", async () => {
+    await seedTask({ title: "Dropped" }, "cancelled");
+    renderBoard();
+    await screen.findByRole("region", { name: "Stopped" });
+    await waitFor(() => expect(lane("Stopped").querySelector(".sf-count")).toHaveTextContent("1"));
+    const stopped = lane("Stopped");
+    expect(stopped.querySelector("li")).toBeNull();
+    expect(stopped.querySelector(".sf-lane-name")).toHaveTextContent("Stopped");
+    const toggle = within(stopped).getByRole("button", { name: "Show" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).not.toHaveAttribute("aria-controls");
+    fireEvent.click(toggle);
+    expect(within(stopped).getByText("Dropped")).toBeInTheDocument();
+    expect(toggle).toHaveTextContent("Hide");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const target = toggle.getAttribute("aria-controls");
+    expect(target && document.getElementById(target)).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(within(stopped).queryByText("Dropped")).toBeNull();
+  });
+
+  it("selecting_the_Stopped_pill_lists_the_cancelled_cards", async () => {
+    await seedTask({ title: "Dropped" }, "cancelled");
+    renderBoard();
+    await screen.findByRole("region", { name: "Stopped" });
+    await waitFor(() => expect(lane("Stopped").querySelector(".sf-count")).toHaveTextContent("1"));
+    fireEvent.click(within(screen.getByRole("group", { name: "Lane" })).getByRole("button", { name: /^Stopped/ }));
+    expect(within(lane("Stopped")).getByText("Dropped")).toBeInTheDocument();
   });
 
   it("shows_a_task_with_an_unknown_status_in_working", async () => {
@@ -646,8 +762,8 @@ describe("BoardView lanes", () => {
     expect(regionNames()).toEqual(ORDER);
     expect(window.localStorage.getItem("factory-board:view")).toBe("stages");
     expect(screen.getByRole("button", { name: "All stages" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Done (0)" })).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByRole("button", { name: "Cancelled (0)" })).toHaveAttribute("aria-expanded", "false");
+    expect(toggleOf("Done")).toHaveAttribute("aria-expanded", "false");
+    expect(toggleOf("Cancelled")).toHaveAttribute("aria-expanded", "false");
   });
 
   it("restores_the_stored_view_on_reload", async () => {
@@ -708,16 +824,40 @@ const NEEDS_YOU_NAMES = ["Spec review", "Plan review", "PR open", "Blocked"];
 describe("BoardView all stages restyle", () => {
   beforeEach(showStages);
 
-  it("shows_one_hint_line_above_the_strip", async () => {
+  it("shows_a_two_part_hint_row_above_the_columns", async () => {
     await seedTask({ title: "First" });
     const { container } = renderBoard();
-    const hint = await screen.findByText(/Every status as its own column\./);
-    expect(hint.textContent).toContain("Every status as its own column. Outlined columns wait for you.");
-    expect(hint.textContent).toContain("Scroll sideways for Review, PR open, Done, Blocked and Cancelled");
-    expect(hint.tagName).toBe("P");
-    expect(hint.nextElementSibling).toHaveClass("sf-columns");
+    await screen.findByText("First");
+    const hint = container.querySelector(".sf-columns-hint");
+    expect(hint).not.toBeNull();
+    expect([...hint!.children].map((c) => c.textContent)).toEqual([
+      "Every status as its own column. Outlined columns wait for you.",
+      "Scroll sideways for Review, PR open, Done, Blocked and Cancelled"
+    ]);
+    expect(hint!.nextElementSibling).toHaveClass("sf-columns");
     expect(container.querySelectorAll(".sf-columns")).toHaveLength(1);
     expect(container.querySelectorAll(".sf-columns > section")).toHaveLength(13);
+  });
+
+  it("empty_columns_say_nothing_here_or_nothing_waiting", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Inbox" });
+    expect(within(column("Inbox")).getByText("Nothing here")).toBeInTheDocument();
+    for (const name of NEEDS_YOU_NAMES) expect(within(column(name)).getByText("Nothing waiting")).toBeInTheDocument();
+    expect(within(column("Done")).queryByText(/Nothing/)).toBeNull();
+    fireEvent.click(toggleOf("Done"));
+    expect(within(column("Done")).getByText("Nothing here")).toBeInTheDocument();
+  });
+
+  it("column_names_use_the_lane_name_style", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Inbox" });
+    for (const name of ORDER) {
+      const label = column(name).querySelector(".sf-lane-name");
+      expect(label?.tagName).toBe("SPAN");
+      expect(label).toHaveClass("sf-label");
+      expect(label).toHaveTextContent(name);
+    }
   });
 
   it("marks_exactly_the_four_owner_columns_as_needs_you", async () => {
@@ -787,8 +927,9 @@ describe("BoardView all stages restyle", () => {
     await seedTask({ title: "Shipped" }, "done");
     await seedTask({ title: "Dropped" }, "cancelled");
     renderBoard();
-    for (const name of ["Done (1)", "Cancelled (1)"]) {
-      expect(await screen.findByRole("button", { name })).toHaveAttribute("aria-expanded", "false");
+    for (const name of ["Done", "Cancelled"]) {
+      expect(await findToggle(name)).toHaveAttribute("aria-expanded", "false");
+      expect(column(name).querySelector(".sf-count")).toHaveTextContent("1");
     }
     expect(column("Done")).toHaveClass("sf-column-collapsed");
     expect(column("Cancelled")).toHaveClass("sf-column-collapsed");
@@ -796,16 +937,19 @@ describe("BoardView all stages restyle", () => {
     expect(screen.queryByText("Dropped")).toBeNull();
   });
 
-  it("clicking_the_header_expands_and_clicking_again_collapses", async () => {
+  it("show_expands_and_hide_collapses", async () => {
     await seedTask({ title: "Shipped" }, "done");
     renderBoard();
-    const toggle = await screen.findByRole("button", { name: "Done (1)" });
+    const toggle = await findToggle("Done");
+    expect(toggle).toHaveTextContent("Show");
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveTextContent("Hide");
     expect(screen.getByText("Shipped")).toBeInTheDocument();
     expect(column("Done")).not.toHaveClass("sf-column-collapsed");
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveTextContent("Show");
     expect(screen.queryByText("Shipped")).toBeNull();
     expect(column("Done")).toHaveClass("sf-column-collapsed");
   });
@@ -813,7 +957,7 @@ describe("BoardView all stages restyle", () => {
   it("a_collapsed_column_with_tasks_has_no_aria_controls", async () => {
     await seedTask({ title: "Shipped" }, "done");
     renderBoard();
-    const toggle = await screen.findByRole("button", { name: "Done (1)" });
+    const toggle = await findToggle("Done");
     expect(toggle).not.toHaveAttribute("aria-controls");
     fireEvent.click(toggle);
     const target = toggle.getAttribute("aria-controls");
@@ -824,16 +968,16 @@ describe("BoardView all stages restyle", () => {
   it("expansion_is_not_remembered", async () => {
     await seedTask({ title: "Shipped" }, "done");
     renderBoard();
-    fireEvent.click(await screen.findByRole("button", { name: "Done (1)" }));
+    fireEvent.click(await findToggle("Done"));
     expect(screen.getByText("Shipped")).toBeInTheDocument();
     cleanup();
     renderBoard();
-    expect(await screen.findByRole("button", { name: "Done (1)" })).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Done (1)" }));
+    expect(await findToggle("Done")).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggleOf("Done"));
     expect(screen.getByText("Shipped")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Lanes" }));
     fireEvent.click(screen.getByRole("button", { name: "All stages" }));
-    expect(screen.getByRole("button", { name: "Done (1)" })).toHaveAttribute("aria-expanded", "false");
+    expect(toggleOf("Done")).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Shipped")).toBeNull();
   });
 

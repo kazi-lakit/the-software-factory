@@ -8,12 +8,11 @@ import { useFactories, useSelectedFactory, type FactoryEntry } from "../factorie
 import { DependsOnPicker } from "../task/DependsOnPicker";
 import { describeWriteError, NEVER_MAIN_BASE, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 import { FactoryPicker } from "./FactoryPicker";
-import { laneOf, LANES, type LaneId } from "./lanes";
+import { byAge, laneOf, LANES, type LaneId } from "./lanes";
 import { COLUMNS, isTestTask, MUTED, NEEDS_YOU, STATUS_LABEL } from "./status";
-import { TaskCard } from "./TaskCard";
+import { followInApp, TaskCard } from "./TaskCard";
 import { useBoard } from "./useBoard";
 import { useBoardView } from "./useBoardView";
-import { WaitingStrip } from "./WaitingStrip";
 
 type Navigate = (path: string) => void;
 
@@ -96,6 +95,10 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const [repo, setRepo] = useState("");
   const [view, setView] = useBoardView();
   const [showTest, setShowTest] = useState(false);
+  // In memory only: a reload starts with an empty search.
+  const [query, setQuery] = useState("");
+  // The Stopped lane starts collapsed; in memory only.
+  const [stoppedOpen, setStoppedOpen] = useState(false);
   // Phones show one lane at a time. In memory only: a reload selects Needs you again.
   const [selectedLane, setSelectedLane] = useState<LaneId>("needs-you");
   const [expanded, setExpanded] = useState<ReadonlySet<Status>>(new Set());
@@ -136,8 +139,10 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const repoOptions: readonly FactoryRepo[] = all ? factories.repos : (factories.byId.get(factory)?.repos ?? NO_REPOS);
 
   const inFactory = (board.data ?? []).filter((task) => all || task.factoryId === factory);
-  const visible = inFactory.filter((task) => (showTest || !isTestTask(task)) && (repo === "" || (all ? `${task.factoryId}/${task.repo}` : task.repo) === repo));
-  const waiting = inFactory.filter((task) => showTest || !isTestTask(task));
+  // The search matches a task's id or title, case-insensitive; it applies before the split, so both views follow it.
+  const q = query.trim().toLowerCase();
+  const matches = (task: Task) => q === "" || task.taskId.toLowerCase().includes(q) || task.title.toLowerCase().includes(q);
+  const visible = inFactory.filter((task) => (showTest || !isTestTask(task)) && (repo === "" || (all ? `${task.factoryId}/${task.repo}` : task.repo) === repo) && matches(task));
   const allTasks = board.data ?? [];
   const waitingOn = (task: Task): string[] => (task.status === "ready" ? unfinishedDeps(task, allTasks) : []);
   const byStatus = new Map<Status, Task[]>(COLUMNS.map((status) => [status, []]));
@@ -146,6 +151,8 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const byLane = new Map<LaneId, Task[]>(LANES.map((lane) => [lane.id, []]));
   for (const status of COLUMNS) byLane.get(laneOf(status))?.push(...(byStatus.get(status) ?? []));
   for (const task of visible) if (!byStatus.has(task.status)) byLane.get(laneOf(task.status))?.push(task);
+  // Needs you is oldest first across its statuses: the longest wait comes first.
+  byLane.get("needs-you")?.sort(byAge);
 
   function toggle(status: Status) {
     setExpanded((current) => {
@@ -159,7 +166,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   return (
     <div className={view === "stages" ? "sf-view sf-view-stages" : "sf-view"}>
       <div className="sf-toolbar">
-        <h2>Board</h2>
+        <h1 className="sf-page-title">Board</h1>
         <FactoryPicker
           defs={factories.defs}
           value={factory}
@@ -182,6 +189,14 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
           <input type="checkbox" checked={showTest} onChange={(event) => setShowTest(event.target.checked)} />
           <span>Show test tasks</span>
         </label>
+        <input
+          type="search"
+          className="sf-input sf-board-search"
+          aria-label="Search tasks by title or id"
+          placeholder="Search tasks by title or id"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+        />
         <div role="group" aria-label="Board view" className="sf-segmented">
           <button type="button" className="sf-segment" aria-pressed={view === "lanes"} onClick={() => setView("lanes")}>Lanes</button>
           <button type="button" className="sf-segment" aria-pressed={view === "stages"} onClick={() => setView("stages")}>All stages</button>
@@ -189,7 +204,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
         <button
           ref={newTaskButton}
           type="button"
-          className={`sf-button sf-toolbar-end${creating ? "" : " sf-button-primary"}`}
+          className="sf-button sf-button-primary sf-toolbar-end"
           aria-expanded={creating}
           aria-controls={creating ? formId : undefined}
           onClick={() => {
@@ -242,8 +257,6 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
       ) : null}
       {board.isPending ? <p className="sf-empty" role="status">Loading tasks…</p> : null}
 
-      {board.data ? <WaitingStrip tasks={waiting} showFactory={all} onNavigate={onNavigate} /> : null}
-
       {board.data && view === "lanes" ? (
         <>
         <div role="group" aria-label="Lane" className="sf-pills">
@@ -253,7 +266,11 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
               type="button"
               className="sf-pill"
               aria-pressed={selectedLane === lane.id}
-              onClick={() => setSelectedLane(lane.id)}
+              onClick={() => {
+                setSelectedLane(lane.id);
+                // Phones hide the lane head, so picking Stopped opens it: the cancelled cards stay reachable.
+                if (lane.id === "stopped") setStoppedOpen(true);
+              }}
             >
               {lane.name} <span className="sf-count sf-mono">{byLane.get(lane.id)?.length ?? 0}</span>
             </button>
@@ -262,26 +279,47 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
         <div className="sf-lanes">
           {LANES.map((lane) => {
             const tasks = byLane.get(lane.id) ?? [];
+            const stopped = lane.id === "stopped";
+            // Done shows the two most recent (highest id); Stopped lists its cards only while open.
+            const shown = lane.id === "done" ? [...tasks].sort((a, b) => byAge(b, a)).slice(0, 2) : stopped && !stoppedOpen ? [] : tasks;
+            const listId = stopped ? `${formId}-lane-stopped` : undefined;
+            const tone = lane.id === "needs-you" ? " sf-lane-needs-you" : stopped ? " sf-lane-stopped" : "";
             return (
               <section
                 key={lane.id}
-                className={`sf-lane${lane.id === "needs-you" ? " sf-lane-needs-you" : ""}`}
+                className={`sf-lane${tone}`}
                 aria-label={lane.name}
                 data-selected={selectedLane === lane.id ? "true" : "false"}
               >
                 <div className="sf-lane-head">
-                  <h3 className="sf-label sf-lane-name">{lane.name}</h3>
+                  <span className="sf-label sf-lane-name">{lane.name}</span>
                   <span className="sf-count sf-mono">{tasks.length}</span>
+                  {stopped ? (
+                    <button
+                      type="button"
+                      className="sf-show-toggle"
+                      aria-expanded={stoppedOpen}
+                      aria-controls={shown.length > 0 ? listId : undefined}
+                      onClick={() => setStoppedOpen(!stoppedOpen)}
+                    >
+                      {stoppedOpen ? "Hide" : "Show"}
+                    </button>
+                  ) : null}
                 </div>
-                <p className="sf-lane-hint">{lane.hint}</p>
-                {tasks.length > 0 ? (
-                  <ul className="sf-card-list">
-                    {tasks.map((task) => (
+                {lane.hint ? <p className="sf-lane-hint">{lane.hint}</p> : null}
+                {shown.length > 0 ? (
+                  <ul id={listId} className="sf-card-list">
+                    {shown.map((task) => (
                       <li key={task.taskId}><TaskCard task={task} showFactory={all} waitingOn={waitingOn(task)} onNavigate={onNavigate} /></li>
                     ))}
                   </ul>
-                ) : selectedLane === lane.id ? (
+                ) : tasks.length === 0 && selectedLane === lane.id ? (
                   <p className="sf-empty sf-lane-empty">Nothing in {lane.name}.</p>
+                ) : null}
+                {lane.id === "done" && tasks.length > 0 ? (
+                  <a className="sf-lane-more" href="/history" onClick={(event) => followInApp(event, "/history", onNavigate)}>
+                    Show all {tasks.length} in History
+                  </a>
                 ) : null}
               </section>
             );
@@ -292,7 +330,10 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
 
       {board.data && view === "stages" ? (
         <>
-        <p className="sf-columns-hint">Every status as its own column. Outlined columns wait for you. Scroll sideways for Review, PR open, Done, Blocked and Cancelled</p>
+        <p className="sf-columns-hint">
+          <span>Every status as its own column. Outlined columns wait for you.</span>
+          <span>Scroll sideways for Review, PR open, Done, Blocked and Cancelled</span>
+        </p>
         <div className="sf-columns">
           {COLUMNS.map((status) => {
             const tasks = byStatus.get(status) ?? [];
@@ -304,17 +345,17 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             return (
               <section key={status} className={`sf-column${tone}${NEEDS_YOU.has(status) ? " sf-column-needs-you" : ""}${open ? "" : " sf-column-collapsed"}`} aria-label={STATUS_LABEL[status]}>
                 <h3 className="sf-column-head">
+                  <span className="sf-label sf-lane-name">{STATUS_LABEL[status]}</span>
+                  <span className="sf-count sf-mono">{tasks.length}</span>
                   {collapsible ? (
-                    <button type="button" className="sf-column-toggle" aria-expanded={open} aria-controls={listed ? listId : undefined} onClick={() => toggle(status)}>
-                      {STATUS_LABEL[status]} ({tasks.length})
+                    <button type="button" className="sf-show-toggle" aria-expanded={open} aria-controls={listed ? listId : undefined} onClick={() => toggle(status)}>
+                      {open ? "Hide" : "Show"}
                     </button>
-                  ) : (
-                    <>
-                      <span>{STATUS_LABEL[status]}</span>
-                      <span className="sf-count sf-mono">{tasks.length}</span>
-                    </>
-                  )}
+                  ) : null}
                 </h3>
+                {open && tasks.length === 0 ? (
+                  <p className="sf-empty sf-column-empty">{NEEDS_YOU.has(status) ? "Nothing waiting" : "Nothing here"}</p>
+                ) : null}
                 {listed ? (
                   <ul id={listId} className="sf-card-list">
                     {tasks.map((task) => (

@@ -721,7 +721,7 @@ textarea.sf-input {
 }
 
 .sf-column-needs-you {
-  background: var(--sf-needs-tint);
+  background: linear-gradient(to bottom, var(--sf-needs-tint), transparent 70%);
   border-color: var(--sf-accent);
 }
 
@@ -729,14 +729,16 @@ textarea.sf-input {
   flex-basis: 140px;
 }
 
+/* One row: what the view is on the left, the scroll hint on the right; the parts wrap on narrow screens. */
 .sf-columns-hint {
   color: var(--sf-muted);
+  display: flex;
+  flex-wrap: wrap;
   font-size: var(--sf-size-small);
+  gap: 4px 16px;
+  justify-content: space-between;
   margin: 0 0 8px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .sf-column-head {
@@ -755,16 +757,21 @@ textarea.sf-input {
   color: var(--sf-muted);
 }
 
-.sf-column-toggle {
-  background: none;
-  border: 0;
-  color: inherit;
-  font: inherit;
-  padding: 0;
-  text-align: left;
+/* The small Show/Hide button of a collapsible lane or column (Stopped, Done, Cancelled). */
+.sf-show-toggle {
+  background: transparent;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-muted);
+  cursor: pointer;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 0 6px;
 }
 
-.sf-column-muted .sf-column-toggle {
+.sf-column-muted .sf-lane-name {
   color: var(--sf-done);
 }
 
@@ -772,8 +779,8 @@ textarea.sf-input {
 .sf-lanes {
   align-items: start;
   display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  grid-template-columns: minmax(260px, 1.25fr) repeat(3, minmax(220px, 1fr)) minmax(150px, .55fr);
   width: 100%;
 }
 
@@ -786,26 +793,50 @@ textarea.sf-input {
 }
 
 .sf-lane-needs-you {
-  background: linear-gradient(to bottom, var(--sf-needs-tint), transparent 40%), var(--sf-needs-tint);
+  background: linear-gradient(to bottom, var(--sf-needs-tint), transparent 70%);
   border-color: var(--sf-accent);
 }
 
 .sf-lane-head {
   align-items: baseline;
   display: flex;
+  gap: 8px;
   justify-content: space-between;
+  padding: 2px 2px 4px;
 }
 
 .sf-lane-name {
   margin: 0;
 }
 
+.sf-lane-needs-you .sf-lane-name {
+  color: var(--sf-accent-text);
+}
+
+.sf-lane-stopped .sf-lane-name {
+  color: var(--sf-done);
+}
+
 .sf-lane-hint {
   color: var(--sf-muted);
   margin: 0 0 8px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.sf-lane .sf-card-list {
+  gap: 8px;
+}
+
+.sf-lane-more {
+  display: inline-block;
+  font-size: var(--sf-size-small);
+  margin-top: 8px;
+}
+
+/* Search tasks by title or id: 220 to 360px wide. */
+.sf-board-search {
+  flex: 1 1 220px;
+  max-width: 360px;
+  min-width: 220px;
 }
 
 /* One segmented switch for the theme and the Board view: a framed group, the pressed one filled. */
@@ -1623,36 +1654,6 @@ textarea.sf-input {
 
 .sf-lane-empty {
   display: none;
-}
-
-/* Waiting for you */
-.sf-strip {
-  background: var(--sf-accent-soft);
-  border: 1px solid var(--sf-accent);
-  border-radius: var(--sf-radius);
-  margin-bottom: 12px;
-  padding: 8px 12px;
-}
-
-.sf-strip-list {
-  display: grid;
-  gap: 4px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.sf-strip-item {
-  align-items: baseline;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-}
-
-.sf-strip-id,
-.sf-strip-status {
-  color: var(--sf-muted);
-  font-size: var(--sf-size-small);
 }
 
 /* Settings tabs and the Factories tab */

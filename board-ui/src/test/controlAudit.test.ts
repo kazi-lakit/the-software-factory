@@ -12,8 +12,9 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
 /** Counted when this guard was written (T-18). A new control makes the count test fail, so it is looked at.
  *  +2 / +1 file: DependsOnPicker's checkboxes (task dependencies).
  *  +1: FactoryForm's per-stage agent model select (T-19).
- *  -1 / -1 file: FormField deleted (T-23). */
-const EXPECTED_CONTROLS = 44;
+ *  -1 / -1 file: FormField deleted (T-23).
+ *  +1: the Board's Search tasks by title or id field (T-24). */
+const EXPECTED_CONTROLS = 45;
 const EXPECTED_FILES = 12;
 
 type Control = { file: string; tag: string; text: string };

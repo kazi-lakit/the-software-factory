@@ -137,7 +137,7 @@ describe("phone pills and lanes", () => {
   it("desktop lanes are unchanged", () => {
     const base = css.slice(0, css.lastIndexOf("@media (max-width: 639px)"));
     expect(base).not.toContain("data-selected");
-    expect(tokens(css, ".sf-lanes")["grid-template-columns"]).toBe("repeat(5, minmax(0, 1fr))");
+    expect((tokens(css, ".sf-lanes")["grid-template-columns"] ?? "").replace(/\s+/g, "")).toBe("minmax(260px,1.25fr)repeat(3,minmax(220px,1fr))minmax(150px,.55fr)");
   });
 
   it("the pill gets the shared colour transition and no phone rule adds one", () => {
@@ -189,7 +189,7 @@ describe("phone action bar, inputs and buttons", () => {
   });
 
   it("no phone rule is out-ranked by an earlier base rule", () => {
-    const ELEMENT_OF = { "sf-lane-name": "h3", "sf-question-title": "h3", "sf-page-title": "h2", "sf-input": "input", "sf-select": "select", "sf-pill": "button", "sf-account-name": "span" };
+    const ELEMENT_OF = { "sf-lane-name": "span", "sf-question-title": "h3", "sf-page-title": "h2", "sf-input": "input", "sf-select": "select", "sf-pill": "button", "sf-account-name": "span" };
     expect(outranked(css, ELEMENT_OF, [".sf-theme-switch"])).toEqual([]);
   });
 });
