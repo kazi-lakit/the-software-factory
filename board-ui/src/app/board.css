@@ -1274,6 +1274,13 @@ textarea.sf-input {
   border-collapse: collapse;
   font-size: 13px;
   min-width: 0;
+  width: 100%;
+}
+
+.sf-table th,
+.sf-table td {
+  text-align: left;
+  vertical-align: middle;
 }
 
 .sf-table td {
@@ -1294,6 +1301,7 @@ textarea.sf-input {
 
 .sf-table tbody tr {
   border-bottom: 1px solid var(--sf-chrome-border);
+  transition: background-color 150ms ease;
 }
 
 .sf-table tbody tr:last-child {
@@ -1727,7 +1735,11 @@ textarea.sf-input {
 }
 
 .sf-checks-diff pre {
+  background: var(--sf-surface-sunk);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
   margin: 0;
+  padding: 10px 12px;
   overflow-x: auto;
   white-space: pre-wrap;
 }

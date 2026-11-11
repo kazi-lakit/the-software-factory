@@ -86,10 +86,9 @@ describe("the stylesheets", () => {
     expect(cssClashes(read("styles.css"))).toEqual([]);
   });
 
-  it("styles_css_dark_block_does_not_use_prefers_color_scheme", () => {
+  it("styles_css_does_not_use_prefers_color_scheme", () => {
     const css = read("styles.css");
     expect(css).not.toContain("prefers-color-scheme");
-    expect(css).toContain(':root:not([data-theme="light"])');
   });
 });
 
@@ -1074,5 +1073,25 @@ describe("board_css_screen_panel", () => {
       expect(m[2] ?? "").not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
     }
     expect(seen).toBeGreaterThan(0);
+  });
+});
+
+describe("board_css_table_without_bare_rules", () => {
+  const css = read("board.css");
+
+  it("sf_table_is_full_width", () => {
+    expect(tokens(css, ".sf-table").width).toBe("100%");
+  });
+
+  it("sf_table_cells_align_left_and_middle", () => {
+    expect(tokens(css, ".sf-table th,\n.sf-table td")).toMatchObject({ "text-align": "left", "vertical-align": "middle" });
+  });
+
+  it("sf_table_rows_fade_their_hover", () => {
+    expect(tokens(css, ".sf-table tbody tr").transition).toBe("background-color 150ms ease");
+  });
+
+  it("checks_diff_pre_uses_sf_tokens", () => {
+    expect(tokens(css, ".sf-checks-diff pre")).toMatchObject({ background: "var(--sf-surface-sunk)", color: "var(--sf-text)" });
   });
 });
