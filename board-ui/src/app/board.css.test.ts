@@ -815,18 +815,108 @@ describe("board_css_lanes", () => {
   });
 });
 
+const SHORTHAND: Record<string, string> = {
+  background: "background", "border-color": "border", "margin-bottom": "margin"
+};
+
+/**
+ * The declaration that wins `prop` on an element carrying exactly `classes`, among the
+ * top-level rules whose selectors are class-only compounds (".a", ".a.b"): more classes
+ * win, a later rule wins a tie. The property's shorthand counts too, so a later
+ * `border` beats an earlier `border-color`. Test helper for cascade checks.
+ */
+function cascaded(css: string, classes: string[], prop: string): string | undefined {
+  const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const shorthand = SHORTHAND[prop];
+  let best: { spec: number; value: string } | undefined;
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < clean.length; i++) {
+    const c = clean[i];
+    if (c === "{") {
+      if (depth === 0) {
+        const close = clean.indexOf("}", i);
+        const prelude = clean.slice(start, i).trim();
+        const inner = clean.slice(i + 1, close);
+        if (!prelude.startsWith("@") && !inner.includes("{")) {
+          for (const sel of prelude.split(",").map((x) => x.trim())) {
+            if (!/^(\.[\w-]+)+$/.test(sel)) continue;
+            const names = sel.slice(1).split(".");
+            if (!names.every((n) => classes.includes(n))) continue;
+            for (const d of inner.split(";")) {
+              const k = d.indexOf(":");
+              const name = k > 0 ? d.slice(0, k).trim() : "";
+              if (name !== prop && name !== shorthand) continue;
+              if (!best || names.length >= best.spec) best = { spec: names.length, value: d.slice(k + 1).trim() };
+            }
+          }
+          i = close;
+          start = close + 1;
+          continue;
+        }
+      }
+      depth++;
+    } else if (c === "}") {
+      depth--;
+      if (depth === 0) start = i + 1;
+    }
+  }
+  return best?.value;
+}
+
 describe("board_css_task_page", () => {
   const css = read("board.css");
   const t = (selector: string) => tokens(css, selector);
 
-  it("task_title_is_28px_bold_tight", () => {
-    expect(t(".sf-task-header h2")).toMatchObject({
+  it("task_title_uses_the_page_title_style", () => {
+    expect(t(".sf-task-header h2")).toEqual({});
+    expect(t(".sf-page-title")).toMatchObject({
       color: "var(--sf-text)", "font-size": "28px", "font-weight": "700", "letter-spacing": "-0.02em"
     });
   });
 
-  it("task_meta_is_muted", () => {
-    expect(t(".sf-task-meta").color).toBe("var(--sf-muted)");
+  it("breadcrumb_is_muted_and_meta_line_is_gone", () => {
+    expect(t(".sf-breadcrumb").color).toBe("var(--sf-muted)");
+    expect(t(".sf-task-meta")).toEqual({});
+  });
+
+  it("facts_rules_are_not_in_the_task_section", () => {
+    const slice = css.slice(css.indexOf("/* Task */"), css.indexOf("/* Docs are markdown"));
+    expect(slice).not.toContain(".sf-facts");
+  });
+
+  it("title_row_puts_actions_on_the_right_and_wraps", () => {
+    expect(t(".sf-task-title-row")).toMatchObject({ display: "flex", "flex-wrap": "wrap", "justify-content": "space-between" });
+    expect(t(".sf-task-title-row > h1")["min-width"]).toBe("0");
+    expect(t(".sf-task-actions").display).toBe("contents");
+    expect(t(".sf-task-actions > :not(.sf-actions)")["flex-basis"]).toBe("100%");
+  });
+
+  it("waiting_chip_and_task_chip_row_win_the_cascade", () => {
+    const chip = ["sf-chip", "sf-chip-waiting"];
+    expect(cascaded(css, chip, "background")).toBe("var(--sf-accent-soft)");
+    expect(cascaded(css, chip, "border-color")).toBe("var(--sf-accent)");
+    expect(cascaded(css, chip, "color")).toBe("var(--sf-accent-text)");
+    expect(cascaded(css, ["sf-chips", "sf-task-chips"], "margin-bottom")).toBe("0");
+  });
+
+  it("chip_row_and_waiting_chip_use_tokens", () => {
+    expect(t(".sf-chips.sf-task-chips").margin).toBe("0");
+    expect(t(".sf-chip.sf-chip-waiting")).toMatchObject({
+      background: "var(--sf-accent-soft)", "border-color": "var(--sf-accent)", color: "var(--sf-accent-text)"
+    });
+  });
+
+  it("columns_stack_their_panels", () => {
+    for (const selector of [".sf-task-main", ".sf-task-side"]) {
+      expect(t(selector)).toMatchObject({ display: "flex", "flex-direction": "column", gap: "16px" });
+    }
+    expect(t(".sf-task-docs")).toEqual({});
+  });
+
+  it("gate_hint_and_runs_list_use_tokens", () => {
+    expect(t(".sf-gate-hint")).toMatchObject({ color: "var(--sf-muted)", "font-size": "var(--sf-size-small)", margin: "0" });
+    expect(t(".sf-runs")["list-style"]).toBe("none");
   });
 
   it("stepper_labels_use_label_type_and_waiting_uses_accent_text", () => {
@@ -857,7 +947,8 @@ describe("board_css_task_page", () => {
     });
   });
 
-  it("decision_panel_has_accent_border_on_all_sides", () => {
+  it("decision_panel_has_a_3px_accent_top_border", () => {
+    expect(t(".sf-panel-decision")["border-top"]).toBe("3px solid var(--sf-accent)");
     const needs = t(".sf-panel-needs-you");
     expect(needs["border-color"]).toBe("var(--sf-accent)");
     expect(needs["border-left"]).toBeUndefined();

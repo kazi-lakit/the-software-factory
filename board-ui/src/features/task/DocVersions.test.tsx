@@ -68,3 +68,45 @@ describe("DocVersions dropdowns", () => {
     expect(screen.getByLabelText("Compare with").tagName).toBe("SELECT");
   });
 });
+
+describe("DocVersions compare with previous", () => {
+  it("previous_mode_has_a_compare_button_and_no_compare_select", () => {
+    render(<DocVersions label="Spec" docs={docs} compare="previous" />);
+    expect(screen.getByRole("button", { name: "Compare with v1" })).toBeInTheDocument();
+    expect(screen.queryByLabelText("Compare with")).toBeNull();
+    expect(screen.getByLabelText("Spec version")).toBeInTheDocument();
+  });
+
+  it("compare_button_toggles_the_diff_from_the_previous_version", () => {
+    render(<DocVersions label="Spec" docs={docs} compare="previous" />);
+    const button = screen.getByRole("button", { name: "Compare with v1" });
+    fireEvent.click(button);
+    expect(screen.getByRole("region", { name: "Spec changes from v1 to v2" })).toBeInTheDocument();
+    expect(button).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(button);
+    expect(screen.queryByRole("region", { name: "Spec changes from v1 to v2" })).toBeNull();
+    expect(screen.getByText(/Add paging\./)).toBeInTheDocument();
+    expect(button).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("compare_button_is_hidden_at_v1", () => {
+    const first = render(<DocVersions label="Spec" docs={docs} to={1} compare="previous" />);
+    expect(screen.queryByRole("button", { name: /Compare with/ })).toBeNull();
+    first.unmount();
+    render(<DocVersions label="Spec" docs={[doc(1, "x", "current")]} compare="previous" />);
+    expect(screen.queryByRole("button", { name: /Compare with/ })).toBeNull();
+  });
+
+  it("previous_mode_opens_on_to", () => {
+    render(<DocVersions label="Spec" docs={docs} to={1} compare="previous" />);
+    expect(screen.getByLabelText("Spec version")).toHaveValue("1");
+  });
+
+  it("compare_button_follows_the_shown_version", () => {
+    const three = [doc(1, "a"), doc(2, "b"), doc(3, "c", "current")];
+    render(<DocVersions label="Spec" docs={three} to={3} compare="previous" />);
+    expect(screen.getByRole("button", { name: "Compare with v2" })).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Spec version"), { target: { value: "2" } });
+    expect(screen.getByRole("button", { name: "Compare with v1" })).toBeInTheDocument();
+  });
+});
