@@ -1,9 +1,9 @@
 import type { FactoryEvent } from "@factory/core";
 import { isAnswer, isQuestion } from "../../lib/qaEvent";
+import { formatTime } from "../../lib/formatTime";
 import { ageOf } from "../board/status";
 import { optionText, parseQuestion, type QuestionOption } from "./parseQuestion";
 
-export type QaMark = "recommended" | "not-recommended" | "none";
 export type QaOption = QuestionOption & { chosen: boolean };
 export type QaEntry = {
   key: string;
@@ -22,7 +22,6 @@ export type QaEntry = {
   resumedAt: string | null;
   /** True for the question that is still open. */
   open: boolean;
-  mark: QaMark;
 };
 
 const humanise = (text: string): string => {
@@ -37,12 +36,6 @@ export function askerName(actor: string): string {
 }
 
 const collapse = (text: string) => text.replace(/\s+/g, " ").trim();
-
-function markOf(options: readonly QuestionOption[], answer: string): QaMark {
-  const marked = options.filter((option) => option.recommended);
-  if (marked.length !== 1) return "none";
-  return collapse(answer) === collapse(optionText(marked[0]!)) ? "recommended" : "not-recommended";
-}
 
 /** An answer picks an option when it is the option's full text (whitespace collapsed) or its bare letter (`A` or `A.`). */
 function chosenOf(option: QuestionOption, answer: string): boolean {
@@ -59,8 +52,11 @@ const isResume = (event: FactoryEvent): boolean => event.field === "status" && e
  */
 export function buildQaLog(events: readonly FactoryEvent[], openQuestion: string | null): QaEntry[] {
   const asked: { event: FactoryEvent; answer: FactoryEvent | null; resumedAt: string | null }[] = [];
+  /** The working status each `blocked` move left, keyed by the move's time; a question shares its move's time. */
+  const blockedFrom = new Map<string, string | null>();
   let cleared = false;
   for (const event of events) {
+    if (event.field === "status" && event.to === "blocked" && !blockedFrom.has(event.at)) blockedFrom.set(event.at, event.from);
     const last = asked[asked.length - 1];
     if (isQuestion(event)) {
       asked.push({ answer: null, event, resumedAt: null });
@@ -76,14 +72,13 @@ export function buildQaLog(events: readonly FactoryEvent[], openQuestion: string
     .map(({ answer, event, resumedAt }, index): QaEntry => {
       const parsed = parseQuestion(event.to ?? "");
       const given = answer?.to ?? null;
-      const stage = events.find((e) => e.field === "status" && e.to === "blocked" && e.at === event.at)?.from ?? null;
+      const stage = blockedFrom.get(event.at) ?? null;
       return {
         answer: given,
         answeredAt: answer?.at ?? null,
         askedAt: event.at,
         askedBy: askerName(event.actor),
         key: `${index}:${event.at}`,
-        mark: given === null ? "none" : markOf(parsed.options, given),
         number: index + 1,
         open: index === openIndex,
         options: parsed.options.map((option) => ({ ...option, chosen: given !== null && chosenOf(option, given) })),
@@ -103,7 +98,7 @@ export function qaCounts(entries: readonly QaEntry[]): { asked: number; answered
 const pad = (value: number) => String(value).padStart(2, "0");
 
 /** Local `HH:MM` of an ISO time. */
-export function clockOf(iso: string): string {
+function clockOf(iso: string): string {
   const date = new Date(iso);
   return Number.isNaN(date.getTime()) ? iso : `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
@@ -112,7 +107,7 @@ export function clockOf(iso: string): string {
 export function timeLabel(iso: string, nowMs: number = Date.now()): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toDateString() === new Date(nowMs).toDateString() ? `today ${clockOf(iso)}` : date.toLocaleString();
+  return date.toDateString() === new Date(nowMs).toDateString() ? `today ${clockOf(iso)}` : formatTime(iso);
 }
 
 /** "Question N · spec writer · spec stage · today 08:14"; the asker and stage parts are left out when unknown. */
@@ -124,13 +119,17 @@ export function qaLabelLine(entry: QaEntry, nowMs: number = Date.now()): string 
   return parts.join(" · ");
 }
 
-/** "Answered by you · today 07:58", plus "· the spec writer resumed at 07:59" when a resume was seen; null when unanswered. */
+/**
+ * "Answered by you · today 07:58", plus "· the spec writer resumed at 07:59" when a resume was seen; null when unanswered.
+ * A resume on a different day from the answer carries its day too, so it never reads as earlier than the answer.
+ */
 export function answeredLine(entry: QaEntry, nowMs: number = Date.now()): string | null {
   if (entry.answeredAt === null) return null;
   const line = `Answered by you · ${timeLabel(entry.answeredAt, nowMs)}`;
   if (entry.resumedAt === null) return line;
   const who = entry.askedBy ? `the ${entry.askedBy.toLowerCase()}` : "the task";
-  return `${line} · ${who} resumed at ${clockOf(entry.resumedAt)}`;
+  const sameDay = new Date(entry.resumedAt).toDateString() === new Date(entry.answeredAt).toDateString();
+  return `${line} · ${who} resumed at ${sameDay ? clockOf(entry.resumedAt) : timeLabel(entry.resumedAt, nowMs)}`;
 }
 
 /** "Spec writer asks · question 2 of this task · 5h ago" from the latest question event; "" when there is none. */

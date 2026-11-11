@@ -30,28 +30,20 @@ describe("buildQaLog", () => {
     expect(entry).toMatchObject({ question: "Which branch?", askedBy: "Spec writer", answer: "A. main: fits", answeredAt: a1.at });
   });
 
-  it("marks_recommended_when_the_answer_letter_matches_the_single_recommended_option", () => {
-    expect(buildQaLog([ev("question", LETTERED), ev("answer", "A. main: fits")], null)[0]?.mark).toBe("recommended");
-  });
-
-  it("marks_not_recommended_for_another_letter_and_for_other_text", () => {
-    expect(buildQaLog([ev("question", LETTERED), ev("answer", "B. develop: more work")], null)[0]?.mark).toBe("not-recommended");
-    expect(buildQaLog([ev("question", LETTERED), ev("answer", "use release")], null)[0]?.mark).toBe("not-recommended");
-  });
-
-  it("no_mark_when_no_recommended_option_or_plain_text", () => {
-    expect(buildQaLog([ev("question", NONE), ev("answer", "A. main: fits")], null)[0]?.mark).toBe("none");
-    expect(buildQaLog([ev("question", "Continue?"), ev("answer", "yes")], null)[0]?.mark).toBe("none");
+  it("a_question_without_a_recommended_option_flags_none", () => {
+    const [entry] = buildQaLog([ev("question", NONE), ev("answer", "A. main: fits")], null);
+    expect(entry?.options.map((o) => [o.recommended, o.chosen])).toEqual([[false, true], [false, false]]);
   });
 
   it("ignores_answer_events_whose_reason_is_not_answered", () => {
     const [entry] = buildQaLog([ev("question", "Continue?"), ev("answer", "fix it", { reason: "spec changes requested" })], null);
-    expect(entry).toMatchObject({ answer: null, answeredAt: null, mark: "none" });
+    expect(entry).toMatchObject({ answer: null, answeredAt: null });
   });
 
-  it("unanswered_past_question_has_no_answer_and_no_mark", () => {
+  it("unanswered_past_question_has_no_answer_and_no_chosen_option", () => {
     const [entry] = buildQaLog([ev("question", LETTERED)], null);
-    expect(entry).toMatchObject({ answer: null, answeredAt: null, mark: "none" });
+    expect(entry).toMatchObject({ answer: null, answeredAt: null });
+    expect(entry?.options.some((o) => o.chosen)).toBe(false);
   });
 
   it("answer_after_the_next_question_does_not_pair_with_the_earlier_one", () => {
@@ -84,8 +76,8 @@ describe("buildQaLog", () => {
 });
 
 describe("buildQaLog review fixes", () => {
-  it("an_other_answer_that_starts_with_the_letter_is_not_recommended", () => {
-    expect(buildQaLog([ev("question", LETTERED), ev("answer", "A. something else")], null)[0]?.mark).toBe("not-recommended");
+  it("an_other_answer_that_starts_with_the_letter_chooses_no_option", () => {
+    expect(buildQaLog([ev("question", LETTERED), ev("answer", "A. something else")], null)[0]?.options.map((o) => o.chosen)).toEqual([false, false]);
   });
 
   it("does_not_pair_an_answer_across_a_cleared_question", () => {
@@ -119,8 +111,8 @@ describe("buildQaLog review fixes", () => {
     expect(entries.map((e) => [e.question, e.answer, e.open])).toEqual([["Q2?", "yes", true], ["Q1?", null, false]]);
   });
 
-  it("marks_recommended_when_the_answer_differs_only_by_extra_spaces", () => {
-    expect(buildQaLog([ev("question", LETTERED), ev("answer", "A.  main:   fits")], null)[0]?.mark).toBe("recommended");
+  it("chooses_the_recommended_option_when_the_answer_differs_only_by_extra_spaces", () => {
+    expect(buildQaLog([ev("question", LETTERED), ev("answer", "A.  main:   fits")], null)[0]?.options.map((o) => o.chosen)).toEqual([true, false]);
   });
 });
 
@@ -202,7 +194,7 @@ describe("qa line helpers", () => {
   const now = new Date(2026, 10, 11, 12, 0).getTime();
   const base: QaEntry = {
     key: "k", question: "Q?", askedBy: "Spec writer", askedAt: localIso(11, 8, 14), number: 2, stage: "spec", options: [],
-    answer: "A", answeredAt: localIso(11, 7, 58), resumedAt: null, open: false, mark: "none"
+    answer: "A", answeredAt: localIso(11, 7, 58), resumedAt: null, open: false
   };
 
   it("time_label_is_today_hh_mm_for_today", () => {
@@ -228,6 +220,17 @@ describe("qa line helpers", () => {
 
   it("answered_line_with_resume", () => {
     expect(answeredLine({ ...base, resumedAt: localIso(11, 7, 59) }, now)).toBe("Answered by you · today 07:58 · the spec writer resumed at 07:59");
+  });
+
+  it("answered_line_shows_the_resume_day_when_it_differs_from_the_answer_day", () => {
+    const answeredAt = localIso(9, 23, 58);
+    const resumedAt = localIso(10, 0, 5);
+    expect(answeredLine({ ...base, answeredAt, resumedAt }, now)).toBe(
+      `Answered by you · ${new Date(answeredAt).toLocaleString()} · the spec writer resumed at ${new Date(resumedAt).toLocaleString()}`
+    );
+    expect(answeredLine({ ...base, answeredAt: localIso(10, 23, 58), resumedAt: localIso(11, 0, 5) }, now)).toBe(
+      `Answered by you · ${new Date(localIso(10, 23, 58)).toLocaleString()} · the spec writer resumed at today 00:05`
+    );
   });
 
   it("answered_line_is_null_when_unanswered", () => {

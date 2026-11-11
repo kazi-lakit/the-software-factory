@@ -1962,11 +1962,6 @@ textarea.sf-input {
   overflow-wrap: anywhere;
 }
 
-.sf-badge-muted {
-  border-color: var(--sf-border);
-  color: var(--sf-muted);
-}
-
 .sf-qa-log {
   display: flex;
   flex-direction: column;
