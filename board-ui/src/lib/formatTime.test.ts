@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatWhen, localDay } from "./formatTime";
+import { formatWhen, formatWhenShort, localDay } from "./formatTime";
 
 const now = new Date(2026, 10, 12, 18, 0);
 
@@ -23,6 +23,24 @@ describe("formatWhen", () => {
 
   it("formatWhen_unparseable_is_shown_as_given", () => {
     expect(formatWhen("nope", now)).toBe("nope");
+  });
+});
+
+describe("formatWhenShort", () => {
+  it("formatWhenShort_today_reads_HH_MM", () => {
+    expect(formatWhenShort(new Date(2026, 10, 12, 10, 42).toISOString(), now)).toBe("10:42");
+  });
+
+  it("formatWhenShort_yesterday_reads_Yesterday_HH_MM", () => {
+    expect(formatWhenShort(new Date(2026, 10, 11, 17, 5).toISOString(), now)).toBe("Yesterday 17:05");
+  });
+
+  it("formatWhenShort_older_reads_day_month_time", () => {
+    expect(formatWhenShort(new Date(2026, 10, 10, 9, 3).toISOString(), now)).toBe("10 Nov 09:03");
+  });
+
+  it("formatWhenShort_unparseable_is_shown_as_given", () => {
+    expect(formatWhenShort("nope", now)).toBe("nope");
   });
 });
 
