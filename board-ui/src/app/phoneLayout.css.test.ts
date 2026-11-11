@@ -21,7 +21,7 @@ describe("phone layout tokens", () => {
     expect(root["--sf-actionbar-button"]).toBe("48px");
     expect(root["--sf-input-height"]).toBe("44px");
     expect(root["--sf-input-font"]).toBe("16px");
-    expect(root["--sf-bar-height"]).toBe("76px");
+    expect(root["--sf-bar-height"]).toBe("72px");
   });
 });
 
@@ -293,5 +293,15 @@ describe("phone design gaps (T-33)", () => {
     const added = phoneRules(css).filter((r) => /sf-(board-view|task-repo|task-more|question-for-you|question-from|qa-earlier|gate-changes|panel-decision)/.test(r.selector));
     expect(added.length).toBeGreaterThan(0);
     for (const r of added) for (const p of ["background", "background-color", "transition", "animation", "box-shadow"]) expect(r.decls, r.selector).not.toHaveProperty(p);
+  });
+});
+
+describe("narrow-phone review usability", () => {
+  it("lays out six progress labels in two readable rows", () => {
+    expect(phone(".sf-stepper")).toMatchObject({ display: "grid", "grid-template-columns": "repeat(3, minmax(0, 1fr))" });
+  });
+  it("keeps view and theme switches touch sized", () => {
+    expect(phone(".sf-segment")["min-height"]).toBe("44px");
+    expect(phone(".sf-theme-switch .sf-segment").width).toBe("44px");
   });
 });

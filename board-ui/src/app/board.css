@@ -7,7 +7,7 @@
   --sf-surface: #141e24;
   --sf-surface-sunk: #10181d;
   --sf-text: #eef2f3;
-  --sf-muted: #b1c1cb;
+  --sf-muted: #c4cfd6;
   --sf-border: rgba(177, 193, 203, 0.32);
   --sf-chrome-border: rgba(177, 193, 203, 0.18);
   --sf-accent: #4693c3;
@@ -38,9 +38,9 @@
   --sf-size-small: 12px;
   --sf-label-size: 11px;
   --sf-label-line: 16px;
-  --sf-label-tracking: 0.08em;
+  --sf-label-tracking: 2.2px;
   --sf-radius: 0px;
-  --sf-bar-height: 76px;
+  --sf-bar-height: 72px;
   --sf-tabbar-height: 56px;
   --sf-actionbar-button: 48px;
   --sf-input-height: 44px;
@@ -103,6 +103,7 @@ body {
 
 /* Small caps-style label type. */
 .sf-label {
+  font-weight: 500;
   font-family: var(--sf-mono);
   font-size: var(--sf-label-size);
   letter-spacing: var(--sf-label-tracking);
@@ -227,8 +228,7 @@ body {
   white-space: nowrap;
 }
 
-/* The account pill: outlined, initials in a circle, then the first name. 999px is a justified
-   exception to the single 3px radius: a pill and a circle are round by definition. */
+/* Square account control and initials follow the Breakwater geometry. */
 .sf-account {
   align-items: center;
   background: var(--sf-surface-sunk);
@@ -825,6 +825,8 @@ textarea.sf-input {
   letter-spacing: var(--sf-label-tracking);
   line-height: var(--sf-label-line);
   padding: 0 6px;
+  min-height: 44px;
+  min-width: 44px;
 }
 
 .sf-column-muted .sf-lane-name {
@@ -927,7 +929,7 @@ textarea.sf-input {
   display: inline-flex;
   font-family: var(--sf-mono);
   font-size: var(--sf-label-size);
-  height: 34px;
+  height: 44px;
   justify-content: center;
   letter-spacing: .02em;
   line-height: var(--sf-label-line);
@@ -944,7 +946,7 @@ textarea.sf-input {
 /* The sun and moon buttons stay square. */
 .sf-theme-switch .sf-segment {
   padding: 0;
-  width: 32px;
+  width: 44px;
 }
 
 .sf-card-list {
@@ -991,7 +993,7 @@ textarea.sf-input {
 .sf-card-id {
   color: var(--sf-muted);
   font-family: var(--sf-mono);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: .02em;
   line-height: var(--sf-label-line);
   overflow-wrap: anywhere;
@@ -1018,7 +1020,7 @@ textarea.sf-input {
   border-radius: var(--sf-radius);
   color: var(--sf-muted);
   font-family: var(--sf-mono);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: .02em;
   line-height: 14px;
   padding: 3px 6px;
@@ -1556,6 +1558,7 @@ textarea.sf-input {
 }
 
 .sf-table-wrap {
+  position: relative;
   background: var(--sf-surface);
   border: 1px solid var(--sf-chrome-border);
   border-radius: var(--sf-radius);
@@ -1588,7 +1591,7 @@ textarea.sf-input {
   border-bottom: 1px solid var(--sf-chrome-border);
   color: var(--sf-muted);
   font-family: var(--sf-mono);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
   letter-spacing: .1em;
   line-height: var(--sf-label-line);
@@ -1599,7 +1602,7 @@ textarea.sf-input {
 
 .sf-table tbody tr {
   border-bottom: 1px solid var(--sf-chrome-border);
-  transition: background-color 150ms ease;
+  transition: background-color 220ms ease;
 }
 
 .sf-table tbody tr:last-child {
@@ -1888,7 +1891,7 @@ textarea.sf-input {
   left: 2px;
   position: absolute;
   top: 2px;
-  transition: transform 120ms ease;
+  transition: transform 220ms ease;
   width: 16px;
 }
 
@@ -1927,9 +1930,6 @@ textarea.sf-input {
 .sf-history-pill,
 .sf-tab {
   transition: background-color 220ms ease, border-color 220ms ease, color 220ms ease;
-  padding: 12px 16px;
-  letter-spacing: .02em;
-  min-height: 44px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2237,9 +2237,10 @@ textarea.sf-input {
   cursor: pointer;
   font-family: var(--sf-mono);
   font-size: var(--sf-label-size);
-  letter-spacing: var(--sf-label-tracking);
+  letter-spacing: .02em;
   line-height: var(--sf-label-line);
-  padding: 8px 12px;
+  padding: 12px 16px;
+  min-height: 44px;
 }
 
 .sf-tab:hover {
@@ -2691,7 +2692,7 @@ textarea.sf-input {
 }
 .sf-sidebar-label {
   color: #9db2c0;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: .08em;
   padding: 0 16px;
   margin: 0 0 16px;
@@ -2703,7 +2704,7 @@ textarea.sf-input {
 }
 .sf-sidebar-note > span {
   color: #a7bdcc;
-  font-size: 9px;
+  font-size: 11px;
 }
 .sf-sidebar-note p {
   color: #b1c1cb;
@@ -2722,7 +2723,7 @@ textarea.sf-input {
 }
 .sf-sidebar-footer {
   color: #a7bdcc;
-  font-size: 9px;
+  font-size: 11px;
   padding: 0 8px;
 }
 .sf-workspace-context {
@@ -2758,7 +2759,7 @@ textarea.sf-input {
 }
 .sf-eyebrow {
   color: var(--sf-muted);
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: .14em;
   margin: 0 0 12px;
 }
@@ -2798,7 +2799,7 @@ textarea.sf-input {
 }
 .sf-queue-stat-caption {
   color: var(--sf-muted);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.6;
 }
 .sf-queue-stat-needs-you {
@@ -2845,7 +2846,7 @@ textarea.sf-input {
   padding: 12px 20px;
   border-top: 1px solid var(--sf-chrome-border);
   color: var(--sf-muted);
-  font-size: 10px;
+  font-size: 11px;
 }
 .sf-lane-stopped {
   grid-column: 1 / -1;
@@ -3083,6 +3084,46 @@ textarea.sf-input {
    (phoneLayout.css.test.ts checks); where a base rule is more specific its prefix is copied, never !important.
    Desktop values above are unchanged. */
 @media (max-width: 639px) {
+  .sf-card .sf-button,
+  .sf-card .sf-card-cta {
+    min-height: var(--sf-input-height);
+  }
+
+  .sf-topbar {
+    gap: 8px;
+  }
+
+  .sf-topbar-end {
+    gap: 8px;
+  }
+
+  .sf-theme-switch {
+    gap: 0;
+    padding: 1px;
+  }
+
+  .sf-stepper {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .sf-segment {
+    min-height: 44px;
+    height: 44px;
+  }
+
+  .sf-theme-switch .sf-segment {
+    min-height: 44px;
+    height: 44px;
+    width: 44px;
+  }
+
+  .sf-chip-remove {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
   .sf-board-filter-fields {
     display: none;
     order: 3;
@@ -3139,13 +3180,13 @@ textarea.sf-input {
     font-size: 11px;
   }
   .sf-eyebrow {
-    font-size: 9px;
+    font-size: 11px;
     margin-bottom: 8px;
   }
   .sf-page-heading > .sf-button {
     padding: 10px 12px;
     flex: none;
-    font-size: 10px;
+    font-size: 11px;
   }
   .sf-queue-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3196,7 +3237,7 @@ textarea.sf-input {
     flex-direction: column;
     gap: 4px;
     color: var(--sf-muted);
-    font-size: 10px;
+    font-size: 11px;
   }
   .sf-view-link[aria-current="page"] {
     background: var(--sf-accent-soft);

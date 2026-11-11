@@ -87,6 +87,8 @@ describe("Breakwater component system", () => {
     expect(t(":root")["--sf-display"]).toContain("Instrument Serif");
     expect(t(":root")["--sf-mono"]).toContain("DM Mono");
     expect(t(":root")["--sf-radius"]).toBe("0px");
+    expect(t(":root")["--sf-label-tracking"]).toBe("2.2px");
+    expect(t(".sf-label")["font-weight"]).toBe("500");
     expect(t(":root")["--sf-accent"]).toBe("#4693c3");
     expect(t(':root[data-theme="light"]')["--sf-bg"]).toBe("#eef2f3");
   });
@@ -124,5 +126,17 @@ describe("Breakwater component system", () => {
     expect(t(".sf-feedback").background).toBe("var(--sf-accent-soft)");
     expect(t(".sf-feedback").color).toBe("var(--sf-accent-text)");
     expect(t(".sf-feedback").display).not.toBe("none");
+  });
+});
+
+describe("shared-control style isolation", () => {
+  const css = read("board.css");
+  it("does not leak tab geometry through the shared transition rule", () => {
+    const group = css.match(/\.sf-button,\s*\.sf-select,[^{]+\{([^}]+)\}/)?.[1];
+    expect(group).toBeDefined();
+    expect(group).not.toMatch(/\b(padding|min-height|letter-spacing)\s*:/);
+  });
+  it("contains absolutely positioned accessibility text inside scrollable tables", () => {
+    expect(tokens(css, ".sf-table-wrap").position).toBe("relative");
   });
 });
