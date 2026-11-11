@@ -160,7 +160,8 @@ describe("TaskCard", () => {
 
   it("shows_the_first_line_of_a_blocked_question", () => {
     render(<TaskCard task={task({ question: "Which base branch?\nThe repo has dev and stg.", status: "blocked" })} onNavigate={vi.fn()} />);
-    expect(screen.getByText("Which base branch?")).toHaveClass("sf-card-question");
+    expect(screen.getByText("Which base branch?")).toHaveClass("sf-card-question-text");
+    expect(screen.getByText("Which base branch?").parentElement).toHaveClass("sf-card-question");
     expect(screen.queryByText(/The repo has dev and stg/)).not.toBeInTheDocument();
   });
 
@@ -168,6 +169,9 @@ describe("TaskCard", () => {
     render(<TaskCard task={task({ question: "Which base?\nA. dev: x (recommended)\nB. stg: y\nC. main: z", status: "blocked" })} onNavigate={vi.fn()} />);
     expect(document.querySelector(".sf-card-question")).toHaveTextContent(/^Which base\? · 3 options$/);
     expect(document.querySelector(".sf-card-question-options")?.textContent).toBe(" · 3 options");
+    const line = document.querySelector(".sf-card-question");
+    expect([...(line?.children ?? [])].map((c) => c.className)).toEqual(["sf-card-question-text", "sf-card-question-options"]);
+    expect(line?.querySelector(".sf-card-question-text")?.textContent).toBe("Which base?");
   });
 
   it("card_question_without_options_has_no_suffix", () => {

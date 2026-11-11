@@ -1049,15 +1049,28 @@ textarea.sf-input {
   text-decoration: underline;
 }
 
+/* The first line ellipsizes in its own span, so the " · N options" suffix always stays visible. */
 .sf-card-question {
   border: 1px dashed var(--sf-border);
   border-radius: var(--sf-radius);
+  display: flex;
   font-size: var(--sf-size-small);
   margin: 0;
   overflow: hidden;
   padding: 6px 8px;
+  white-space: nowrap;
+}
+
+.sf-card-question-text {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sf-card-question-options {
+  flex: none;
+  white-space: pre;
 }
 
 .sf-card-waiting {

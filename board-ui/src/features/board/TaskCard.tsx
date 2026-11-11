@@ -83,7 +83,7 @@ export function TaskCard({ onNavigate, showFactory = false, task, view = "lanes"
       ) : null}
       {firstLine ? (
         <p className="sf-card-question">
-          {firstLine}
+          <span className="sf-card-question-text">{firstLine}</span>
           {options >= 2 ? <span className="sf-card-question-options"> · {options} options</span> : null}
         </p>
       ) : null}
