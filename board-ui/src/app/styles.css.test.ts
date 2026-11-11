@@ -1,10 +1,10 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-// styles.css keeps only the bare resets and the rules Alert still uses, all on
-// --sf-* tokens (T-23). The landing page (T-22) is styled in board.css.
+// styles.css keeps only the bare resets (T-23). Every class rule lives in board.css,
+// including the landing page (T-22), which replaced the last user of Alert.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const srcRoot = join(here, "..");
@@ -27,8 +27,6 @@ function classNames(): Set<string> {
   return names;
 }
 
-const TONES = ["alert-warn", "alert-error", "alert-info"];
-
 describe("styles_css_cleanup", () => {
   it("styles_css_has_no_scaffold_tokens_font_or_raw_colours", () => {
     for (const banned of ["--primary", "hsl(var(", ":root:not(", "#c0c9d1", "rgba(15, 23, 42", "@keyframes blocks-"]) {
@@ -40,18 +38,15 @@ describe("styles_css_cleanup", () => {
   });
 
   it("every_class_rule_in_styles_css_is_used_by_a_tsx_file", () => {
-    expect(readFileSync(join(srcRoot, "shared/ui/Alert.tsx"), "utf8")).toContain("`alert alert-${tone}`");
     const sources = sourceFiles(/\.tsx$/).map((f) => readFileSync(f, "utf8"));
     const unused = [...classNames()]
-      .filter((name) => !TONES.includes(name))
       .filter((name) => !sources.some((s) => new RegExp(`(?<![\\w-])${name}(?![\\w-])`).test(s)));
     expect(unused).toEqual([]);
   });
 
-  it("only_alert_classes_remain", () => {
-    expect([...classNames()].sort()).toEqual(
-      ["alert", ...TONES].sort()
-    );
+  it("no_class_rules_remain_and_the_unused_alert_is_gone", () => {
+    expect([...classNames()]).toEqual([]);
+    expect(existsSync(join(srcRoot, "shared/ui/Alert.tsx"))).toBe(false);
   });
 
   it("board_ui_has_no_inter_primary_token_or_hsl_var", () => {
