@@ -344,6 +344,15 @@ body {
   opacity: 0.6;
 }
 
+/* The shared small outline button: neutral, label type, for in-row actions. */
+.sf-button-small {
+  border-color: var(--sf-border);
+  color: var(--sf-text);
+  display: inline-block;
+  padding: 2px 8px;
+  text-decoration: none;
+}
+
 .sf-main {
   flex: 1;
   padding: 16px;
@@ -891,7 +900,7 @@ textarea.sf-input {
   border-radius: var(--sf-radius);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
   padding: 8px;
   position: relative;
 }
@@ -1027,9 +1036,9 @@ textarea.sf-input {
   border: 1px dashed var(--sf-border);
   border-radius: var(--sf-radius);
   font-size: var(--sf-size-small);
-  margin: 2px 0 0;
+  margin: 0;
   overflow: hidden;
-  padding: 2px 6px;
+  padding: 6px 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1037,29 +1046,37 @@ textarea.sf-input {
 .sf-card-waiting {
   color: var(--sf-muted);
   font-family: var(--sf-mono);
-  font-size: var(--sf-size-small);
-  margin: 2px 0 0;
-}
-
-.sf-card-cta {
-  align-self: flex-start;
-  background: transparent;
-  border: 1px solid var(--sf-accent);
-  border-radius: var(--sf-radius);
-  color: var(--sf-accent-text);
-  font-family: var(--sf-mono);
   font-size: var(--sf-label-size);
   letter-spacing: var(--sf-label-tracking);
   line-height: var(--sf-label-line);
-  margin-top: 4px;
-  padding: 2px 8px;
+  margin: 0;
+}
+
+.sf-card-waiting a {
+  color: inherit;
   position: relative;
-  text-decoration: none;
   z-index: 1;
 }
 
-.sf-card-cta:hover {
-  text-decoration: underline;
+/* The CTA is a shared small button; this only lifts it above the stretched title link. */
+.sf-card-cta {
+  align-self: flex-start;
+  position: relative;
+  z-index: 1;
+}
+
+.sf-card-ready {
+  align-self: flex-start;
+  position: relative;
+  z-index: 1;
+}
+
+.sf-card-error {
+  color: var(--sf-removed);
+  font-size: var(--sf-size-small);
+  margin: 0;
+  position: relative;
+  z-index: 1;
 }
 
 /* Task */

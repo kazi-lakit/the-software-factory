@@ -264,6 +264,15 @@ describe("board_css_buttons", () => {
     expect(tokens(css, ".sf-button:hover")).toEqual({});
   });
 
+  it("small_button_is_a_neutral_outline_with_2_8_padding", () => {
+    const css = read("board.css");
+    expect(tokens(css, ".sf-button-small")).toMatchObject({
+      padding: "2px 8px", "border-color": "var(--sf-border)", color: "var(--sf-text)", "text-decoration": "none"
+    });
+    expect(css.indexOf(".sf-button-small {")).toBeGreaterThan(css.indexOf(".sf-button {"));
+    expect(css.indexOf(".sf-button-small {")).toBeLessThan(css.indexOf(".sf-button-primary {"));
+  });
+
   it("primary_is_the_only_filled_variant", () => {
     const css = read("board.css");
     const p = tokens(css, ".sf-button-primary");
@@ -620,23 +629,39 @@ describe("board_css_task_card", () => {
 
   it("question_is_one_line_with_a_dashed_outline", () => {
     expect(t(".sf-card-question")).toMatchObject({
-      border: "1px dashed var(--sf-border)", "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis"
+      border: "1px dashed var(--sf-border)", "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis", padding: "6px 8px"
     });
   });
 
-  it("cta_is_a_small_outlined_accent_link_above_the_stretched_link", () => {
-    expect(t(".sf-card-cta")).toMatchObject({
-      ...labelType,
-      background: "transparent",
-      border: "1px solid var(--sf-accent)",
-      color: "var(--sf-accent-text)",
-      position: "relative",
-      "z-index": "1",
-      "align-self": "flex-start",
-      padding: "2px 8px"
-    });
-    expect(t(".sf-card-cta").outline).toBeUndefined();
-    expect(t(".sf-card-cta:hover")["text-decoration"]).toBe("underline");
+  it("card_rows_are_6px_apart_with_no_extra_top_margins", () => {
+    expect(t(".sf-card").gap).toBe("6px");
+    for (const selector of [".sf-card-question", ".sf-card-waiting", ".sf-card-cta"]) {
+      expect([undefined, "0"], selector).toContain(t(selector).margin);
+      expect([undefined, "0"], selector).toContain(t(selector)["margin-top"]);
+    }
+  });
+
+  it("meta_and_question_are_size_small", () => {
+    expect(t(".sf-card-meta")["font-size"]).toBe("var(--sf-size-small)");
+    expect(t(".sf-card-question")["font-size"]).toBe("var(--sf-size-small)");
+  });
+
+  it("waiting_line_is_muted_label_type", () => {
+    expect(t(".sf-card-waiting")).toMatchObject({ ...labelType, "line-height": "var(--sf-label-line)", color: "var(--sf-muted)" });
+    expect(t(".sf-card-waiting a")).toMatchObject({ position: "relative", "z-index": "1" });
+  });
+
+  it("mark_ready_and_error_sit_above_the_stretched_link", () => {
+    expect(t(".sf-card-ready")).toMatchObject({ "align-self": "flex-start", position: "relative", "z-index": "1" });
+    expect(t(".sf-card-error")).toMatchObject({ margin: "0", position: "relative", "z-index": "1", "font-size": "var(--sf-size-small)" });
+  });
+
+  it("cta_is_layout_only_above_the_stretched_link", () => {
+    const cta = t(".sf-card-cta");
+    expect(cta).toMatchObject({ position: "relative", "z-index": "1", "align-self": "flex-start" });
+    for (const key of ["border", "border-color", "color", "padding", "margin-top", "margin"]) expect(cta[key], key).toBeUndefined();
+    expect(JSON.stringify(cta)).not.toContain("--sf-accent");
+    expect(t(".sf-card-cta:hover")).toEqual({});
   });
 
   it("waiting_card_border_is_accent_on_all_sides", () => {
