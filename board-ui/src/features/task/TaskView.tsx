@@ -147,10 +147,10 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
         </div>
         <aside className="sf-task-side" aria-label="Task side panels">
           <Details task={task} onNavigate={onNavigate} />
-          <Section title="Description" className="sf-panel sf-side-panel">
+          <Section title="Description" className="sf-panel">
             {task.description.trim() ? <pre className="sf-doc-body">{task.description}</pre> : <p className="sf-empty">No description.</p>}
           </Section>
-          <Section title="Runs" className="sf-panel sf-side-panel"><RunsList runs={runs} /></Section>
+          <Section title="Runs" className="sf-panel"><RunsList runs={runs} /></Section>
         </aside>
       </div>
     </div>
@@ -169,7 +169,7 @@ function Details({ onNavigate, task }: { onNavigate: (path: string) => void; tas
   const limit = stored ? resolveSettings(entry?.factory ?? DEFAULT_SETTINGS, entry?.repos[task.repo]).maxCostPerTaskUsd : undefined;
   const headingId = useId();
   return (
-    <section className="sf-panel sf-details" aria-labelledby={headingId}>
+    <section className="sf-details" aria-labelledby={headingId}>
       <h3 id={headingId}>Details</h3>
       <dl>
         <div><dt>Repo</dt><dd>{task.repo}</dd></div>

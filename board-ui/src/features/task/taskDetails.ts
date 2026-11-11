@@ -1,9 +1,9 @@
 import type { Run } from "@factory/core";
 import { formatCost } from "../board/status";
 
-/** "N returns", or "N of M returns" when the limit is known. */
+/** "N returns" ("1 return"), or "N of M returns" when the limit is known. */
 export const attemptsLabel = (returns: number, limit?: number): string =>
-  limit === undefined ? `${returns} returns` : `${returns} of ${limit} returns`;
+  limit === undefined ? `${returns} ${returns === 1 ? "return" : "returns"}` : `${returns} of ${limit} returns`;
 
 /** "$x", or "$x of $limit" when the limit is known. */
 export const costLabel = (costUsd: number, limit?: number): string =>

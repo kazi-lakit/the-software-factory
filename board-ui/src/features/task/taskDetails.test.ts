@@ -24,6 +24,11 @@ describe("taskDetails", () => {
     expect(attemptsLabel(0)).toBe("0 returns");
   });
 
+  it("attempts_label_without_a_limit_is_singular_for_one", () => {
+    expect(attemptsLabel(1)).toBe("1 return");
+    expect(attemptsLabel(1, 3)).toBe("1 of 3 returns");
+  });
+
   it("attempts_label_with_a_limit_reads_n_of_m_returns", () => {
     expect(attemptsLabel(2, 3)).toBe("2 of 3 returns");
   });
