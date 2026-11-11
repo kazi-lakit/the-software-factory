@@ -188,6 +188,14 @@ describe("TaskActions styling", () => {
     for (const filled of ["sf-button-accent", "sf-button-primary"]) expect(cancel).not.toHaveClass(filled);
   });
 
+  it("edit_is_the_outlined_default_button", async () => {
+    renderActions(await seedTask());
+    const edit = screen.getByRole("button", { name: "Edit" });
+    expect(edit).toHaveClass("sf-button");
+    for (const filled of ["sf-button-primary", "sf-button-accent", "sf-button-danger"]) expect(edit).not.toHaveClass(filled);
+    expect(screen.getByRole("button", { name: "Mark ready" })).toHaveClass("sf-button-primary");
+  });
+
   it("confirm_dialog_danger_button_unchanged", async () => {
     renderActions(await seedTask());
     fireEvent.click(screen.getByRole("button", { name: "Cancel task" }));
