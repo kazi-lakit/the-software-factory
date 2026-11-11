@@ -181,11 +181,11 @@ describe("TaskActions edit with several factories", () => {
 });
 
 describe("TaskActions styling", () => {
-  it("cancel_task_is_outlined_and_not_danger", async () => {
+  it("cancel_task_uses_the_danger_outline", async () => {
     renderActions(await seedTask());
     const cancel = screen.getByRole("button", { name: "Cancel task" });
-    expect(cancel).toHaveClass("sf-button");
-    for (const filled of ["sf-button-accent", "sf-button-primary", "sf-button-danger"]) expect(cancel).not.toHaveClass(filled);
+    expect(cancel).toHaveClass("sf-button", "sf-button-danger");
+    for (const filled of ["sf-button-accent", "sf-button-primary"]) expect(cancel).not.toHaveClass(filled);
   });
 
   it("confirm_dialog_danger_button_unchanged", async () => {

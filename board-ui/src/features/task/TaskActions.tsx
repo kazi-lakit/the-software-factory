@@ -87,7 +87,7 @@ export function TaskActions({ onCancelled, onReload, task }: ActionsProps) {
           </button>
         ) : null}
         {canCancel ? (
-          <button ref={cancelButton} type="button" className="sf-button" disabled={busy} onClick={() => setConfirming(true)}>
+          <button ref={cancelButton} type="button" className="sf-button sf-button-danger" disabled={busy} onClick={() => setConfirming(true)}>
             Cancel task
           </button>
         ) : null}
