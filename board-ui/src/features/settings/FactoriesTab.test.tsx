@@ -9,7 +9,7 @@ vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/
 
 async function openFactoriesSection() {
   const view = renderWithClient(<SettingsView />);
-  await screen.findByRole("button", { name: "Add factory" });
+  await screen.findByRole("link", { name: "Add factory" });
   return view;
 }
 
@@ -63,79 +63,15 @@ describe("Factories tab", () => {
     expect(delta.querySelectorAll(".sf-chip")).toHaveLength(1);
   });
 
-  it("add_factory_opens_the_add_form_inside_the_factories_section", async () => {
-    await openFactoriesSection();
-    const section = screen.getByRole("region", { name: "Factories" });
-    fireEvent.click(within(section).getByRole("button", { name: "Add factory" }));
-    expect(await within(section).findByRole("form", { name: "Add factory" })).toBeInTheDocument();
-  });
-
-  it("creates_a_factory_whose_protected_branches_always_include_main", async () => {
-    await openFactoriesSection();
-    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
-    const form = await screen.findByRole("form", { name: "Add factory" });
-    changeField("Factory id", "echo");
-    changeField("Name", "Echo");
-    fireEvent.click(within(form).getByRole("button", { name: "Remove dev" }));
-    fireEvent.click(within(form).getByRole("button", { name: "Remove stg" }));
-    changeField("Branch to protect", "rel");
-    fireEvent.click(within(form).getByRole("button", { name: "Add branch" }));
-    fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
-    await screen.findByText("Created factory echo.");
-    const saved = (await owner().listFactoryDefs()).find((d) => d.factoryId === "echo");
-    // The GitHub login was left empty: the core default is what is saved.
-    expect(saved).toMatchObject({ active: true, ghUser: "kazi-lakit", name: "Echo", protectedBranches: ["rel", "main"] });
-    expect((await owner().listEvents("-")).map((e) => e.field)).toContain("def.protectedBranches");
-    expect(await screen.findByRole("region", { name: "Factory echo" })).toBeInTheDocument();
-  });
-
-  it("labels_the_github_login_with_its_hint_and_saves_the_login_given", async () => {
-    await openFactoriesSection();
-    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
-    const form = await screen.findByRole("form", { name: "Add factory" });
-    expect(within(form).getByLabelText("GitHub login")).toHaveAccessibleDescription(
-      "The gh CLI account the factory opens PRs with (gh auth login on this Mac). Empty uses kazi-lakit."
-    );
-    changeField("Factory id", "echo");
-    changeField("Name", "Echo");
-    changeField("GitHub login", " octocat ");
-    fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
-    await screen.findByText("Created factory echo.");
-    expect((await owner().listFactoryDefs()).find((d) => d.factoryId === "echo")).toMatchObject({ ghUser: "octocat" });
-  });
-
-  it("refuses_a_github_login_that_is_not_one_and_saves_nothing", async () => {
-    const save = vi.spyOn(owner(), "saveFactoryDef");
-    await openFactoriesSection();
-    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
-    const form = await screen.findByRole("form", { name: "Add factory" });
-    changeField("Factory id", "echo");
-    changeField("Name", "Echo");
-    changeField("GitHub login", "keychain:echo");
-    fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
-    expect(await within(form).findByRole("alert")).toHaveTextContent("ghUser must be a GitHub login");
-    expect(save).not.toHaveBeenCalled();
-  });
-
-  it("offers_no_way_to_remove_main", async () => {
-    await openFactoriesSection();
-    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
-    const form = await screen.findByRole("form", { name: "Add factory" });
-    expect(within(form).getByText("main")).toBeInTheDocument();
-    expect(within(form).queryByRole("button", { name: "Remove main" })).not.toBeInTheDocument();
-    expect(within(form).getByRole("button", { name: "Remove dev" })).toBeInTheDocument();
-  });
-
-  it("shows_the_validation_message_for_an_invalid_id_and_saves_nothing", async () => {
-    const save = vi.spyOn(owner(), "saveFactoryDef");
-    await openFactoriesSection();
-    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
-    const form = await screen.findByRole("form", { name: "Add factory" });
-    changeField("Factory id", "Bad_ID");
-    changeField("Name", "Bad");
-    fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
-    expect(await within(form).findByRole("alert")).toHaveTextContent("factoryId must match");
-    expect(save).not.toHaveBeenCalled();
+  it("add_factory_links_to_the_new_factory_page_and_no_inline_form", async () => {
+    const onNavigate = vi.fn();
+    renderWithClient(<SettingsView onNavigate={onNavigate} />);
+    const section = await screen.findByRole("region", { name: "Factories" });
+    const link = await within(section).findByRole("link", { name: "Add factory" });
+    expect(link).toHaveAttribute("href", "/settings/factories/new");
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledWith("/settings/factories/new");
+    expect(screen.queryByRole("form", { name: "Add factory" })).not.toBeInTheDocument();
   });
 
   it("keeps_the_id_read_only_once_the_factory_exists", async () => {
@@ -152,8 +88,8 @@ describe("Factories tab", () => {
 
   it("shows_one_model_picker_per_stage_with_same_as_session_by_default", async () => {
     await openFactoriesSection();
-    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
-    const form = await screen.findByRole("form", { name: "Add factory" });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit factory delta" }));
+    const form = await screen.findByRole("form", { name: "Edit factory delta" });
     for (const label of ["Spec model", "Plan model", "Build model", "Verify model", "Review model"]) {
       const select = within(form).getByRole("combobox", { name: label });
       expect(within(form).getByLabelText(label)).toBe(select);
@@ -164,37 +100,23 @@ describe("Factories tab", () => {
 
   it("saves_a_chosen_model_under_its_stage_and_leaves_same_as_session_out", async () => {
     await openFactoriesSection();
-    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
-    const form = await screen.findByRole("form", { name: "Add factory" });
-    changeField("Factory id", "echo");
-    changeField("Name", "Echo");
+    fireEvent.click(await screen.findByRole("button", { name: "Edit factory delta" }));
+    const form = await screen.findByRole("form", { name: "Edit factory delta" });
     changeField("Build model", "sonnet");
     changeField("Review model", "fable");
-    fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
-    await screen.findByText("Created factory echo.");
-    const saved = (await owner().listFactoryDefs()).find((d) => d.factoryId === "echo");
+    fireEvent.click(within(form).getByRole("button", { name: "Save factory" }));
+    await screen.findByText("Saved factory delta.");
+    const saved = (await owner().listFactoryDefs()).find((d) => d.factoryId === "delta");
     expect(saved?.agentModels).toEqual({ build: "sonnet", review: "fable" });
 
-    fireEvent.click(await screen.findByRole("button", { name: "Edit factory echo" }));
-    const edit = await screen.findByRole("form", { name: "Edit factory echo" });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit factory delta" }));
+    const edit = await screen.findByRole("form", { name: "Edit factory delta" });
     expect(within(edit).getByLabelText("Build model")).toHaveValue("sonnet");
     changeField("Build model", "");
     fireEvent.click(within(edit).getByRole("button", { name: "Save factory" }));
-    await screen.findByText("Saved factory echo.");
-    const edited = (await owner().listFactoryDefs()).find((d) => d.factoryId === "echo");
+    await screen.findByText("Saved factory delta.");
+    const edited = (await owner().listFactoryDefs()).find((d) => d.factoryId === "delta");
     expect(edited?.agentModels).toEqual({ review: "fable" });
-  });
-
-  it("a_factory_with_no_stage_entries_saves_no_agentModels", async () => {
-    await openFactoriesSection();
-    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
-    const form = await screen.findByRole("form", { name: "Add factory" });
-    changeField("Factory id", "echo");
-    changeField("Name", "Echo");
-    fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
-    await screen.findByText("Created factory echo.");
-    const saved = (await owner().listFactoryDefs()).find((d) => d.factoryId === "echo")!;
-    expect("agentModels" in saved).toBe(false);
   });
 
   it("shows_the_changed_message_with_reload_on_a_conflict_and_reloads_the_latest", async () => {
@@ -293,18 +215,6 @@ describe("Factories tab", () => {
     expect(screen.queryByText(/Skipped definitions/)).not.toBeInTheDocument();
   });
 
-  it("says_an_added_factory_id_already_exists_instead_of_a_reload_conflict_and_keeps_the_draft", async () => {
-    await openFactoriesSection();
-    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
-    const form = await screen.findByRole("form", { name: "Add factory" });
-    changeField("Factory id", "delta");
-    changeField("Name", "Again");
-    fireEvent.click(within(form).getByRole("button", { name: "Create factory" }));
-    expect(await within(form).findByRole("alert")).toHaveTextContent("Factory delta already exists. Pick another id.");
-    expect(within(form).queryByRole("button", { name: "Reload" })).not.toBeInTheDocument();
-    expect(screen.getByLabelText("Name")).toHaveValue("Again");
-  });
-
   it("says_an_added_repo_id_already_exists_and_keeps_the_draft", async () => {
     await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Add repo to delta" }));
@@ -322,8 +232,8 @@ describe("Factories tab", () => {
 describe("Factories tab restyle", () => {
   it("form_labels_and_inputs_follow_the_design", async () => {
     await openFactoriesSection();
-    fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
-    const form = await screen.findByRole("form", { name: "Add factory" });
+    fireEvent.click(await screen.findByRole("button", { name: "Edit factory delta" }));
+    const form = await screen.findByRole("form", { name: "Edit factory delta" });
     const labels = Array.from(form.querySelectorAll("label.sf-field-label"));
     expect(labels.length).toBeGreaterThan(0);
     for (const label of labels) {
@@ -331,7 +241,7 @@ describe("Factories tab restyle", () => {
       expect(control, label.textContent ?? "").not.toBeNull();
       if (control?.tagName === "INPUT" || control?.tagName === "TEXTAREA") expect(control, label.textContent ?? "").toHaveClass("sf-input");
     }
-    expect(within(form).getByRole("button", { name: "Create factory" })).toHaveClass("sf-button-primary");
+    expect(within(form).getByRole("button", { name: "Save factory" })).toHaveClass("sf-button-primary");
     expect(within(form).getByRole("button", { name: "Cancel" })).not.toHaveClass("sf-button-primary");
   });
 

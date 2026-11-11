@@ -335,7 +335,7 @@ describe("factory picker and scope", () => {
     for (const name of ["Factory", "Gates and limits", "Repos"]) {
       expect(within(region(name)).getByText("Pick a factory to see its settings.")).toBeInTheDocument();
     }
-    expect(within(region("Factories")).getByRole("button", { name: "Add factory" })).toBeInTheDocument();
+    expect(within(region("Factories")).getByRole("link", { name: "Add factory" })).toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Gates and limits" })).not.toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Factory", { selector: "select" }), { target: { value: "blocks" } });
     expect(await screen.findByRole("form", { name: "Gates and limits" })).toBeInTheDocument();

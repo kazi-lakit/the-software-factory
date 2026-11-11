@@ -194,7 +194,7 @@ function SettingsSection({ children, section: { id, title } }: { children: React
  * One scrolling page: the selected factory's pause switch, gates and limits and repos, then the factory and repo
  * definitions. A sticky nav links to each section. Each scope saves on its own.
  */
-export function SettingsView() {
+export function SettingsView({ onNavigate }: { onNavigate?: (path: string) => void } = {}) {
   const settings = useSettings();
   const factories = useFactories();
   const [picked, setPicked] = useSelectedFactory();
@@ -277,7 +277,7 @@ export function SettingsView() {
             ))}
           </SettingsSection>
           <SettingsSection section={FACTORIES_SECTION}>
-            <FactoriesSection />
+            <FactoriesSection onNavigate={onNavigate} />
           </SettingsSection>
         </div>
       </div>
