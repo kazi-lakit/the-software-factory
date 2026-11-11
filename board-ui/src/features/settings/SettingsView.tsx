@@ -194,13 +194,21 @@ function SettingsSection({ children, section: { id, title } }: { children: React
  * One scrolling page: the selected factory's pause switch, gates and limits and repos, then the factory and repo
  * definitions. A sticky nav links to each section. Each scope saves on its own.
  */
-export function SettingsView() {
+export function SettingsView({ onNavigate }: { onNavigate?: (path: string) => void } = {}) {
   const settings = useSettings();
   const factories = useFactories();
   const [picked, setPicked] = useSelectedFactory();
   const [notice, setNotice] = useState("");
   const [currentSection, setCurrentSection] = useCurrentSection(SECTION_IDS);
   const noteId = useId();
+
+  // Arriving with #<section> (the New factory breadcrumb): an in-app navigation does not jump to it, so scroll there.
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!SECTION_IDS.includes(id)) return;
+    document.getElementById(id)?.scrollIntoView?.();
+    setCurrentSection(id);
+  }, [setCurrentSection]);
 
   // With one factory there is nothing to pick: its settings show whatever the stored pick says.
   const only = factories.defs.length === 1 ? factories.defs[0] : undefined;
@@ -277,7 +285,7 @@ export function SettingsView() {
             ))}
           </SettingsSection>
           <SettingsSection section={FACTORIES_SECTION}>
-            <FactoriesSection />
+            <FactoriesSection onNavigate={onNavigate} />
           </SettingsSection>
         </div>
       </div>

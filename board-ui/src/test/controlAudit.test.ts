@@ -15,9 +15,10 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
  *  -1 / -1 file: FormField deleted (T-23).
  *  +1: the Board's Search tasks by title or id field (T-24).
  *  -1 / +1 file: DependsOnPicker dropdown, New task page (T-26).
- *  -2: History drops Mode, Kind, From and To and adds the search and When (T-28). */
-const EXPECTED_CONTROLS = 42;
-const EXPECTED_FILES = 13;
+ *  -2: History drops Mode, Kind, From and To and adds the search and When (T-28).
+ *  +4 / +1 file: New factory page's text field, Factory id, Active switch and Add a branch (T-32). */
+const EXPECTED_CONTROLS = 46;
+const EXPECTED_FILES = 14;
 
 type Control = { file: string; tag: string; text: string };
 

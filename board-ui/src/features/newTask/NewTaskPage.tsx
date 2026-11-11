@@ -162,7 +162,7 @@ function WhatHappensNext({ factoryId, onNavigate }: { factoryId: string | undefi
     gates = GATE_LABELS.filter(([key]) => on[key]).map(([, label]) => label).join(", ") || "none";
   }
   return (
-    <aside className="sf-panel sf-new-task-aside" aria-labelledby={headingId}>
+    <aside className="sf-panel sf-side-summary" aria-labelledby={headingId}>
       <h2 id={headingId}>What happens next</h2>
       <ol>
         {STEPS.map((step) => <li key={step}>{step}</li>)}

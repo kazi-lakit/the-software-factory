@@ -1288,25 +1288,29 @@ textarea.sf-input {
 }
 
 /* New task page */
-/* The form left, What happens next right; one column below 1100px (see the media block), the aside after the form. */
-.sf-new-task-body {
+/* The form left, an aside right (What happens next; the New factory Summary); one column below 1100px (see the media
+   block), the aside after the form. */
+.sf-new-task-body,
+.sf-new-factory-body {
   align-items: start;
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
 }
 
-.sf-new-task-body > * {
+.sf-new-task-body > *,
+.sf-new-factory-body > * {
   min-width: 0;
 }
 
-.sf-new-task-aside {
+/* A side panel beside a page's form: New task's What happens next, New factory's Summary. */
+.sf-side-summary {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
 
-.sf-new-task-aside h2 {
+.sf-side-summary h2 {
   color: var(--sf-muted);
   font-family: var(--sf-mono);
   font-size: var(--sf-label-size);
@@ -1316,7 +1320,7 @@ textarea.sf-input {
   margin: 0;
 }
 
-.sf-new-task-aside ol {
+.sf-side-summary ol {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1324,10 +1328,28 @@ textarea.sf-input {
   padding-left: 20px;
 }
 
-.sf-new-task-aside .sf-hint {
+.sf-side-summary .sf-hint {
   margin: 0;
 }
 /* End of New task page */
+
+/* New factory page */
+/* Its body and Summary share the New task page's layout and side-summary rules above. */
+.sf-new-factory-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sf-new-factory-section h2 {
+  font-size: var(--sf-label-size);
+  margin: 0;
+}
+
+.sf-new-factory-section .sf-hint {
+  margin: 0;
+}
+/* End of New factory page */
 
 .sf-doc {
   display: flex;
@@ -2083,7 +2105,8 @@ textarea.sf-input {
     gap: 4px 16px;
   }
 
-  .sf-new-task-body {
+  .sf-new-task-body,
+  .sf-new-factory-body {
     grid-template-columns: minmax(0, 1fr);
   }
 }

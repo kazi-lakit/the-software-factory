@@ -19,7 +19,7 @@ const OUTCOME_TEXT = { already: "already there", created: "created", kept: "kept
  * Imports the JSON `factory migrate --export` wrote: pick or paste it, review what it creates, confirm. The owner's
  * session does the writes (repos, then the definition, then the legacy settings move). Repeating it is safe.
  */
-export function ImportFactory({ onClose }: { onClose: () => void }) {
+export function ImportFactory({ heading = true, onClose }: { heading?: boolean; onClose: () => void }) {
   const ids = useId();
   const client = useQueryClient();
   const [text, setText] = useState("");
@@ -105,7 +105,7 @@ export function ImportFactory({ onClose }: { onClose: () => void }) {
 
   return (
     <section className="sf-panel sf-form sf-import" aria-label="Import factory">
-      <h3>Import factory</h3>
+      {heading ? <h3>Import factory</h3> : null}
       <p className="sf-hint">Use the file written by <span className="sf-mono">factory migrate --export</span>. It holds no secrets.</p>
       <div className="sf-field">
         <label className="sf-field-label" htmlFor={`${ids}-file`}>Import file</label>

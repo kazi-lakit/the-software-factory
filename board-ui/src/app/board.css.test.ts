@@ -1331,12 +1331,57 @@ describe("board_css_new_task_page", () => {
     const end = css.indexOf("@media (max-width: 639px)");
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
-    expect(css.slice(start, end)).toMatch(/\.sf-new-task-body\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+    expect(css.slice(start, end)).toMatch(/\.sf-new-task-body\s*[,{][^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
   });
 
   it("new_task_rules_have_no_shadow_or_raw_colour", () => {
     const start = css.indexOf("/* New task page */");
     const end = css.indexOf("/* End of New task page */");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = css.slice(start, end);
+    expect(block).not.toMatch(/box-shadow/);
+    expect(block).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(block).not.toMatch(/rgba?\(/);
+  });
+});
+
+describe("new_factory_page", () => {
+  const css = read("board.css");
+
+  it("new_factory_body_is_two_columns", () => {
+    expect(tokens(css, ".sf-new-factory-body")).toMatchObject({
+      "align-items": "start",
+      display: "grid",
+      gap: "16px",
+      "grid-template-columns": "minmax(0, 2fr) minmax(0, 1fr)"
+    });
+    expect(tokens(css, ".sf-new-factory-body > *")["min-width"]).toBe("0");
+  });
+
+  it("shares_the_new_task_layout_rules_instead_of_copying_them", () => {
+    const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const lists = Array.from(clean.matchAll(/([^{}]+)\{/g), (m) => (m[1] ?? "").trim());
+    // The New factory body is only ever named alongside the New task body, never in a rule of its own.
+    const factoryBody = lists.filter((l) => /\.sf-new-factory-body(?![\w-])/.test(l));
+    expect(factoryBody.length).toBeGreaterThan(0);
+    for (const list of factoryBody) expect(list).toMatch(/\.sf-new-task-body(?![\w-])/);
+    // The Summary aside is styled by the generic side-summary rules, not by the New task page's aside class.
+    expect(lists.some((l) => /\.sf-new-task-aside(?![\w-])/.test(l))).toBe(false);
+    expect(tokens(css, ".sf-side-summary")).toMatchObject({ display: "flex", "flex-direction": "column", gap: "12px" });
+  });
+
+  it("new_factory_body_stacks_below_1100px", () => {
+    const start = css.indexOf("@media (max-width: 1099px)");
+    const end = css.indexOf("@media (max-width: 639px)");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(css.slice(start, end)).toMatch(/\.sf-new-factory-body\s*[,{][^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  });
+
+  it("new_factory_rules_have_no_shadow_or_raw_colour", () => {
+    const start = css.indexOf("/* New factory page */");
+    const end = css.indexOf("/* End of New factory page */");
     expect(start).toBeGreaterThan(-1);
     expect(end).toBeGreaterThan(start);
     const block = css.slice(start, end);

@@ -7,9 +7,11 @@ import { FactoryForm } from "./FactoryForm";
 import { ImportFactory } from "./ImportFactory";
 import { RepoForm } from "./RepoForm";
 import { formatTime } from "../../lib/formatTime";
+import { followInApp } from "../board/TaskCard";
+
+const NEW_FACTORY_PATH = "/settings/factories/new";
 
 type Editing =
-  | { kind: "add-factory" }
   | { kind: "edit-factory"; factoryId: string }
   | { kind: "add-repo"; factoryId: string }
   | { kind: "edit-repo"; factoryId: string; repoId: string }
@@ -27,8 +29,8 @@ function GhStatus({ health }: { health: FactoryHealth | undefined }) {
   );
 }
 
-/** Factories and their repos: list, add, edit, import, and the definitions the Board cannot use. */
-export function FactoriesSection() {
+/** Factories and their repos: list, edit, import, and the definitions the Board cannot use. Add factory opens the New factory page. */
+export function FactoriesSection({ onNavigate }: { onNavigate?: (path: string) => void } = {}) {
   const client = useQueryClient();
   const factories = useFactories();
   const health = useFactoryHealth();
@@ -58,8 +60,6 @@ export function FactoriesSection() {
   const form = (() => {
     if (!editing) return null;
     switch (editing.kind) {
-      case "add-factory":
-        return <FactoryForm key="add" before={null} onCancel={close} onReload={async () => undefined} onSaved={(d) => void saved(`Created factory ${d.factoryId}.`)} />;
       case "edit-factory": {
         const entry = factories.byId.get(editing.factoryId);
         if (!entry) return null;
@@ -98,7 +98,15 @@ export function FactoriesSection() {
   return (
     <>
       <div className="sf-toolbar">
-        <button type="button" className="sf-button" onClick={() => setEditing({ kind: "add-factory" })}>Add factory</button>
+        <a
+          href={NEW_FACTORY_PATH}
+          className="sf-button"
+          onClick={(event) => {
+            if (onNavigate) followInApp(event, NEW_FACTORY_PATH, onNavigate);
+          }}
+        >
+          Add factory
+        </a>
         <button type="button" className="sf-button" onClick={() => setEditing({ kind: "import" })}>Import factory</button>
       </div>
       <p className="sf-muted" role="status">{notice}</p>
