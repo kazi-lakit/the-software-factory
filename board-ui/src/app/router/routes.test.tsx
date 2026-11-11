@@ -207,6 +207,48 @@ describe("the 404 page", () => {
   });
 });
 
+describe("the profile page", () => {
+  it("shows_every_profile_detail_in_the_shared_panel", async () => {
+    claims.mockResolvedValue({ sub: "me", iat: 1700000000, exp: 1700003600 });
+    me.mockResolvedValue({
+      data: { firstName: "Kazi", lastName: "Rahman", email: "kazi@example.test", itemId: "u-1", roles: ["factory-owner"], permissions: ["p.read"] }
+    } as never);
+    renderAt("/profile");
+    const h1 = await screen.findByRole("heading", { level: 1, name: "Profile" });
+    expect(h1).toHaveClass("sf-page-title");
+    const panel = h1.closest(".sf-screen-panel") as HTMLElement;
+    expect(panel).not.toBeNull();
+    const inPanel = within(panel);
+    expect(inPanel.getByText("Kazi Rahman")).toBeInTheDocument();
+    expect(inPanel.getByText("kazi@example.test")).toBeInTheDocument();
+    expect(inPanel.getByText("Authenticated")).toBeInTheDocument();
+    expect(inPanel.getByText("u-1")).toBeInTheDocument();
+    expect(inPanel.getByText("Tenant id (x-blocks-key)")).toBeInTheDocument();
+    expect(inPanel.getByText("Session expires")).toBeInTheDocument();
+    const role = inPanel.getByText("factory-owner");
+    expect(role.tagName).toBe("LI");
+    expect(role).toHaveClass("sf-chip");
+    expect(inPanel.getByText("Permissions (1)")).toBeInTheDocument();
+    expect(inPanel.getByText("p.read")).toBeInTheDocument();
+    expect(inPanel.getByText(/^Signed in /)).toHaveClass("sf-chip");
+    expect(inPanel.getByText(/^Expires /)).toHaveClass("sf-chip");
+    const summary = inPanel.getByText("View raw response");
+    expect(summary.tagName).toBe("SUMMARY");
+    expect(summary.closest("details")!.querySelector("pre")).toHaveClass("sf-json");
+    expect(inPanel.getByRole("button", { name: "Refresh profile" })).toHaveClass("sf-button");
+  });
+
+  it("shows_the_fallback_when_the_profile_cannot_be_read", async () => {
+    claims.mockResolvedValue({ sub: "me" });
+    me.mockResolvedValueOnce({ data: { roles: ["factory-owner"] } } as never).mockRejectedValue(new Error("blocks: unavailable"));
+    renderAt("/profile");
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh profile" }));
+    const panel = screen.getByRole("heading", { level: 1, name: "Profile" }).closest(".sf-screen-panel") as HTMLElement;
+    expect(await within(panel).findAllByText("Session unavailable")).not.toHaveLength(0);
+    expect(within(panel).getAllByText("Not available").length).toBeGreaterThan(0);
+  });
+});
+
 describe("the callback route", () => {
   it("is_never_behind_the_sign_in_guard", async () => {
     claims.mockResolvedValue(undefined);
