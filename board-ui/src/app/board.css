@@ -37,7 +37,7 @@
   --sf-font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --sf-mono: SFMono-Regular, ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --sf-size: 16px;
-  --sf-size-small: 12px;
+  --sf-size-small: 14px;
   --sf-label-size: 12px;
   --sf-label-line: 16px;
   --sf-label-tracking: 0.16em;
@@ -47,6 +47,8 @@
   --sf-actionbar-button: 48px;
   --sf-input-height: 44px;
   --sf-input-font: 16px;
+  /* The select chevron, a 10x6 SVG. A data URI cannot use currentColor, so each theme sets its muted stroke. */
+  --sf-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239db0af' stroke-width='1.5'/%3E%3C/svg%3E");
 }
 
 :root[data-theme="dark"] {
@@ -80,6 +82,7 @@
   --sf-added-soft: #dcfce7;
   --sf-removed: #b91c1c;
   --sf-removed-soft: #fee2e2;
+  --sf-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%233e5150' stroke-width='1.5'/%3E%3C/svg%3E");
 }
 
 /* A faint 16px dot grid over a radial glow; fixed so it covers the viewport. */
@@ -116,31 +119,6 @@ body {
   line-height: var(--sf-label-line);
 }
 
-/* Sun/moon theme switch: two outlined icon buttons; the active one is filled. */
-.sf-theme-switch {
-  border: 1px solid var(--sf-border);
-  border-radius: var(--sf-radius);
-  display: inline-flex;
-}
-
-.sf-theme-switch button {
-  align-items: center;
-  background: none;
-  border: 0;
-  border-radius: var(--sf-radius);
-  color: var(--sf-muted);
-  display: inline-flex;
-  height: 28px;
-  justify-content: center;
-  padding: 0;
-  width: 28px;
-}
-
-.sf-theme-switch button[aria-pressed="true"] {
-  background: var(--sf-primary-soft);
-  color: var(--sf-on-primary-soft);
-}
-
 /* Ids, branches, versions and costs. */
 .sf-mono {
   font-family: var(--sf-mono);
@@ -164,9 +142,6 @@ body {
   gap: 4px 20px;
   min-height: var(--sf-bar-height);
   padding: 0 16px;
-  position: sticky;
-  top: 0;
-  z-index: 10;
 }
 
 .sf-project {
@@ -175,7 +150,13 @@ body {
   font-size: var(--sf-label-size);
   letter-spacing: var(--sf-label-tracking);
   line-height: var(--sf-label-line);
+  text-decoration: none;
   white-space: nowrap;
+}
+
+/* The project name links to the Board. */
+.sf-project:hover {
+  text-decoration: underline;
 }
 
 /* Phones only (see the phone block at the end); hidden everywhere else. */
@@ -196,7 +177,7 @@ body {
   align-items: stretch;
   align-self: stretch;
   display: flex;
-  gap: 2px;
+  gap: 16px;
 }
 
 .sf-view-link {
@@ -208,7 +189,7 @@ body {
   font-size: var(--sf-label-size);
   letter-spacing: var(--sf-label-tracking);
   line-height: var(--sf-label-line);
-  padding: 0 10px;
+  padding: 0 14px;
   text-decoration: none;
 }
 
@@ -235,9 +216,9 @@ body {
 
 .sf-paused {
   background: transparent;
-  border: 1px solid var(--sf-accent);
+  border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
-  color: var(--sf-accent-text);
+  color: var(--sf-muted);
   font-family: var(--sf-mono);
   font-size: var(--sf-label-size);
   letter-spacing: var(--sf-label-tracking);
@@ -288,6 +269,53 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The account menu: the signed-in email and Sign out, under the pill. */
+.sf-account-wrap {
+  position: relative;
+}
+
+.sf-account-menu {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  display: flex;
+  flex-direction: column;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  min-width: 180px;
+  padding: 4px;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+}
+
+.sf-account-email {
+  color: var(--sf-muted);
+  overflow-wrap: anywhere;
+  padding: 4px 8px;
+}
+
+.sf-account-menu-item {
+  background: transparent;
+  border: 0;
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  padding: 4px 8px;
+  text-align: start;
+}
+
+.sf-account-menu-item:hover {
+  background: var(--sf-primary-soft);
+  color: var(--sf-on-primary-soft);
+  text-decoration: underline;
 }
 
 .sf-button {
@@ -388,8 +416,7 @@ body {
   font-size: var(--sf-label-size);
   letter-spacing: var(--sf-label-tracking);
   line-height: var(--sf-label-line);
-  margin-left: 6px;
-  padding: 0 6px;
+  padding: 2px 6px;
   white-space: nowrap;
 }
 
@@ -419,7 +446,14 @@ body {
   text-decoration: underline;
 }
 
+/* Danger: a red outline (Cancel task, Yes cancel it); it stays red over the hover fill. */
 .sf-button-danger {
+  background: transparent;
+  border-color: var(--sf-removed);
+  color: var(--sf-removed);
+}
+
+.sf-button-danger:hover:not(:disabled) {
   border-color: var(--sf-removed);
   color: var(--sf-removed);
 }
@@ -443,13 +477,10 @@ body {
   -webkit-appearance: none;
   appearance: none;
   background-color: transparent;
-  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
-    linear-gradient(135deg, currentColor 50%, transparent 50%);
-  background-position:
-    calc(100% - 15px) 50%,
-    calc(100% - 10px) 50%;
+  background-image: var(--sf-chevron);
+  background-position: right 10px center;
   background-repeat: no-repeat;
-  background-size: 5px 5px;
+  background-size: 10px 6px;
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   color: var(--sf-text);
@@ -679,26 +710,41 @@ textarea.sf-input {
   white-space: nowrap;
 }
 
+/* One segmented switch for the theme and the Board view: a framed group, the pressed one filled. */
 .sf-segmented {
+  border: 1px solid var(--sf-chrome-border);
+  border-radius: var(--sf-radius);
   display: inline-flex;
-  gap: 4px;
+  gap: 0;
+  padding: 2px;
 }
 
 .sf-segment {
+  align-items: center;
   background: transparent;
-  border: 1px solid var(--sf-border);
+  border: 0;
   border-radius: var(--sf-radius);
   color: var(--sf-text);
+  display: inline-flex;
   font-family: var(--sf-mono);
   font-size: var(--sf-label-size);
+  height: 32px;
+  justify-content: center;
   letter-spacing: var(--sf-label-tracking);
   line-height: var(--sf-label-line);
-  padding: 8px 14px;
+  padding: 0 12px;
 }
 
 .sf-segment[aria-pressed="true"] {
   background: var(--sf-primary-soft);
   color: var(--sf-on-primary-soft);
+  font-weight: 600;
+}
+
+/* The sun and moon buttons stay square. */
+.sf-theme-switch .sf-segment {
+  padding: 0;
+  width: 32px;
 }
 
 .sf-card-list {
@@ -788,11 +834,12 @@ textarea.sf-input {
 .sf-steps {
   align-items: center;
   display: inline-flex;
-  gap: 2px;
+  gap: 4px;
 }
 
 .sf-step {
   background: var(--sf-border);
+  border-radius: var(--sf-radius);
   display: inline-block;
   height: 4px;
   width: 14px;
@@ -925,7 +972,7 @@ textarea.sf-input {
 
 .sf-stepper {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -939,7 +986,18 @@ textarea.sf-input {
   min-width: 0;
 }
 
+/* On the task page each step is a labelled chip, not a bar. */
 .sf-stepper .sf-step {
+  border-radius: var(--sf-radius);
+  box-sizing: border-box;
+  display: block;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  height: auto;
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 4px 8px;
+  text-align: center;
   width: 100%;
 }
 
@@ -954,6 +1012,31 @@ textarea.sf-input {
 .sf-stepper-item-waiting .sf-stepper-label {
   color: var(--sf-accent-text);
   font-weight: 700;
+}
+
+.sf-stepper .sf-step[data-state="done"] {
+  background: var(--sf-done-soft);
+  border: 0;
+  color: var(--sf-done);
+}
+
+.sf-stepper .sf-step[data-state="current"] {
+  background: transparent;
+  border: 1px solid var(--sf-muted);
+  color: var(--sf-text);
+}
+
+.sf-stepper .sf-step[data-state="waiting"] {
+  background: var(--sf-accent-soft);
+  border: 1px solid var(--sf-accent);
+  color: var(--sf-accent-text);
+  font-weight: 700;
+}
+
+.sf-stepper .sf-step[data-state="todo"] {
+  background: transparent;
+  border: 1px solid var(--sf-border);
+  color: var(--sf-muted);
 }
 
 .sf-task-body {

@@ -40,6 +40,13 @@ describe("ThemeSwitch", () => {
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
+  it("uses_the_shared_segmented_classes", () => {
+    render(<ThemeSwitch />);
+    const group = screen.getByRole("group", { name: "Theme" });
+    expect(group).toHaveClass("sf-segmented", "sf-theme-switch");
+    for (const b of within(group).getAllByRole("button")) expect(b).toHaveClass("sf-segment");
+  });
+
   it("icons_are_aria_hidden", () => {
     const { container } = render(<ThemeSwitch />);
     const icons = container.querySelectorAll("svg");
