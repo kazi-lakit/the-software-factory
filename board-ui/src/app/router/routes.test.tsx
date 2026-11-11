@@ -247,6 +247,17 @@ describe("the new factory route", () => {
     fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
     expect(window.location.pathname).toBe("/settings");
   });
+
+  it("factories_breadcrumb_opens_settings_at_the_factories_section", async () => {
+    signIn();
+    renderAt("/settings/factories/new");
+    const crumbs = await screen.findByRole("navigation", { name: "Breadcrumb" });
+    fireEvent.click(within(crumbs).getByRole("link", { name: "Factories" }));
+    expect(window.location.pathname).toBe("/settings");
+    expect(window.location.hash).toBe("#settings-factories");
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    expect(screen.queryByText(/not found/i)).not.toBeInTheDocument();
+  });
 });
 
 describe("the task route", () => {

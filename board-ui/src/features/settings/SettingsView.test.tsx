@@ -626,6 +626,22 @@ describe("settings page layout", () => {
     expect(current()).toEqual(["Repos"]);
   });
 
+  it("opening_with_a_section_hash_scrolls_to_it_and_makes_it_current", () => {
+    const scrolled: Element[] = [];
+    const original = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
+    window.history.pushState({}, "", "/settings#settings-factories");
+    try {
+      renderSettings();
+      expect(scrolled).toEqual([region("Factories")]);
+      const nav = screen.getByRole("navigation", { name: "Settings sections" });
+      expect(within(nav).getByRole("link", { name: "Factories" })).toHaveAttribute("aria-current", "location");
+    } finally {
+      Element.prototype.scrollIntoView = original;
+      window.history.pushState({}, "", "/");
+    }
+  });
+
   it("section_nearest_the_top_becomes_current_while_scrolling", () => {
     vi.stubGlobal("IntersectionObserver", FakeIO);
     renderSettings();

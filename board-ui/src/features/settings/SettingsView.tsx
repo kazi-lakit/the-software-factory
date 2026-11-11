@@ -202,6 +202,14 @@ export function SettingsView({ onNavigate }: { onNavigate?: (path: string) => vo
   const [currentSection, setCurrentSection] = useCurrentSection(SECTION_IDS);
   const noteId = useId();
 
+  // Arriving with #<section> (the New factory breadcrumb): an in-app navigation does not jump to it, so scroll there.
+  useEffect(() => {
+    const id = window.location.hash.slice(1);
+    if (!SECTION_IDS.includes(id)) return;
+    document.getElementById(id)?.scrollIntoView?.();
+    setCurrentSection(id);
+  }, [setCurrentSection]);
+
   // With one factory there is nothing to pick: its settings show whatever the stored pick says.
   const only = factories.defs.length === 1 ? factories.defs[0] : undefined;
   const entry = only ? factories.byId.get(only.factoryId) : factories.byId.get(picked);

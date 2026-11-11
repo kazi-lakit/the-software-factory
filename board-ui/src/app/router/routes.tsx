@@ -39,7 +39,9 @@ export function AppRouter() {
   }, []);
 
   function navigate(nextPath: string) {
-    const [nextPathname = "/", queryString = ""] = nextPath.split("?");
+    // A #fragment is the browser's (an anchor on the page), never part of the route.
+    const [beforeHash = "/"] = nextPath.split("#");
+    const [nextPathname = "/", queryString = ""] = beforeHash.split("?");
     window.history.pushState({}, "", nextPath);
     setPath(nextPathname);
     setSearch(queryString ? `?${queryString}` : "");
