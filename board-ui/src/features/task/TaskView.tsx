@@ -1,4 +1,4 @@
-import { useCallback, useId, useRef } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { GATE_DOC, GATE_STATUS, NotFoundError, unfinishedDeps, type FactoryEvent, type Gate, type Run, type Task } from "@factory/core";
 import { ageOf, formatCost, NEEDS_YOU, STATUS_LABEL, taskPath } from "../board/status";
@@ -6,6 +6,7 @@ import { useTopBarLead } from "../../app/topBarLead";
 import { followInApp } from "../board/TaskCard";
 import { useBoard } from "../board/useBoard";
 import { useFactories } from "../factories/useFactories";
+import { clearReadyProblem, peekReadyProblem } from "../newTask/createdNotice";
 import { AnswerPanel } from "./AnswerPanel";
 import { DocVersions } from "./DocVersions";
 import { GatePanel } from "./GatePanel";
@@ -14,6 +15,7 @@ import { buildQaLog } from "./qaEntries";
 import { Stepper } from "./Stepper";
 import { TaskActions } from "./TaskActions";
 import { useTask } from "./useTask";
+import { WriteProblemNotice } from "./writeOutcome";
 
 const GITHUB = "https://github.com/";
 
@@ -65,6 +67,9 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
   useTopBarLead({ label: "Back", onClick: () => onNavigate("/") });
   // Reload after a conflict: resolves with the latest task so open forms can rebase on its version.
   const reload = useCallback(async () => (await refetch()).data?.task, [refetch]);
+  // Set by New task when this task was created but not marked ready: shown once, then forgotten.
+  const [readyProblem] = useState(() => peekReadyProblem(taskId));
+  useEffect(() => clearReadyProblem(taskId), [taskId]);
 
   if (!query.data) {
     if (query.isError) {
@@ -95,6 +100,12 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
       <nav aria-label="Breadcrumb" className="sf-breadcrumb">
         <BackToBoard label="Board" onNavigate={onNavigate} />
       </nav>
+      {readyProblem ? (
+        <>
+          <WriteProblemNotice problem={readyProblem} />
+          <p className="sf-problem" role="alert">The task was created but not marked ready.</p>
+        </>
+      ) : null}
       {query.isError ? <p className="sf-problem" role="alert">Could not refresh this task; showing what was loaded last.</p> : null}
       <TaskHeader task={task} events={events} onReload={reload} />
 
