@@ -1296,21 +1296,106 @@ textarea.sf-input {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 960px;
+  max-width: 1200px;
 }
 
 .sf-settings .sf-toolbar {
   margin-bottom: 0;
 }
 
+/* One scrolling page: a sticky section nav on the left, the section panels on the right. */
+.sf-settings-layout {
+  align-items: start;
+  display: grid;
+  gap: 24px;
+  grid-template-columns: 200px minmax(0, 1fr);
+}
+
+.sf-settings-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
 .sf-settings-section {
   display: flex;
   flex-direction: column;
   gap: 10px;
+  scroll-margin-top: 16px;
+}
+
+.sf-settings-section > h2 {
+  margin: 0;
 }
 
 .sf-settings-section h3 {
   margin: 0;
+}
+
+.sf-settings-nav {
+  align-self: start;
+  position: sticky;
+  top: 16px;
+}
+
+.sf-settings-nav ul {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sf-settings-nav a {
+  color: var(--sf-muted);
+  display: inline-block;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 4px 0;
+  text-decoration: none;
+}
+
+.sf-settings-nav a:hover {
+  color: var(--sf-text);
+  text-decoration: underline;
+}
+
+.sf-settings-nav a[aria-current="location"] {
+  color: var(--sf-text);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.sf-settings-nav a:focus-visible {
+  outline: 2px solid var(--sf-focus);
+  outline-offset: 2px;
+}
+
+.sf-settings-subsection,
+.sf-factory-row {
+  border-top: 1px solid var(--sf-chrome-border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 12px;
+}
+
+.sf-repo-edit-row td {
+  background: var(--sf-surface-sunk);
+}
+
+.sf-repo-table tbody tr.sf-repo-edit-row:hover {
+  background: transparent;
+}
+
+.sf-repo-overrides {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .sf-fieldset {
@@ -1511,6 +1596,20 @@ textarea.sf-input {
   .sf-task-body {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  /* Settings: one column, the nav full width above the sections. */
+  .sf-settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sf-settings-nav {
+    position: static;
+  }
+
+  .sf-settings-nav ul {
+    flex-flow: row wrap;
+    gap: 4px 16px;
+  }
 }
 
 /* Lane pills show on phones only (see the phone block at the end). */
@@ -1552,7 +1651,7 @@ textarea.sf-input {
   font-size: var(--sf-size-small);
 }
 
-/* Settings tabs and the Factories tab */
+/* Tabs */
 .sf-tabs {
   border-bottom: 1px solid var(--sf-chrome-border);
   display: flex;
@@ -1645,7 +1744,7 @@ textarea.sf-input {
   margin-top: 12px;
 }
 
-.sf-gh-logged-out {
+.sf-gh-signed-out {
   font-weight: 600;
 }
 
