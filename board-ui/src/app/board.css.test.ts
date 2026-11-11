@@ -815,6 +815,55 @@ describe("board_css_lanes", () => {
   });
 });
 
+const SHORTHAND: Record<string, string> = {
+  background: "background", "border-color": "border", "margin-bottom": "margin"
+};
+
+/**
+ * The declaration that wins `prop` on an element carrying exactly `classes`, among the
+ * top-level rules whose selectors are class-only compounds (".a", ".a.b"): more classes
+ * win, a later rule wins a tie. The property's shorthand counts too, so a later
+ * `border` beats an earlier `border-color`. Test helper for cascade checks.
+ */
+function cascaded(css: string, classes: string[], prop: string): string | undefined {
+  const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+  const shorthand = SHORTHAND[prop];
+  let best: { spec: number; value: string } | undefined;
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < clean.length; i++) {
+    const c = clean[i];
+    if (c === "{") {
+      if (depth === 0) {
+        const close = clean.indexOf("}", i);
+        const prelude = clean.slice(start, i).trim();
+        const inner = clean.slice(i + 1, close);
+        if (!prelude.startsWith("@") && !inner.includes("{")) {
+          for (const sel of prelude.split(",").map((x) => x.trim())) {
+            if (!/^(\.[\w-]+)+$/.test(sel)) continue;
+            const names = sel.slice(1).split(".");
+            if (!names.every((n) => classes.includes(n))) continue;
+            for (const d of inner.split(";")) {
+              const k = d.indexOf(":");
+              const name = k > 0 ? d.slice(0, k).trim() : "";
+              if (name !== prop && name !== shorthand) continue;
+              if (!best || names.length >= best.spec) best = { spec: names.length, value: d.slice(k + 1).trim() };
+            }
+          }
+          i = close;
+          start = close + 1;
+          continue;
+        }
+      }
+      depth++;
+    } else if (c === "}") {
+      depth--;
+      if (depth === 0) start = i + 1;
+    }
+  }
+  return best?.value;
+}
+
 describe("board_css_task_page", () => {
   const css = read("board.css");
   const t = (selector: string) => tokens(css, selector);
@@ -843,9 +892,17 @@ describe("board_css_task_page", () => {
     expect(t(".sf-task-actions > :not(.sf-actions)")["flex-basis"]).toBe("100%");
   });
 
+  it("waiting_chip_and_task_chip_row_win_the_cascade", () => {
+    const chip = ["sf-chip", "sf-chip-waiting"];
+    expect(cascaded(css, chip, "background")).toBe("var(--sf-accent-soft)");
+    expect(cascaded(css, chip, "border-color")).toBe("var(--sf-accent)");
+    expect(cascaded(css, chip, "color")).toBe("var(--sf-accent-text)");
+    expect(cascaded(css, ["sf-chips", "sf-task-chips"], "margin-bottom")).toBe("0");
+  });
+
   it("chip_row_and_waiting_chip_use_tokens", () => {
-    expect(t(".sf-task-chips").margin).toBe("0");
-    expect(t(".sf-chip-waiting")).toMatchObject({
+    expect(t(".sf-chips.sf-task-chips").margin).toBe("0");
+    expect(t(".sf-chip.sf-chip-waiting")).toMatchObject({
       background: "var(--sf-accent-soft)", "border-color": "var(--sf-accent)", color: "var(--sf-accent-text)"
     });
   });

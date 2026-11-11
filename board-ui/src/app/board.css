@@ -1124,11 +1124,12 @@ textarea.sf-input {
   gap: 10px;
 }
 
-.sf-task-chips {
+/* Two classes each, so they beat the shared .sf-chips/.sf-chip rules further down. */
+.sf-chips.sf-task-chips {
   margin: 0;
 }
 
-.sf-chip-waiting {
+.sf-chip.sf-chip-waiting {
   background: var(--sf-accent-soft);
   border-color: var(--sf-accent);
   color: var(--sf-accent-text);
