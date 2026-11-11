@@ -11,8 +11,9 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Counted when this guard was written (T-18). A new control makes the count test fail, so it is looked at.
  *  +2 / +1 file: DependsOnPicker's checkboxes (task dependencies).
- *  +1: FactoryForm's per-stage agent model select (T-19). */
-const EXPECTED_CONTROLS = 45;
+ *  +1: FactoryForm's per-stage agent model select (T-19).
+ *  +1: the Board's Search tasks by title or id field (T-24). */
+const EXPECTED_CONTROLS = 46;
 const EXPECTED_FILES = 13;
 
 /** Spreads props into the control and no file renders it, so there is no caller that could omit the class. */
