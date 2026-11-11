@@ -57,7 +57,7 @@ describe("dot field", () => {
     expect(pkg.dependencies).not.toHaveProperty("three");
     expect(pkg.devDependencies).not.toHaveProperty("three");
     expect(Object.keys(pkg.dependencies).sort()).toEqual([
-      "@radix-ui/react-dropdown-menu", "@seliseblocks/client", "@tanstack/react-query", "clsx", "diff", "lucide-react", "react", "react-dom", "tailwind-merge"
+      "@radix-ui/react-dropdown-menu", "@seliseblocks/client", "@tanstack/react-query", "clsx", "diff", "lucide-react", "react", "react-dom", "react-markdown", "tailwind-merge"
     ]);
     expect(Object.keys(pkg.devDependencies).sort()).toEqual([
       "@testing-library/jest-dom", "@testing-library/react", "@testing-library/user-event", "@types/node", "@types/react", "@types/react-dom",

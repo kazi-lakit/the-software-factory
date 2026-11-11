@@ -914,9 +914,8 @@ describe("board_css_task_page", () => {
     expect(t(".sf-task-docs")).toEqual({});
   });
 
-  it("gate_hint_and_runs_list_use_tokens", () => {
+  it("gate_hint_uses_tokens", () => {
     expect(t(".sf-gate-hint")).toMatchObject({ color: "var(--sf-muted)", "font-size": "var(--sf-size-small)", margin: "0" });
-    expect(t(".sf-runs")["list-style"]).toBe("none");
   });
 
   it("stepper_labels_use_label_type_and_waiting_uses_accent_text", () => {
@@ -1301,5 +1300,31 @@ describe("board_css_new_task_page", () => {
     expect(block).not.toMatch(/box-shadow/);
     expect(block).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(block).not.toMatch(/rgba?\(/);
+  });
+});
+
+describe("board_css_task_tabs_and_markdown", () => {
+  const css = read("board.css");
+  const t = (selector: string) => tokens(css, selector);
+
+  it("markdown_reading_style", () => {
+    expect(t(".sf-markdown")).toMatchObject({ "font-size": "16px", "line-height": "1.6", "max-width": "72ch" });
+    expect(t(".sf-markdown h2")["font-size"]).toBe("20px");
+  });
+
+  it("task_tab_strip_scrolls_instead_of_overflowing", () => {
+    expect(t(".sf-task-tabs .sf-tabs")).toMatchObject({ "overflow-x": "auto", "flex-wrap": "nowrap" });
+    expect(t(".sf-task-tabs .sf-tab")["white-space"]).toBe("nowrap");
+  });
+
+  it("selected_tab_has_a_2px_underline", () => {
+    expect(t(".sf-tab")["border-bottom"]).toMatch(/^2px solid/);
+    expect(t('.sf-tab[aria-selected="true"]')["border-bottom-color"]).toBe("var(--sf-text)");
+  });
+
+  it("removed_list_styles_are_gone", () => {
+    expect(t(".sf-runs")).toEqual({});
+    expect(t(".sf-history")).toEqual({});
+    expect(t(".sf-history-actor")).toEqual({});
   });
 });

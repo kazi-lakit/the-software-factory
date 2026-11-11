@@ -9,9 +9,7 @@ import {
   unfinishedDeps,
   type Doc,
   type DocKind,
-  type FactoryEvent,
   type Gate,
-  type Run,
   type Task
 } from "@factory/core";
 import { NEEDS_YOU, STATUS_LABEL, taskPath } from "../board/status";
@@ -28,11 +26,12 @@ import { QaLog } from "./QaLog";
 import { buildQaLog } from "./qaEntries";
 import { Stepper } from "./Stepper";
 import { TaskActions } from "./TaskActions";
-import { attemptsLabel, costLabel, runLines } from "./taskDetails";
+import { RunsTable } from "./RunsTable";
+import { attemptsLabel, costLabel } from "./taskDetails";
+import { TaskHistory } from "./TaskHistory";
+import { TaskTabs } from "./TaskTabs";
 import { currentOf, useTask } from "./useTask";
 import { WriteProblemNotice } from "./writeOutcome";
-
-const DOC_SECTIONS = [["spec", "Spec"], ["plan", "Plan"], ["verify", "Verify report"], ["review", "Review report"]] as const;
 
 const GITHUB = "https://github.com/";
 
@@ -47,20 +46,8 @@ function githubUrl(value: string | null): string | undefined {
   }
 }
 
-const formatTime = (iso: string | null): string => {
-  if (!iso) return "—";
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
-};
-
 const gateOf = (task: Task): Gate | undefined =>
   (Object.entries(GATE_STATUS) as [Gate, Task["status"]][]).find(([, status]) => status === task.status)?.[0];
-
-const short = (value: string | null): string => {
-  if (value === null) return "—";
-  const line = value.replace(/\s+/g, " ").trim();
-  return line.length > 120 ? `${line.slice(0, 119)}…` : line;
-};
 
 const HOW_QUESTIONS_WORK =
   "An agent that can't go on asks one question, offers 2 to 4 answers and marks the one it recommends, with a reason. Pick one or write your own. Every question and answer stays on the task and in History.";
@@ -82,7 +69,7 @@ export function BackToBoard({ label, onNavigate }: { label: string; onNavigate: 
 
 /**
  * One task: the header, then a main column (the gate or answer panel when it waits for you, questions and answers,
- * docs, history) and a side column (details, description, runs).
+ * then a tab strip: History, Spec, Plan, Checks, Review, Runs) and a side column (details, description, how questions work).
  */
 export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) => void; taskId: string }) {
   const query = useTask(taskId);
@@ -142,18 +129,24 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
           ) : null}
           {task.status === "blocked" ? <AnswerPanel key={task.taskId} task={task} events={events} onReload={reload} /> : null}
           {qaEntries.length > 0 ? <QaLog entries={qaEntries} /> : null}
-          {/* The decision panel shows the gate's doc, so its section is left out here. */}
-          {DOC_SECTIONS.filter(([kind]) => !gate || GATE_DOC[gate] !== kind).map(([kind, title]) => (
-            <Section key={kind} title={title}><DocVersions label={title} docs={docs[kind]} /></Section>
-          ))}
-          <Section title="History"><History events={events} /></Section>
+          <TaskTabs
+            key={task.taskId}
+            label="Task sections"
+            tabs={[
+              { content: <TaskHistory events={events} />, id: "history", label: "History" },
+              { content: <DocVersions label="Spec" docs={docs.spec} />, id: "spec", label: `Spec (${docs.spec.length})` },
+              { content: <DocVersions label="Plan" docs={docs.plan} />, id: "plan", label: `Plan (${docs.plan.length})` },
+              { content: <DocVersions label="Checks" docs={docs.verify} />, id: "checks", label: "Checks" },
+              { content: <DocVersions label="Review" docs={docs.review} />, id: "review", label: "Review" },
+              { content: <RunsTable runs={runs} />, id: "runs", label: `Runs (${runs.length})` }
+            ]}
+          />
         </div>
         <aside className="sf-task-side" aria-label="Task side panels">
           <Details task={task} onNavigate={onNavigate} />
           <Section title="Description" className="sf-panel">
             {task.description.trim() ? <pre className="sf-doc-body">{task.description}</pre> : <p className="sf-empty">No description.</p>}
           </Section>
-          <Section title="Runs" className="sf-panel"><RunsList runs={runs} /></Section>
           {qaEntries.length > 0 ? (
             <Section title="How questions work" className="sf-panel">
               <p className="sf-muted sf-qa-how">{HOW_QUESTIONS_WORK}</p>
@@ -249,36 +242,5 @@ function TaskHeader({ docs, gate, onReload, task }: {
       </div>
       <Stepper status={task.status} stage={task.stage} baseBranch={task.baseBranch} waitingVersion={waitingVersion} />
     </section>
-  );
-}
-
-function RunsList({ runs }: { runs: readonly Run[] }) {
-  if (runs.length === 0) return <p className="sf-empty">No runs yet.</p>;
-  return (
-    <ul className="sf-runs" aria-label="Runs">
-      {runLines(runs).map((line) => <li key={line.runId}>{line.text}</li>)}
-    </ul>
-  );
-}
-
-function describeEvent(event: FactoryEvent): string {
-  if (event.action === "create") return `created in ${event.to ?? "inbox"}`;
-  return `${event.field ?? event.action}: ${short(event.from)} → ${short(event.to)}`;
-}
-
-function History({ events }: { events: readonly FactoryEvent[] }) {
-  if (events.length === 0) return <p className="sf-empty">No history yet.</p>;
-  const newestFirst = [...events].reverse();
-  return (
-    <ol className="sf-history" aria-label="History">
-      {newestFirst.map((event, index) => (
-        <li key={`${event.at}-${index}`}>
-          <time className="sf-muted" dateTime={event.at}>{formatTime(event.at)}</time>
-          <span className="sf-history-actor">{event.actor}</span>
-          <span>{describeEvent(event)}</span>
-          {event.reason ? <span className="sf-muted">({event.reason})</span> : null}
-        </li>
-      ))}
-    </ol>
   );
 }

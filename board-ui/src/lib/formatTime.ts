@@ -26,3 +26,8 @@ export function formatWhen(iso: string, now: Date = new Date()): string {
   if (day === localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))) return `Yesterday ${time}`;
   return `${date.getDate()} ${MONTHS[date.getMonth()]} ${time}`;
 }
+
+/** Like formatWhen, but today reads just "10:42" (no "Today " prefix). */
+export function formatWhenShort(iso: string, now: Date = new Date()): string {
+  return formatWhen(iso, now).replace(/^Today /, "");
+}

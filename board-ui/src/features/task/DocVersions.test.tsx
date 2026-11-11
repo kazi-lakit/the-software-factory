@@ -43,6 +43,23 @@ describe("DocVersions", () => {
     expect(screen.getByRole("region", { name: "Spec changes from v1 to v2" })).toBeInTheDocument();
   });
 
+  it("renders_the_body_as_markdown", () => {
+    const { container } = render(<DocVersions label="Spec" docs={[doc(1, "## Goal\nAdd paging.", "current")]} />);
+    expect(screen.getByRole("heading", { level: 2, name: "Goal" })).toBeInTheDocument();
+    expect(container.querySelector("pre.sf-doc-body")).toBeNull();
+  });
+
+  it("raw_html_in_a_doc_is_not_rendered", () => {
+    const { container } = render(<DocVersions label="Spec" docs={[doc(1, "<img src=x onerror=\"alert(1)\">", "current")]} />);
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("switching_version_shows_that_version_as_markdown", () => {
+    const { container } = render(<DocVersions label="Spec" docs={docs} />);
+    fireEvent.change(screen.getByLabelText("Spec version"), { target: { value: "1" } });
+    expect(container.querySelector(".sf-markdown")?.textContent).toContain("Keep the old API.");
+  });
+
   it("says_when_there_is_no_version_yet", () => {
     render(<DocVersions label="Plan" docs={[]} />);
     expect(screen.getByText("No plan yet.")).toBeInTheDocument();
