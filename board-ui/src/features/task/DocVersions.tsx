@@ -1,6 +1,7 @@
 import { diffLines } from "diff";
 import { useId, useState } from "react";
 import type { Doc } from "@factory/core";
+import { Markdown } from "./Markdown";
 
 type Line = { kind: "added" | "removed" | "same"; text: string };
 
@@ -107,7 +108,7 @@ export function DocVersions({ compare: compareMode = "select", docs, from, label
       ) : compare !== undefined && !compareDoc ? (
         <p className="sf-empty">Loading v{compare}…</p>
       ) : (
-        <pre className="sf-doc-body">{shownDoc.body}</pre>
+        <Markdown body={shownDoc.body} />
       )}
     </div>
   );
