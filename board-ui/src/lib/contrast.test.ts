@@ -130,9 +130,16 @@ describe("danger_button_meets_4_5_to_1", () => {
 
 // The landing page: its text sits on the page field, under the static 16px grid dot and a WebGL dot at its brightest.
 describe("landing_text_meets_4_5_over_the_field", () => {
+  // The static grid dot, read from the body background in board.css so the check follows the CSS.
+  const gridDotOf = (selector: string) => {
+    const image = tokens(css, selector)["background-image"] ?? "";
+    const dot = image.match(/radial-gradient\(\s*(rgba\([^)]*\))/);
+    if (!dot) throw new Error(`no grid dot in ${selector} background-image`);
+    return parse(dot[1] as string);
+  };
   const gridDot: Record<string, { rgb: Rgb; alpha: number }> = {
-    dark: { rgb: [157, 176, 175], alpha: 0.045 },
-    light: { rgb: [11, 17, 18], alpha: 0.035 }
+    dark: gridDotOf("body"),
+    light: gridDotOf(':root[data-theme="light"] body')
   };
   const cases = (["dark", "light"] as const).flatMap((theme) => ["text", "muted", "accent-text"].map((fg) => [theme, fg] as const));
   it.each(cases)("%s: %s over the field", (theme, fg) => {
