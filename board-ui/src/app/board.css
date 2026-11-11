@@ -1255,21 +1255,6 @@ textarea.sf-input {
   margin: 0;
 }
 
-.sf-runs {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.sf-runs li {
-  font-family: var(--sf-mono);
-  font-size: var(--sf-size-small);
-  overflow-wrap: anywhere;
-}
-
 .sf-details {
   background: var(--sf-surface);
   border: 1px solid var(--sf-border);
@@ -1355,6 +1340,61 @@ textarea.sf-input {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 10px;
+}
+
+/* Docs rendered as Markdown, in the reading style. */
+.sf-markdown {
+  color: var(--sf-text);
+  font-size: 16px;
+  line-height: 1.6;
+  max-width: 72ch;
+  overflow-wrap: anywhere;
+}
+
+.sf-markdown h1,
+.sf-markdown h2,
+.sf-markdown h3 {
+  line-height: 1.3;
+  margin: 1.2em 0 0.4em;
+}
+
+.sf-markdown h2 {
+  font-size: 20px;
+}
+
+.sf-markdown p {
+  margin: 0 0 0.8em;
+}
+
+.sf-markdown ul {
+  list-style: disc;
+  margin: 0 0 0.8em;
+  padding-left: 1.5em;
+}
+
+.sf-markdown ol {
+  list-style: decimal;
+  margin: 0 0 0.8em;
+  padding-left: 1.5em;
+}
+
+.sf-markdown code {
+  font-family: var(--sf-mono);
+  font-size: 0.9em;
+}
+
+.sf-markdown pre {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  margin: 0 0 0.8em;
+  overflow-x: auto;
+  padding: 8px 12px;
+}
+
+.sf-markdown a {
+  color: var(--sf-text);
+  text-decoration: underline;
 }
 
 /* Docs are markdown shown as text; this overrides the scaffold's dark pre. */
@@ -1461,25 +1501,6 @@ textarea.sf-input {
 
 .sf-table tbody tr:hover {
   background: var(--sf-surface-sunk);
-}
-
-.sf-history {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.sf-history li {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0 8px;
-}
-
-.sf-history-actor {
-  font-weight: 600;
 }
 
 .sf-dialog-backdrop {
@@ -2018,6 +2039,23 @@ textarea.sf-input {
 .sf-tab:focus-visible {
   outline: 2px solid var(--sf-focus);
   outline-offset: -2px;
+}
+
+/* The task page's tab strip scrolls sideways on narrow screens instead of overflowing the page. */
+.sf-task-tabs {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.sf-task-tabs .sf-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+
+.sf-task-tabs .sf-tab {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .sf-plain-list {
