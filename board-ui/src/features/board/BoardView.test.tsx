@@ -90,12 +90,12 @@ describe("BoardView", () => {
     expect(screen.getByText("IAM work")).toBeInTheDocument();
   });
 
-  it("new_task_is_primary_only_while_the_form_is_closed", async () => {
+  it("new_task_is_primary_open_or_closed", async () => {
     renderBoard();
     const open = await screen.findByRole("button", { name: "New task" });
     expect(open).toHaveClass("sf-button-primary");
     fireEvent.click(open);
-    expect(screen.getByRole("button", { name: "New task" })).not.toHaveClass("sf-button-primary");
+    expect(screen.getByRole("button", { name: "New task" })).toHaveClass("sf-button-primary");
     expect(screen.getByRole("button", { name: "Create task" })).toHaveClass("sf-button-primary");
     expect(document.querySelector(".sf-button-accent")).toBeNull();
   });
@@ -351,38 +351,102 @@ describe("BoardView with a stored factory pick that is not usable", () => {
   });
 });
 
-describe("BoardView waiting strip", () => {
-  beforeEach(showStages);
-  it("lists_a_blocked_task_of_another_factory_with_a_working_link", async () => {
-    resetFakeBoard(two());
-    await seedTask({ factoryId: "alpha", repo: "api", title: "Quiet" });
-    const blocked = await seedTask({ factoryId: "delta", repo: "ui", title: "Stuck" }, "blocked", { question: "Which way?" });
-    const { onNavigate } = renderBoard();
-    const strip = await screen.findByRole("navigation", { name: "Waiting for you" });
-    expect(within(strip).getByText(`delta · ${blocked.taskId}`)).toBeInTheDocument();
-    expect(within(strip).getByText("Blocked")).toBeInTheDocument();
-    expect(within(strip).queryByText("Quiet")).not.toBeInTheDocument();
-    fireEvent.click(within(strip).getByRole("link", { name: "Stuck" }));
-    expect(onNavigate).toHaveBeenCalledWith(`/tasks/${blocked.taskId}`);
+describe("BoardView Needs you lane order", () => {
+  const needsYouTitles = () =>
+    within(screen.getByRole("region", { name: "Needs you" })).getAllByRole("listitem").map((li) => /First|Second|Third/.exec(li.textContent ?? "")?.[0]);
+
+  it("no_waiting_for_you_navigation_is_rendered", async () => {
+    await seedTask({ title: "Stuck" }, "blocked", { question: "q" });
+    renderBoard();
+    await screen.findByText("Stuck");
+    expect(screen.queryByRole("navigation", { name: "Waiting for you" })).toBeNull();
   });
 
-  it("follows_the_picked_factory_and_lists_oldest_first", async () => {
+  it("needs_you_lists_oldest_first_across_statuses", async () => {
+    await seedTask({ title: "First" }, "blocked", { question: "q" });
+    await seedTask({ title: "Second" }, "spec_review", { stage: "spec" });
+    await seedTask({ title: "Third" }, "pr_open", { stage: "ship" });
+    renderBoard();
+    await screen.findByText("First");
+    expect(needsYouTitles()).toEqual(["First", "Second", "Third"]);
+  });
+
+  it("needs_you_follows_the_picked_factory", async () => {
     resetFakeBoard(two());
     await seedTask({ factoryId: "alpha", repo: "api", title: "First" }, "blocked", { question: "q" });
     await seedTask({ factoryId: "delta", repo: "ui", title: "Second" }, "spec_review", { stage: "spec" });
     await seedTask({ factoryId: "alpha", repo: "web", title: "Third" }, "pr_open", { stage: "ship" });
     renderBoard();
-    const strip = await screen.findByRole("navigation", { name: "Waiting for you" });
-    expect(within(strip).getAllByRole("link").map((a) => a.textContent)).toEqual(["First", "Second", "Third"]);
+    await screen.findByText("First");
     await pickFactory("alpha");
-    expect(within(screen.getByRole("navigation", { name: "Waiting for you" })).getAllByRole("link").map((a) => a.textContent)).toEqual(["First", "Third"]);
+    expect(needsYouTitles()).toEqual(["First", "Third"]);
+  });
+});
+
+describe("BoardView toolbar", () => {
+  const search = () => screen.getByRole("searchbox", { name: "Search tasks by title or id" });
+  const type = (value: string) => fireEvent.change(search(), { target: { value } });
+
+  it("board_title_is_a_28px_page_title_h1", async () => {
+    renderBoard();
+    expect(await screen.findByRole("heading", { level: 1, name: "Board" })).toHaveClass("sf-page-title");
+    expect(screen.queryByRole("heading", { level: 2, name: "Board" })).toBeNull();
   });
 
-  it("is_not_rendered_when_nothing_needs_you", async () => {
-    await seedTask({ title: "Fresh" });
+  it("search_field_is_named_and_has_the_placeholder", async () => {
     renderBoard();
-    await screen.findByText("Fresh");
-    expect(screen.queryByRole("navigation", { name: "Waiting for you" })).not.toBeInTheDocument();
+    await screen.findByRole("region", { name: "Needs you" });
+    expect(search()).toHaveAttribute("placeholder", "Search tasks by title or id");
+    expect(search()).toHaveClass("sf-input");
+  });
+
+  it("search_filters_lanes_by_title_case_insensitive", async () => {
+    await seedTask({ title: "Add paging" });
+    await seedTask({ title: "Fix login" });
+    renderBoard();
+    await screen.findByText("Add paging");
+    const queued = () => screen.getByRole("region", { name: "Queued" });
+    type("PAGING");
+    expect(within(queued()).getByText("Add paging")).toBeInTheDocument();
+    expect(within(queued()).queryByText("Fix login")).toBeNull();
+    expect(queued().querySelector(".sf-count")).toHaveTextContent("1");
+    type("");
+    expect(within(queued()).getByText("Add paging")).toBeInTheDocument();
+    expect(within(queued()).getByText("Fix login")).toBeInTheDocument();
+  });
+
+  it("search_filters_lanes_by_id_lower_case", async () => {
+    const first = await seedTask({ title: "Alpha one" });
+    await seedTask({ title: "Beta two" });
+    renderBoard();
+    await screen.findByText("Alpha one");
+    type(first.taskId.toLowerCase());
+    expect(screen.getByText("Alpha one")).toBeInTheDocument();
+    expect(screen.queryByText("Beta two")).toBeNull();
+  });
+
+  it("search_filters_all_stages_columns_by_title_and_id", async () => {
+    showStages();
+    await seedTask({ title: "Alpha" });
+    const beta = await seedTask({ title: "Beta" }, "spec_review", { stage: "spec" });
+    renderBoard();
+    await screen.findByText("Alpha");
+    type("alpha");
+    expect(within(column("Inbox")).getByText("Alpha")).toBeInTheDocument();
+    expect(within(column("Spec review")).queryByText("Beta")).toBeNull();
+    type(beta.taskId.toLowerCase());
+    expect(screen.queryByText("Alpha")).toBeNull();
+    expect(within(column("Spec review")).getByText("Beta")).toBeInTheDocument();
+  });
+
+  it("search_is_not_persisted", async () => {
+    const first = renderBoard();
+    await screen.findByRole("region", { name: "Needs you" });
+    type("something");
+    first.unmount();
+    renderBoard();
+    await screen.findByRole("region", { name: "Needs you" });
+    expect(search()).toHaveValue("");
   });
 });
 
