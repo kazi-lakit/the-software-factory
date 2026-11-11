@@ -9,18 +9,18 @@ const MODEL_LABEL: Record<AgentModel, string> = { opus: "Opus", sonnet: "Sonnet"
 const STAGE_LABEL: Record<AgentStep, string> = { spec: "Spec", plan: "Plan", build: "Build", verify: "Verify", review: "Review" };
 
 type Props = {
-  /** The stored definition being edited; null adds a factory. */
-  before: FactoryDef | null;
+  /** The stored definition being edited. New factories are made on the New factory page. */
+  before: FactoryDef;
   onCancel: () => void;
   /** After a conflict's Reload: refetches and returns the latest stored definition (undefined if it is gone). */
   onReload: () => Promise<FactoryDef | undefined>;
   onSaved: (saved: FactoryDef) => void;
 };
 
-/** Add or edit a factory. The id is fixed once created; `main` is always protected and cannot be removed. */
+/** Edit a factory. The id is fixed; `main` is always protected and cannot be removed. */
 export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
   const ids = useId();
-  const [base, setBase] = useState(before);
+  const [base, setBase] = useState<FactoryDef>(before);
   const [draft, setDraft] = useState(() => draftOf(before));
   const [branch, setBranch] = useState("");
   const saving = useFactorySave({ base, onSaved });
@@ -51,18 +51,17 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
   );
 
   return (
-    <form className="sf-panel sf-form" aria-label={before ? `Edit factory ${before.factoryId}` : "Add factory"} noValidate onSubmit={(event) => { event.preventDefault(); void saving.save(draft); }}>
+    <form className="sf-panel sf-form" aria-label={`Edit factory ${before.factoryId}`} noValidate onSubmit={(event) => { event.preventDefault(); void saving.save(draft); }}>
       <div className="sf-field">
         <label className="sf-field-label" htmlFor={`${ids}-id`}>Factory id</label>
         <input
           id={`${ids}-id`}
           className="sf-input sf-mono"
           value={draft.factoryId}
-          readOnly={before !== null}
-          onChange={(event) => set("factoryId", event.target.value)}
+          readOnly
           aria-describedby={`${ids}-id-hint`}
         />
-        <span id={`${ids}-id-hint`} className="sf-hint">{before ? "The id cannot change." : "Lowercase letters, digits and hyphens, starting with a letter. It cannot change later."}</span>
+        <span id={`${ids}-id-hint`} className="sf-hint">The id cannot change.</span>
       </div>
       {text("name", "Name")}
       <label className="sf-switch">
@@ -127,7 +126,7 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
       {saving.invalidText ? <p className="sf-problem" role="alert">{saving.invalidText}</p> : null}
       <WriteProblemNotice problem={saving.problem} onReload={() => void reload()} />
       <div className="sf-actions">
-        <button type="submit" className="sf-button sf-button-primary" disabled={saving.busy}>{before ? "Save factory" : "Create factory"}</button>
+        <button type="submit" className="sf-button sf-button-primary" disabled={saving.busy}>Save factory</button>
         <button type="button" className="sf-button" onClick={onCancel}>Cancel</button>
       </div>
     </form>
