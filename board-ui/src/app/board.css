@@ -142,9 +142,6 @@ body {
   gap: 4px 20px;
   min-height: var(--sf-bar-height);
   padding: 0 16px;
-  position: sticky;
-  top: 0;
-  z-index: 10;
 }
 
 .sf-project {
