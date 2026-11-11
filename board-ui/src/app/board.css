@@ -528,9 +528,20 @@ textarea.sf-input {
   line-height: var(--sf-label-line);
 }
 
+.sf-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 24px;
+  margin: 0;
+}
+
 .sf-facts dt {
   color: var(--sf-muted);
   font-size: var(--sf-size-small);
+}
+
+.sf-facts dd {
+  margin: 0;
 }
 
 .sf-inline-field {
@@ -567,6 +578,11 @@ textarea.sf-input {
 /* A panel that waits for the owner (gate, answer) is the accent's other use. */
 .sf-panel-needs-you {
   border-color: var(--sf-accent);
+}
+
+/* The task page's decision panel: a 3px accent top edge. */
+.sf-panel-decision {
+  border-top: 3px solid var(--sf-accent);
 }
 
 .sf-panel-needs-you form {
@@ -941,6 +957,14 @@ textarea.sf-input {
   max-width: 1100px;
 }
 
+.sf-breadcrumb {
+  align-items: baseline;
+  color: var(--sf-muted);
+  display: flex;
+  gap: 6px;
+  margin: 0;
+}
+
 .sf-breadcrumb a,
 .sf-task a:not(.sf-button) {
   text-decoration: underline;
@@ -953,21 +977,37 @@ textarea.sf-input {
   gap: 10px;
 }
 
-.sf-task-header h2 {
-  color: var(--sf-text);
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+.sf-task-chips {
   margin: 0;
 }
 
-.sf-task-meta {
-  align-items: baseline;
-  color: var(--sf-muted);
+.sf-chip-waiting {
+  background: var(--sf-accent-soft);
+  border-color: var(--sf-accent);
+  color: var(--sf-accent-text);
+}
+
+/* The title on the left, the actions on the right; they wrap under it on narrow screens. */
+.sf-task-title-row {
+  align-items: flex-start;
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 8px;
-  margin: 0;
+  gap: 8px 16px;
+  justify-content: space-between;
+}
+
+.sf-task-title-row > h1 {
+  flex: 1 1 320px;
+  min-width: 0;
+}
+
+/* The buttons join the title row; the edit form, dialog and notices take a full row under it. */
+.sf-task-actions {
+  display: contents;
+}
+
+.sf-task-actions > :not(.sf-actions) {
+  flex-basis: 100%;
 }
 
 .sf-stepper {
@@ -1049,10 +1089,37 @@ textarea.sf-input {
   min-width: 0;
 }
 
-.sf-task-docs {
+.sf-task-main {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+.sf-task-side {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sf-gate-hint {
+  color: var(--sf-muted);
+  font-size: var(--sf-size-small);
+  margin: 0;
+}
+
+.sf-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sf-runs li {
+  font-family: var(--sf-mono);
+  font-size: var(--sf-size-small);
+  overflow-wrap: anywhere;
 }
 
 .sf-details {
@@ -1080,17 +1147,6 @@ textarea.sf-input {
 .sf-details dd {
   margin: 0;
   overflow-wrap: anywhere;
-}
-
-.sf-facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 24px;
-  margin: 0;
-}
-
-.sf-facts dd {
-  margin: 0;
 }
 
 .sf-task-section {
