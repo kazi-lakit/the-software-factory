@@ -1199,6 +1199,20 @@ describe("board_css_all_stages_window_fit", () => {
   });
 });
 
+describe("history_pills", () => {
+  it("history_pills_show_at_every_width", () => {
+    const css = read("board.css");
+    expect(tokens(css, ".sf-history-pills").display).toBe("flex");
+    expect(css).not.toMatch(/\.sf-history-pills?[^{]*\{[^}]*display:\s*none/);
+  });
+
+  it("selected_history_pill_is_on_primary_soft", () => {
+    const pressed = tokens(read("board.css"), '.sf-history-pill[aria-pressed="true"]');
+    expect(pressed.background).toBe("var(--sf-primary-soft)");
+    expect(pressed.color).toBe("var(--sf-on-primary-soft)");
+  });
+});
+
 describe("board_css_screen_panel", () => {
   const css = read("board.css");
 

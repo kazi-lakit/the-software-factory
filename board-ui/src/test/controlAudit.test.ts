@@ -14,8 +14,9 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
  *  +1: FactoryForm's per-stage agent model select (T-19).
  *  -1 / -1 file: FormField deleted (T-23).
  *  +1: the Board's Search tasks by title or id field (T-24).
- *  -1 / +1 file: DependsOnPicker dropdown, New task page (T-26). */
-const EXPECTED_CONTROLS = 44;
+ *  -1 / +1 file: DependsOnPicker dropdown, New task page (T-26).
+ *  -2: History drops Mode, Kind, From and To and adds the search and When (T-28). */
+const EXPECTED_CONTROLS = 42;
 const EXPECTED_FILES = 13;
 
 type Control = { file: string; tag: string; text: string };

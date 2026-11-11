@@ -1537,6 +1537,37 @@ textarea.sf-input {
   vertical-align: top;
 }
 
+/* History change-type pills: shown at every width, unlike the Board's lane pills. */
+.sf-history-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+}
+
+.sf-history-pill {
+  background: transparent;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
+  cursor: pointer;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 2px 8px;
+}
+
+.sf-history-pill[aria-pressed="true"] {
+  background: var(--sf-primary-soft);
+  color: var(--sf-on-primary-soft);
+}
+
+.sf-history-pill:focus-visible {
+  outline: 2px solid var(--sf-focus);
+  outline-offset: 2px;
+}
+
 .sf-paging {
   align-items: center;
   margin-top: 8px;
@@ -1671,6 +1702,7 @@ textarea.sf-input {
 .sf-view-link,
 .sf-account,
 .sf-pill,
+.sf-history-pill,
 .sf-tab {
   transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
