@@ -6,11 +6,12 @@ import { ErrorPage } from "../../features/auth/ErrorPage";
 import { NotFoundPage } from "../../features/auth/NotFoundPage";
 import { BoardView } from "../../features/board/BoardView";
 import { HistoryView } from "../../features/history/HistoryView";
+import { NewTaskPage } from "../../features/newTask/NewTaskPage";
 import { SettingsView } from "../../features/settings/SettingsView";
 import { TaskView } from "../../features/task/TaskView";
 import { ProfilePage } from "../../features/profile/ProfilePage";
 import { CallbackPage } from "../../pages/Callback";
-import { LoginPage } from "../../pages/Login";
+import { LandingPage } from "../../pages/Landing";
 
 type PageProps = { onNavigate: (path: string) => void };
 
@@ -51,15 +52,16 @@ export function AppRouter() {
     const returnTo = new URLSearchParams(search).get("returnTo") || undefined;
     return (
       <RedirectIfAuthenticated onNavigate={navigate}>
-        <LoginPage returnTo={returnTo} />
+        <LandingPage returnTo={returnTo} />
       </RedirectIfAuthenticated>
     );
   }
 
-  // /tasks/<taskId>: one task, shown under the Board view.
-  const taskMatch = /^\/tasks\/([^/]+)$/.exec(path);
+  // /tasks/new: the New task page; /tasks/<taskId>: one task. Both are shown under the Board view.
+  const isNewTask = path === "/tasks/new";
+  const taskMatch = isNewTask ? null : /^\/tasks\/([^/]+)$/.exec(path);
   const taskId = taskMatch ? decodeSegment(taskMatch[1] ?? "") : undefined;
-  const Page = taskId === undefined ? protectedRoutes[path] : undefined;
+  const Page = isNewTask ? NewTaskPage : taskId === undefined ? protectedRoutes[path] : undefined;
   if (!taskId && !Page) {
     return <NotFoundPage onNavigate={navigate} />;
   }

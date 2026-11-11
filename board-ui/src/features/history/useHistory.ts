@@ -1,8 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
-import type { FactoryEvent, Mode } from "@factory/core";
+import type { FactoryEvent } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { isTestTask } from "../board/status";
 import { isQaEvent } from "../../lib/qaEvent";
+import { describeEvent } from "../../lib/describeEvent";
+import { localDay } from "../../lib/formatTime";
 
 /** Every history query starts with this key; a settings save invalidates them all. */
 export const HISTORY_KEY = ["history"] as const;
@@ -15,6 +17,10 @@ export type HistoryData = {
   events: FactoryEvent[];
   /** The tasks whose events were read, for the task filter. */
   taskIds: string[];
+  /** Task id to title, for the search. */
+  titles: Record<string, string>;
+  /** Whether any GATE-* test task exists, read before the test filter. */
+  hasTestTasks: boolean;
 };
 
 // Reads at most this many task histories at once.
@@ -36,10 +42,13 @@ export function useHistory(showTest: boolean) {
 }
 
 async function loadHistory(showTest: boolean): Promise<HistoryData> {
-  const tasks = (await boardStore.listTasks()).filter((task) => showTest || !isTestTask(task));
+  const all = await boardStore.listTasks();
+  const hasTestTasks = all.some(isTestTask);
+  const tasks = all.filter((task) => showTest || !isTestTask(task));
   const taskIds = tasks.map((task) => task.taskId).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  const titles = Object.fromEntries(tasks.map((task) => [task.taskId, task.title]));
   const lists = await mapLimit([...taskIds, SETTINGS_TASK], PARALLEL_READS, (taskId) => boardStore.listEvents(taskId));
-  return { events: newestFirst(lists), taskIds };
+  return { events: newestFirst(lists), hasTestTasks, taskIds, titles };
 }
 
 /**
@@ -72,12 +81,9 @@ async function mapLimit<T, R>(items: readonly T[], limit: number, fn: (item: T) 
   return results;
 }
 
-// Actor text: "you", "core · <mode>", or "<agent> · <mode> · run <runId>".
-const MODES: readonly Mode[] = ["sdk", "loop", "session"];
-
+// Actor text: "you", "core · <mode>", "core · new", or "<agent> · <mode> · run <runId>".
 export const ACTOR_FILTERS = ["you", "spec-writer", "planner", "implementer", "verifier", "reviewer", "core"] as const;
 export type ActorFilter = (typeof ACTOR_FILTERS)[number] | "all";
-export type ModeFilter = Mode | "all";
 
 export function actorMatches(actor: string, filter: ActorFilter): boolean {
   if (filter === "all") return true;
@@ -85,39 +91,54 @@ export function actorMatches(actor: string, filter: ActorFilter): boolean {
   return actor.split(" · ")[0] === filter;
 }
 
-/** The mode in an agent or core actor; the owner's events have none. */
-export function actorMode(actor: string): Mode | undefined {
-  const mode = actor.split(" · ")[1];
-  return MODES.find((m) => m === mode);
+export type WhenFilter = "today" | "7d" | "30d" | "all";
+export type PillFilter = "all" | "you" | "qa" | "moves" | "settings";
+
+export type HistoryFilters = { search: string; actor: ActorFilter; task: string; when: WhenFilter; pill: PillFilter; factory: string };
+
+export const NO_FILTERS: HistoryFilters = { actor: "all", factory: "", pill: "all", search: "", task: "", when: "7d" };
+
+export type FilterContext = {
+  /** Task id to title, for the search. */
+  titles?: Readonly<Record<string, string>>;
+  /** The change sentence of an event, for the search; defaults to `describeEvent(event).text`. */
+  changeText?: (event: FactoryEvent) => string;
+  /** The time the When filter counts back from; defaults to now. */
+  now?: Date;
+};
+
+// How many days before today each When choice reaches back to, in local calendar dates.
+const WHEN_DAYS: Readonly<Record<Exclude<WhenFilter, "all">, number>> = { "30d": 29, "7d": 6, today: 0 };
+
+function pillMatches(event: FactoryEvent, pill: PillFilter): boolean {
+  switch (pill) {
+    case "all": return true;
+    case "you": return event.actor === "you";
+    case "qa": return isQaEvent(event);
+    case "moves": return event.action === "move";
+    case "settings": return event.taskId === SETTINGS_TASK;
+  }
 }
 
-/** The event's local calendar date as YYYY-MM-DD, the format of a date input. */
-export function localDate(iso: string): string | undefined {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return undefined;
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
-}
-
-export type KindFilter = "all" | "qa";
-
-export type HistoryFilters = { actor: ActorFilter; factory: string; kind: KindFilter; mode: ModeFilter; task: string; from: string; to: string };
-
-export const NO_FILTERS: HistoryFilters = { actor: "all", factory: "", from: "", kind: "all", mode: "all", task: "", to: "" };
-
-/** The events that pass every filter; the date range is inclusive, in local dates. */
-export function filterEvents(events: readonly FactoryEvent[], filters: HistoryFilters): FactoryEvent[] {
+/** The events that pass every filter. The When filter works on local calendar dates. */
+export function filterEvents(events: readonly FactoryEvent[], filters: HistoryFilters, context: FilterContext = {}): FactoryEvent[] {
+  const now = context.now ?? new Date();
+  const titles = context.titles ?? {};
+  const changeText = context.changeText ?? ((event: FactoryEvent) => describeEvent(event).text);
+  const cutoff = filters.when === "all" ? undefined : localDay(new Date(now.getFullYear(), now.getMonth(), now.getDate() - WHEN_DAYS[filters.when]));
+  const query = filters.search.trim().toLowerCase();
   return events.filter((event) => {
     if (!actorMatches(event.actor, filters.actor)) return false;
-    if (filters.kind === "qa" && !isQaEvent(event)) return false;
-    if (filters.mode !== "all" && actorMode(event.actor) !== filters.mode) return false;
+    if (!pillMatches(event, filters.pill)) return false;
     if (filters.factory !== "" && event.factoryId !== filters.factory) return false;
     if (filters.task !== "" && event.taskId !== filters.task) return false;
-    if (filters.from || filters.to) {
-      const day = localDate(event.at);
-      if (day === undefined) return false;
-      if (filters.from && day < filters.from) return false;
-      if (filters.to && day > filters.to) return false;
+    if (cutoff !== undefined) {
+      const date = new Date(event.at);
+      if (Number.isNaN(date.getTime()) || localDay(date) < cutoff) return false;
+    }
+    if (query !== "") {
+      const haystack = [event.taskId, titles[event.taskId] ?? "", changeText(event), event.reason];
+      if (!haystack.some((text) => text.toLowerCase().includes(query))) return false;
     }
     return true;
   });
