@@ -56,6 +56,12 @@ describe("tooWide", () => {
   it("tooWide_ignores_rules_for_classes_not_rendered", () => {
     expect(tooWide(".a .b{width:400px}", ["b"])).toEqual([]);
   });
+
+  it("tooWide_ignores_overrides_whose_ancestors_are_not_rendered", () => {
+    const css = ".sf-x{width:400px}\n@media (max-width: 639px){.sf-settings .sf-x{width:100%}}";
+    expect(tooWide(css, ["sf-x"])).toEqual([".sf-x {width: 400px}"]);
+    expect(tooWide(css, ["sf-x", "sf-settings"])).toEqual([]);
+  });
 });
 
 describe("renderedClasses", () => {
@@ -73,5 +79,13 @@ describe("renderedClasses", () => {
     root.innerHTML = '<div class="cols"><span class="wide"></span></div>';
     const classes = renderedClasses(root, ".cols{overflow-x:auto}\n@media (max-width: 1023px){.cols{overflow-x:visible}}");
     expect(classes.has("wide")).toBe(true);
+  });
+
+  it("renderedClasses_picks_the_winning_overflow_per_element", () => {
+    const root = document.createElement("div");
+    root.innerHTML = '<div class="page"><div class="cols"><span class="wide"></span></div></div><div class="cols"><span class="other"></span></div>';
+    const classes = renderedClasses(root, ".cols{overflow-x:auto}\n.page .cols{overflow-x:visible}");
+    expect(classes.has("wide")).toBe(true);
+    expect(classes.has("other")).toBe(false);
   });
 });

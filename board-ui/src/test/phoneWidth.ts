@@ -132,6 +132,8 @@ export function tooWide(css: string, classes: Iterable<string>, limit = PHONE_WI
       if (!w || w.amount <= limit) continue;
       const fixed = rules.some((other, otherPos) => {
         if (other === rule || !sameSubject(other.selector, rule.selector)) return false;
+        // The override only counts when it applies to the rendered tree: every class it names must be rendered.
+        if (!selectorClasses(other.selector).every((c) => have.has(c))) return false;
         const order = cmp(specificity(other.selector), spec);
         if (order < 0 || (order === 0 && otherPos < pos)) return false;
         return Object.entries(other.decls).some(([p, v]) => {
@@ -145,30 +147,42 @@ export function tooWide(css: string, classes: Iterable<string>, limit = PHONE_WI
   return found;
 }
 
-/** Selectors whose winning `overflow-x` (or `overflow`) at 360px is `auto`. */
-function scrollingSelectors(css: string): string[] {
-  const winner = new Map<string, string>();
-  for (const rule of rulesAt360(css)) {
+/** Rules at 360px that set `overflow-x` (or `overflow`), with the first `overflow-x` keyword they set. */
+function overflowRules(css: string, root: Element): { selector: string; value: string; spec: number[]; pos: number }[] {
+  const out: { selector: string; value: string; spec: number[]; pos: number }[] = [];
+  rulesAt360(css).forEach((rule, pos) => {
     const value = rule.decls["overflow-x"] ?? rule.decls.overflow;
-    if (value !== undefined) winner.set(rule.selector, value.split(/\s+/)[0] as string);
+    if (value === undefined) return;
+    try {
+      root.ownerDocument.createDocumentFragment().querySelector(rule.selector);
+    } catch {
+      return;
+    }
+    out.push({ pos, selector: rule.selector, spec: specificity(rule.selector), value: value.split(/\s+/)[0] as string });
+  });
+  return out;
+}
+
+/** Whether the winning `overflow-x` on `el` (the most specific matching rule, later on a tie) scrolls. */
+function scrolls(el: Element, rules: ReturnType<typeof overflowRules>): boolean {
+  let best: (typeof rules)[number] | null = null;
+  for (const r of rules) {
+    if (!el.matches(r.selector)) continue;
+    if (!best || cmp(r.spec, best.spec) > 0 || (cmp(r.spec, best.spec) === 0 && r.pos > best.pos)) best = r;
   }
-  return [...winner].filter(([, v]) => v === "auto" || v === "scroll").map(([s]) => s);
+  return best !== null && (best.value === "auto" || best.value === "scroll");
 }
 
 /** Classes of every element under `root`, skipping elements that are or sit inside an `overflow-x: auto` container. */
 export function renderedClasses(root: Element, css: string): Set<string> {
-  const scrolling = scrollingSelectors(css).filter((s) => {
-    try {
-      root.ownerDocument.createDocumentFragment().querySelector(s);
-      return true;
-    } catch {
-      return false;
-    }
-  });
+  const rules = overflowRules(css, root);
   const out = new Set<string>();
   const elements = [root, ...root.querySelectorAll("*")];
+  const scrolling = new Set(elements.filter((el) => scrolls(el, rules)));
   for (const el of elements) {
-    if (scrolling.some((s) => el.closest(s) !== null)) continue;
+    let inside = false;
+    for (let at: Element | null = el; at && !inside; at = at.parentElement) inside = scrolling.has(at);
+    if (inside) continue;
     for (const c of el.classList) out.add(c);
   }
   return out;
