@@ -159,7 +159,7 @@ describe("the owner views", () => {
     renderAt(path);
     expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: heading })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Account" })).toBeInTheDocument();
   });
 });
 
