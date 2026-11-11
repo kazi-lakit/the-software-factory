@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FactoryEvent } from "@factory/core";
-import { answeredLine, askerLine, askerName, buildQaLog, qaCounts, qaLabelLine, timeLabel, type QaEntry } from "./qaEntries";
+import { formatTime } from "../../lib/formatTime";
+import { answeredLine, askerLine, askerName, buildQaLog, earlierAnsweredLine, qaCounts, qaLabelLine, questionFromLine, timeLabel, type QaEntry } from "./qaEntries";
 
 const LETTERED = "Which branch?\nA. main: fits (recommended)\nB. develop: more work\nReply with an option letter.";
 const NONE = "Which branch?\nA. main: fits\nB. develop: more work";
@@ -251,5 +252,45 @@ describe("qa line helpers", () => {
 
   it("asker_line_is_empty_without_a_question_event", () => {
     expect(askerLine([], now)).toBe("");
+  });
+});
+
+describe("questionFromLine", () => {
+  it("question_from_line_is_asker_and_title", () => {
+    expect(questionFromLine([ev("question", "Which?")], "Fix it")).toBe("Spec writer · Fix it");
+    expect(questionFromLine([], "Fix it")).toBe("Fix it");
+  });
+});
+
+describe("earlierAnsweredLine", () => {
+  const NOW = new Date(2026, 10, 11, 12, 0).getTime();
+  const opt = (letter: string, label: string, recommended: boolean, chosen: boolean) => ({ chosen, label, letter, recommended, why: "why" });
+  const entry = (over: Partial<QaEntry>): QaEntry => ({
+    answer: null, answeredAt: null, askedAt: localIso(11, 7, 50), askedBy: "Spec writer", key: "k", number: 1, open: false, options: [],
+    question: "Q?", resumedAt: null, stage: "spec", ...over
+  });
+
+  it("earlier_line_names_the_chosen_option_and_recommended", () => {
+    const e = entry({ answer: "A. jsdom tests: why", answeredAt: localIso(11, 7, 58), options: [opt("A", "jsdom tests", true, true), opt("B", "browser tests", false, false)] });
+    expect(earlierAnsweredLine(e, NOW)).toBe("You answered A. jsdom tests (recommended) at 07:58");
+  });
+
+  it("earlier_line_chosen_option_not_recommended", () => {
+    const e = entry({ answer: "B", answeredAt: localIso(11, 7, 58), options: [opt("A", "jsdom tests", true, false), opt("B", "browser tests", false, true)] });
+    expect(earlierAnsweredLine(e, NOW)).toBe("You answered B. browser tests at 07:58");
+  });
+
+  it("earlier_line_free_text_has_no_recommended", () => {
+    const e = entry({ answer: "use release", answeredAt: localIso(11, 9, 5), options: [opt("A", "jsdom tests", true, false)] });
+    expect(earlierAnsweredLine(e, NOW)).toBe("You answered use release at 09:05");
+  });
+
+  it("earlier_line_other_day_uses_formatTime", () => {
+    const at = localIso(9, 9, 5);
+    expect(earlierAnsweredLine(entry({ answer: "yes", answeredAt: at }), NOW)).toBe(`You answered yes at ${formatTime(at)}`);
+  });
+
+  it("earlier_line_is_null_without_answer", () => {
+    expect(earlierAnsweredLine(entry({}), NOW)).toBeNull();
   });
 });

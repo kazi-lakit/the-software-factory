@@ -31,7 +31,7 @@ describe("lanes", () => {
   });
   it("lane_hints_match_the_design", () => {
     const hint = (id: LaneId) => LANES.find((l) => l.id === id)?.hint;
-    expect(hint("needs-you")).toBe("Oldest first. Each card says what the factory waits for.");
+    expect(hint("needs-you")).toBe("Oldest first. Tap a task to act on it.");
     expect(hint("queued")).toBe("Inbox needs Mark ready; ready tasks start when a slot frees.");
     expect(hint("working")).toBeUndefined();
     expect(hint("done")).toBe("Finished and merged");

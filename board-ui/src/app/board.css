@@ -1049,15 +1049,28 @@ textarea.sf-input {
   text-decoration: underline;
 }
 
+/* The first line ellipsizes in its own span, so the " · N options" suffix always stays visible. */
 .sf-card-question {
   border: 1px dashed var(--sf-border);
   border-radius: var(--sf-radius);
+  display: flex;
   font-size: var(--sf-size-small);
   margin: 0;
   overflow: hidden;
   padding: 6px 8px;
+  white-space: nowrap;
+}
+
+.sf-card-question-text {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sf-card-question-options {
+  flex: none;
+  white-space: pre;
 }
 
 .sf-card-waiting {
@@ -2437,6 +2450,89 @@ textarea.sf-input {
   padding: 0;
 }
 
+/* Phone-only markup (T-33). jsdom and desktops get it in the DOM; the base hides it and the phone block shows it. */
+.sf-board-view {
+  align-items: center;
+  display: inline-flex;
+  gap: 8px;
+}
+
+.sf-board-view-label {
+  display: none;
+}
+
+.sf-question-for-you {
+  display: none;
+}
+
+.sf-task-repo {
+  color: var(--sf-muted);
+  display: none;
+  font-size: var(--sf-size-small);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sf-question-from {
+  display: none;
+  margin: 0;
+}
+
+.sf-task-more {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  display: none;
+  padding: 12px;
+}
+
+.sf-qa-earlier {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  display: none;
+  padding: 12px;
+}
+
+.sf-task-more summary,
+.sf-qa-earlier summary {
+  cursor: pointer;
+}
+
+.sf-task-more dl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.sf-task-more dt {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
+.sf-task-more dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.sf-qa-earlier-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+
+.sf-qa-earlier-entry p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 /* Phones, below 640px. One block, last in the file, so equal specificity wins by source order. A selector
    here is at least as specific as every earlier rule that sets the same property on the same element
    (phoneLayout.css.test.ts checks); where a base rule is more specific its prefix is copied, never !important.
@@ -2620,5 +2716,54 @@ textarea.sf-input {
   .sf-task-actions .sf-button,
   .sf-form .sf-actions:not(.sf-action-bar) .sf-button {
     min-height: var(--sf-input-height);
+  }
+
+  /* T-33 phone design gaps. The View switch takes its own row under the header, above the lane pills. */
+  .sf-board-view {
+    flex-basis: 100%;
+    order: 1;
+  }
+
+  .sf-board-view-label {
+    display: inline;
+  }
+
+  .sf-task-repo,
+  .sf-task-more,
+  .sf-question-for-you,
+  .sf-question-from,
+  .sf-qa-earlier {
+    display: block;
+  }
+
+  /* Desktop duplicates of the phone-only markup. */
+  .sf-chip-repo,
+  .sf-stepper-more,
+  .sf-task-side .sf-details,
+  .sf-question-asker,
+  .sf-task-answering .sf-qa-panel {
+    display: none;
+  }
+
+  /* The doc comes first in the decision panel; the DOM keeps the heading first. */
+  .sf-panel-decision {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Flex items keep both vertical margins, so gap does the spacing instead. */
+  .sf-view .sf-panel-decision > * {
+    margin-bottom: 0;
+    margin-top: 0;
+  }
+
+  .sf-panel-decision > .sf-doc {
+    order: -1;
+  }
+
+  /* Request changes sits left of Approve in the action bar. */
+  .sf-action-bar .sf-gate-changes {
+    order: -1;
   }
 }

@@ -1,6 +1,6 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { QaLog } from "./QaLog";
+import { EarlierQuestions, QaLog } from "./QaLog";
 import type { QaEntry, QaOption } from "./qaEntries";
 
 afterEach(cleanup);
@@ -104,5 +104,30 @@ describe("QaLog", () => {
   it("no_not_recommended_badge", () => {
     render(<QaLog nowMs={NOW} entries={[entry({ answer: "B", options: OPTIONS })]} />);
     expect(screen.queryByText("Not recommended")).toBeNull();
+  });
+});
+
+describe("EarlierQuestions", () => {
+  it("earlier_questions_is_a_closed_disclosure", () => {
+    const answered = entry({ answer: "A. main: why", answeredAt: localIso(11, 7, 58), options: [option("A", "main", { chosen: true, recommended: true }), option("B", "develop")], question: "Which branch?" });
+    const unanswered = entry({ answer: null, answeredAt: null, question: "Go on?" });
+    const { container } = render(<EarlierQuestions nowMs={NOW} entries={[answered, unanswered]} />);
+    const details = container.querySelector("details.sf-qa-earlier") as HTMLDetailsElement;
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    const summary = details.querySelector("summary");
+    expect(summary).toHaveClass("sf-label");
+    expect(summary).toHaveTextContent(/^Earlier question \(2\)$/);
+    const items = [...details.querySelectorAll("li")];
+    expect(items).toHaveLength(2);
+    expect(items[0]).toHaveTextContent("Which branch?");
+    expect(items[0]).toHaveTextContent("You answered A. main (recommended) at 07:58");
+    expect(items[1]).toHaveTextContent("Go on?");
+    expect(items[1]).toHaveTextContent("No answer recorded");
+  });
+
+  it("no_earlier_entries_render_nothing", () => {
+    const { container } = render(<EarlierQuestions nowMs={NOW} entries={[]} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

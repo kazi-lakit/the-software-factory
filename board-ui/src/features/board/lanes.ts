@@ -6,7 +6,7 @@ export type Lane = { id: LaneId; name: string; hint?: string; statuses: readonly
 
 /** The Lanes view: every status sits in exactly one lane. */
 export const LANES: readonly Lane[] = [
-  { hint: "Oldest first. Each card says what the factory waits for.", id: "needs-you", name: "Needs you", statuses: ["spec_review", "plan_review", "pr_open", "blocked"] },
+  { hint: "Oldest first. Tap a task to act on it.", id: "needs-you", name: "Needs you", statuses: ["spec_review", "plan_review", "pr_open", "blocked"] },
   { hint: "Inbox needs Mark ready; ready tasks start when a slot frees.", id: "queued", name: "Queued", statuses: ["inbox", "ready"] },
   { id: "working", name: "Working", statuses: ["spec", "plan", "build", "verify", "review"] },
   { hint: "Finished and merged", id: "done", name: "Done", statuses: ["done"] },

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FactoryEvent } from "@factory/core";
 import { blocksFactories, factory, merge } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard } from "../../test/fakeBoard";
+import { atPhoneWidth, BOARD_CSS, renderedClasses, tooWide } from "../../test/phoneWidth";
 import { HistoryView } from "./HistoryView";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
@@ -423,5 +424,22 @@ describe("HistoryView restyle", () => {
       expect(control, name).toHaveClass("sf-select");
       expect(control.closest(".sf-inline-field"), name).not.toBeNull();
     }
+  });
+});
+
+describe("HistoryView at 360px", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = atPhoneWidth();
+  });
+  afterEach(() => restore());
+
+  it("history_fits_360", async () => {
+    seedTaskRow("T-1");
+    await addEvents(event("T-1", "you", "status", "2026-11-01T10:00:00.000Z"));
+    const { container } = renderHistory();
+    expect(await screen.findByRole("heading", { level: 1, name: "History" })).toBeInTheDocument();
+    expect(await screen.findByRole("table", { name: "History" })).toBeInTheDocument();
+    expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
   });
 });

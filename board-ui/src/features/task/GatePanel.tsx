@@ -173,7 +173,7 @@ export function GatePanel({ approvals, docs, gate, onReload, task }: Props) {
             ) : null}
             <div className="sf-actions sf-action-bar">
               {mergeOnGitHub ? null : <button type="submit" className="sf-button sf-button-accent" disabled={busy}>{gate === "pr" ? "Approve" : `Approve ${GATE_LABEL[gate]} v${seen}`}</button>}
-              <button type="button" className="sf-button" disabled={busy} onClick={() => void decide("changes")}>Request changes</button>
+              <button type="button" className="sf-button sf-gate-changes" disabled={busy} onClick={() => void decide("changes")}>Request changes</button>
             </div>
             {HINT[gate] ? <p className="sf-gate-hint">{HINT[gate]}</p> : null}
           </form>

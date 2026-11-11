@@ -1,6 +1,6 @@
 import { useId } from "react";
 import { optionText } from "./parseQuestion";
-import { answeredLine, qaCounts, qaLabelLine, type QaEntry } from "./qaEntries";
+import { answeredLine, earlierAnsweredLine, qaCounts, qaLabelLine, type QaEntry } from "./qaEntries";
 
 /** The task's questions and answers in one panel, newest first; the open question sits at the top. */
 export function QaLog({ entries, nowMs = Date.now() }: { entries: readonly QaEntry[]; nowMs?: number }) {
@@ -56,5 +56,23 @@ function QaItem({ entry, nowMs }: { entry: QaEntry; nowMs: number }) {
         <p className="sf-muted">No answer recorded</p>
       )}
     </li>
+  );
+}
+
+/** Phone answer view: the questions before the open one, in a closed disclosure. Renders nothing without entries. */
+export function EarlierQuestions({ entries, nowMs = Date.now() }: { entries: readonly QaEntry[]; nowMs?: number }) {
+  if (entries.length === 0) return null;
+  return (
+    <details className="sf-qa-earlier">
+      <summary className="sf-label">Earlier question ({entries.length})</summary>
+      <ol className="sf-qa-earlier-list">
+        {entries.map((entry) => (
+          <li key={entry.key} className="sf-qa-earlier-entry">
+            <p className="sf-qa-question">{entry.question}</p>
+            <p className="sf-muted">{earlierAnsweredLine(entry, nowMs) ?? "No answer recorded"}</p>
+          </li>
+        ))}
+      </ol>
+    </details>
   );
 }

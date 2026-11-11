@@ -324,6 +324,19 @@ describe("GatePanel action bar", () => {
     expect(bar).toContainElement(screen.getByRole("button", { name: "Request changes" }));
   });
 
+  it("spec_gate_buttons_share_the_action_bar", async () => {
+    const seeded = await atSpecGate();
+    task = seeded.task;
+    renderPanel(seeded.docs);
+    const changes = screen.getByRole("button", { name: "Request changes" });
+    const approve = screen.getByRole("button", { name: "Approve spec v1" });
+    expect(changes).toHaveClass("sf-gate-changes");
+    expect(changes.parentElement).toBe(approve.parentElement);
+    expect(changes.parentElement).toHaveClass("sf-actions", "sf-action-bar");
+    expect(approve.compareDocumentPosition(changes) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.querySelector(".sf-panel-decision > .sf-doc")).not.toBeNull();
+  });
+
   it("merge_on_github_gate_has_only_Request_changes_in_the_bar", async () => {
     const created = await fakeBoard().owner.createTask({ factoryId: "blocks", baseBranch: "dev", description: "", repo: "data", title: "Ship me" });
     const t = await fakeBoard().core.updateTask(created.taskId, created.version, { prUrl: "https://github.com/SELISEdigitalplatforms/blocks-data/pull/7", stage: "ship", status: "pr_open" });

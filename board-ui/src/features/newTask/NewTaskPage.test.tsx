@@ -8,6 +8,7 @@ import { TopBarLeadContext, type Lead } from "../../app/topBarLead";
 import { resetSelectedFactoryForTests, SELECTED_FACTORY_KEY } from "../factories/useFactories";
 import { now } from "../task/writeOutcome";
 import { peekReadyProblem } from "./createdNotice";
+import { atPhoneWidth, BOARD_CSS, renderedClasses, tooWide } from "../../test/phoneWidth";
 import { NewTaskPage } from "./NewTaskPage";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
@@ -74,7 +75,7 @@ describe("NewTaskPage layout", () => {
     renderPage();
     const form = await openForm();
     await within(form).findByLabelText("Waits for");
-    const controls = ["Factory", "Repo", "Title", "Description", "Base branch", "Waits for"].map((name) => within(form).getByLabelText(name));
+    const controls = ["Factory", "Repo", "Title", "What do you want done?", "Base branch", "Waits for"].map((name) => within(form).getByLabelText(name));
     const sw = ready(form);
     const all = [...controls, sw];
     for (let i = 1; i < all.length; i++) {
@@ -98,8 +99,8 @@ describe("NewTaskPage layout", () => {
     renderPage();
     const form = await openForm();
     const hintOf = (label: string) => document.getElementById(within(form).getByLabelText(label).getAttribute("aria-describedby") ?? "");
-    expect(hintOf("Description")).toHaveTextContent(DESCRIPTION_HINT);
-    expect(hintOf("Description")).toHaveClass("sf-hint");
+    expect(hintOf("What do you want done?")).toHaveTextContent(DESCRIPTION_HINT);
+    expect(hintOf("What do you want done?")).toHaveClass("sf-hint");
     expect(hintOf("Base branch")).toHaveTextContent(BASE_HINT);
     expect(hintOf("Base branch")).toHaveClass("sf-hint");
   });
@@ -187,7 +188,7 @@ describe("NewTaskPage create", () => {
     const form = await openForm();
     expect(within(form).getByLabelText("Base branch")).toHaveValue("dev");
     fireEvent.change(within(form).getByLabelText("Title"), { target: { value: "Add paging" } });
-    fireEvent.change(within(form).getByLabelText("Description"), { target: { value: "Page the list endpoint." } });
+    fireEvent.change(within(form).getByLabelText("What do you want done?"), { target: { value: "Page the list endpoint." } });
     fireEvent.change(within(form).getByLabelText("Repo"), { target: { value: "iam" } });
     fireEvent.click(within(form).getByRole("button", { name: "Create task" }));
     await waitFor(() => expect(onNavigate).toHaveBeenCalled());
@@ -417,7 +418,7 @@ describe("NewTaskPage Cancel and draft", () => {
     fireEvent.change(within(form).getByLabelText("Factory"), { target: { value: "delta" } });
     fireEvent.change(within(form).getByLabelText("Repo"), { target: { value: "ui" } });
     fireEvent.change(within(form).getByLabelText("Title"), { target: { value: "Kept" } });
-    fireEvent.change(within(form).getByLabelText("Description"), { target: { value: "Words" } });
+    fireEvent.change(within(form).getByLabelText("What do you want done?"), { target: { value: "Words" } });
     fireEvent.change(within(form).getByLabelText("Base branch"), { target: { value: "stg" } });
     first.unmount();
     const second = renderPage();
@@ -425,7 +426,7 @@ describe("NewTaskPage Cancel and draft", () => {
     expect(within(form).getByLabelText("Factory")).toHaveValue("delta");
     expect(within(form).getByLabelText("Repo")).toHaveValue("ui");
     expect(within(form).getByLabelText("Title")).toHaveValue("Kept");
-    expect(within(form).getByLabelText("Description")).toHaveValue("Words");
+    expect(within(form).getByLabelText("What do you want done?")).toHaveValue("Words");
     expect(within(form).getByLabelText("Base branch")).toHaveValue("stg");
     fireEvent.click(within(form).getByRole("button", { name: "Create task" }));
     await waitFor(() => expect(second.onNavigate).toHaveBeenCalled());
@@ -435,7 +436,7 @@ describe("NewTaskPage Cancel and draft", () => {
     expect(within(form).getByLabelText("Factory")).toHaveValue("alpha");
     expect(within(form).getByLabelText("Repo")).toHaveValue("api");
     expect(within(form).getByLabelText("Title")).toHaveValue("");
-    expect(within(form).getByLabelText("Description")).toHaveValue("");
+    expect(within(form).getByLabelText("What do you want done?")).toHaveValue("");
     expect(within(form).getByLabelText("Base branch")).toHaveValue("dev");
   });
 
@@ -467,7 +468,7 @@ describe("NewTaskPage link prefill", () => {
     renderPage();
     const form = await openForm();
     expect(within(form).getByLabelText("Title")).toHaveValue("Fix the typo");
-    expect(within(form).getByLabelText("Description")).toHaveValue("Fix it & more\nline two #1 é");
+    expect(within(form).getByLabelText("What do you want done?")).toHaveValue("Fix it & more\nline two #1 é");
     expect(within(form).getByLabelText("Repo")).toHaveValue("iam");
     expect(within(form).getByLabelText("Base branch")).toHaveValue("stg");
   });
@@ -512,7 +513,7 @@ describe("NewTaskPage link prefill", () => {
     renderPage();
     const form = await openForm();
     expect((within(form).getByLabelText("Title") as HTMLInputElement).value).toHaveLength(200);
-    expect((within(form).getByLabelText("Description") as HTMLTextAreaElement).value).toHaveLength(8000);
+    expect((within(form).getByLabelText("What do you want done?") as HTMLTextAreaElement).value).toHaveLength(8000);
   });
 
   it("clears_the_parameters_from_the_address_bar_after_reading_them", async () => {
@@ -530,7 +531,7 @@ describe("NewTaskPage link prefill", () => {
     renderPage();
     const form = await openForm();
     expect(within(form).getByLabelText("Title")).toHaveValue("From the link");
-    expect(within(form).getByLabelText("Description")).toHaveValue("");
+    expect(within(form).getByLabelText("What do you want done?")).toHaveValue("");
   });
 
   it("creates_nothing_until_create_task_is_clicked", async () => {
@@ -574,5 +575,31 @@ describe("NewTaskPage link prefill", () => {
     expect(within(form).getByLabelText("Factory")).toHaveValue("delta");
     expect(within(form).getByLabelText("Repo")).toHaveValue("api");
     expect(screen.getByText('Unknown repo "web" in the link; pick one.')).toBeInTheDocument();
+  });
+});
+
+describe("NewTaskPage phone", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = atPhoneWidth();
+  });
+  afterEach(() => restore());
+
+  it("description_label_reads_what_do_you_want_done", async () => {
+    renderPage();
+    const form = await openForm();
+    const field = within(form).getByLabelText("What do you want done?");
+    expect(field.tagName).toBe("TEXTAREA");
+    expect(document.getElementById(field.getAttribute("aria-describedby") ?? "")).toHaveTextContent(DESCRIPTION_HINT);
+  });
+
+  it("new_task_phone_markup_at_360", async () => {
+    const leads: Array<Lead | null> = [];
+    const { container } = renderPage(leads);
+    const form = await openForm();
+    expect(within(form).getByLabelText("What do you want done?")).toBeInTheDocument();
+    expect(within(form).getByRole("button", { name: "Create task" }).parentElement).toHaveClass("sf-action-bar");
+    expect(leads[leads.length - 1]?.label).toBe("Cancel");
+    expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
   });
 });

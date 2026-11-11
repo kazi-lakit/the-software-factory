@@ -306,7 +306,7 @@ function NewTaskForm({ entries, id, note, onCancel, onCreated, onFactory, onNote
         <input id={`${id}-title`} className="sf-input" autoFocus value={title} onChange={(event) => setTitle(event.target.value)} />
       </label>
       <div className="sf-field">
-        <label htmlFor={`${id}-description`}>Description</label>
+        <label htmlFor={`${id}-description`}>What do you want done?</label>
         <textarea
           id={`${id}-description`}
           className="sf-input"

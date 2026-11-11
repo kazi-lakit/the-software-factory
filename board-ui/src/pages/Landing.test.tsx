@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAuth } from "../app/providers/AuthProvider";
 import { isLoginConfigured } from "../lib/blocks/config";
 import { defaultDictionary } from "../lib/i18n/dictionary";
+import { atPhoneWidth, BOARD_CSS, renderedClasses, tooWide } from "../test/phoneWidth";
 import { LandingPage } from "./Landing";
 
 vi.mock("../app/providers/AuthProvider", () => ({ useAuth: vi.fn() }));
@@ -163,5 +164,20 @@ describe("LandingPage", () => {
     expect(Array.from(container.querySelectorAll("code")).map((c) => c.textContent)).toContain(`${window.location.origin}/login/callback`);
     expect(screen.getByRole("button", { name: "Continue with Blocks" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled();
+  });
+});
+
+describe("LandingPage at 360px", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = atPhoneWidth();
+  });
+  afterEach(() => restore());
+
+  it("landing_fits_360", () => {
+    const { container } = render(<LandingPage />);
+    expect(container.querySelector("header.sf-topbar")).not.toBeNull();
+    expect(screen.getAllByRole("button", { name: "Continue with Blocks" }).length).toBeGreaterThan(0);
+    expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
   });
 });

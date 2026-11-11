@@ -1,12 +1,15 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DEFAULT_SETTINGS, ForbiddenError, type StoredSettings } from "@factory/core";
+import { DEFAULT_SETTINGS, ForbiddenError, type FactoryEvent, type StoredSettings } from "@factory/core";
+import { describeEvent } from "../../lib/describeEvent";
+import { formatWhenShort } from "../../lib/formatTime";
 import { setReadyProblem } from "../newTask/createdNotice";
 import { describeWriteError } from "./writeOutcome";
 import { clearAllUnsent } from "../../lib/unsent";
 import { factory } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
 import { TopBarLeadContext, type Lead } from "../../app/topBarLead";
+import { atPhoneWidth, BOARD_CSS, renderedClasses, tooWide } from "../../test/phoneWidth";
 import { TaskView } from "./TaskView";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
@@ -302,7 +305,9 @@ describe("TaskView body", () => {
     await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nOne.", "spec-agent");
     const { container } = renderTask(task.taskId);
     const panel = await screen.findByRole("region", { name: "Your decision: approve the spec" });
-    expect(container.querySelector(".sf-task-main")!.firstElementChild).toBe(panel);
+    // The phone-only Details and history disclosure (hidden at 640px and up) comes first; the panel follows it.
+    expect(container.querySelector(".sf-task-main")!.firstElementChild).toHaveClass("sf-task-more");
+    expect(container.querySelector(".sf-task-main > .sf-task-more")!.nextElementSibling).toBe(panel);
     expect(panel).toHaveClass("sf-panel-decision");
   });
 
@@ -351,7 +356,9 @@ describe("TaskView body", () => {
     const { container } = renderTask(task.taskId);
     const panel = await screen.findByRole("region", { name: "Open now?" });
     const main = container.querySelector(".sf-task-main") as HTMLElement;
-    expect(main.firstElementChild).toBe(panel);
+    // The phone-only Details and history disclosure (hidden at 640px and up) comes first; the panel follows it.
+    expect(main.firstElementChild).toHaveClass("sf-task-more");
+    expect(main.firstElementChild!.nextElementSibling).toBe(panel);
     const log = screen.getByRole("region", { name: "Questions and answers" });
     const tablist = screen.getByRole("tablist", { name: "Task sections" });
     expect(follows(panel, log)).toBe(true);
@@ -516,8 +523,8 @@ describe("TaskView body", () => {
   it("last_event_row_is_gone", async () => {
     const task = await seedTask({ title: "Events" });
     renderTask(task.taskId);
-    await screen.findByRole("region", { name: "Details" });
-    expect(screen.queryByText("Last event")).toBeNull();
+    const details = await screen.findByRole("region", { name: "Details" });
+    expect(within(details).queryByText("Last event")).toBeNull();
   });
 
   it("runs_tab_lists_every_run_in_start_order", async () => {
@@ -686,5 +693,153 @@ describe("TaskView after New task", () => {
     renderTask(task.taskId);
     await screen.findByRole("heading", { level: 1, name: "Fresh" });
     expect(screen.queryByText("The task was created but not marked ready.")).not.toBeInTheDocument();
+  });
+});
+
+describe("TaskView phone markup", () => {
+  const more = (container: HTMLElement) => container.querySelector("details.sf-task-more") as HTMLDetailsElement;
+  const moreRow = (container: HTMLElement, term: string) =>
+    [...more(container).querySelectorAll("dt")].find((dt) => dt.textContent === term)?.nextElementSibling as HTMLElement | undefined;
+
+  it("shows_repo_to_base_under_the_title", async () => {
+    const task = await seedTask({ repo: "data", title: "Repo line" }, "build", { stage: "build" });
+    const { container } = renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 1, name: "Repo line" });
+    const line = container.querySelector("p.sf-task-repo") as HTMLElement;
+    expect(line).toHaveClass("sf-mono");
+    expect(line).toHaveTextContent(/^data → dev$/);
+    expect(container.querySelector(".sf-task-title-row")?.nextElementSibling).toBe(line);
+    const chips = within(screen.getByRole("list", { name: "Task summary" })).getAllByRole("listitem");
+    expect(chips[2]).toHaveClass("sf-chip-repo");
+  });
+
+  it("details_and_history_is_a_closed_disclosure", async () => {
+    const prUrl = "https://github.com/SELISEdigitalplatforms/blocks-data/pull/9";
+    const task = await seedTask({ title: "More" }, "pr_open", { branch: "factory/T-1-more", costUsd: 1.5, prUrl, stage: "ship" });
+    const at = "2099-01-02T10:00:00.000Z";
+    const newest: FactoryEvent = { action: "move", actor: "core", at, factoryId: "blocks", field: "status", from: "review", reason: "pr opened", taskId: task.taskId, to: "pr_open" };
+    await fakeBoard().core.addEvents([newest]);
+    const { container } = renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    const details = more(container);
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    const summary = details.querySelector("summary");
+    expect(summary).toHaveClass("sf-label");
+    expect(summary).toHaveTextContent(/^Details and history$/);
+    expect([...details.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Branch", "Cost", "PR", "Last event"]);
+    expect(moreRow(container, "Branch")).toHaveTextContent(/^factory\/T-1-more$/);
+    await waitFor(() => expect(moreRow(container, "Cost")?.textContent).toBe(detail("Cost").textContent));
+    expect(within(details).getByRole("link", { name: /pull\/9/ })).toHaveAttribute("target", "_blank");
+    const last = moreRow(container, "Last event")!;
+    expect(last).toHaveTextContent(describeEvent(newest).text);
+    expect(last).toHaveTextContent(formatWhenShort(at));
+  });
+
+  it("details_and_history_lists_waits_for_with_its_badge", async () => {
+    const { core, owner } = fakeBoard();
+    const dep = await seedTask({ title: "Dep" }, "build", { stage: "build" });
+    const child = await owner.createTask({ dependsOn: [dep.taskId], description: "", factoryId: "blocks", repo: "data", title: "Child" });
+    await core.updateTask(child.taskId, child.version, { status: "ready" });
+    const { container, onNavigate } = renderTask(child.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    expect([...more(container).querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Branch", "Cost", "Waits for", "Last event"]);
+    const waits = moreRow(container, "Waits for")!;
+    const link = within(waits).getByRole("link", { name: dep.taskId });
+    await waitFor(() => expect(link.closest("li")).toHaveTextContent("Build"));
+    await waitFor(() => expect(within(waits).getByText(`Waiting on ${dep.taskId}`)).toHaveClass("sf-badge"));
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledWith(`/tasks/${dep.taskId}`);
+  });
+
+  it("details_and_history_is_first_in_the_main_column", async () => {
+    const gated = await seedTask({ title: "Gated" }, "spec_review", { stage: "spec" });
+    await fakeBoard().core.addDoc(gated.taskId, "spec", "# Spec\nOne.", "spec-agent");
+    const first = renderTask(gated.taskId);
+    await screen.findByRole("button", { name: "Approve spec v1" });
+    expect(first.container.querySelector(".sf-task-main")?.firstElementChild).toBe(more(first.container));
+    first.unmount();
+    const stuck = await seedTask({ title: "Stuck" }, "blocked", { question: "Open now?", stage: "plan" });
+    const { container } = renderTask(stuck.taskId);
+    await screen.findByRole("region", { name: "Open now?" });
+    expect(container.querySelector(".sf-task-main")?.firstElementChild).toBe(more(container));
+  });
+
+  it("details_and_history_without_pr_or_events", async () => {
+    fakeBoard().ownerData.seed("FactoryTask", {
+      attempt: 0, baseBranch: "dev", costUsd: 0, description: "", gateOverrides: "{}", repo: "data", status: "inbox", taskId: "T-77", title: "Quiet row", version: 1
+    });
+    const { container } = renderTask("T-77");
+    await screen.findByRole("heading", { level: 1, name: "Quiet row" });
+    expect([...more(container).querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Branch", "Cost", "Last event"]);
+    expect(moreRow(container, "Branch")).toHaveTextContent(/^—$/);
+    expect(moreRow(container, "Last event")).toHaveTextContent(/^No history yet\.$/);
+  });
+
+  it("blocked_task_marks_the_main_column_and_shows_earlier", async () => {
+    const task = await seedTask({ title: "Stuck" }, "blocked", { question: "Open now?", stage: "plan" });
+    const ask = (to: string, at: string) => ({ action: "set" as const, actor: "spec-writer · sdk · run R-1", at, factoryId: "blocks", field: "question", from: null, reason: "asked", taskId: task.taskId, to });
+    await fakeBoard().core.addEvents([
+      ask("Which branch?", "2026-11-01T10:00:00.000Z"),
+      { action: "set", actor: "you", at: "2026-11-01T11:00:00.000Z", factoryId: "blocks", field: "answer", from: null, reason: "answered", taskId: task.taskId, to: "main" },
+      ask("Open now?", "2026-11-02T10:00:00.000Z")
+    ]);
+    const first = renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Open now?" });
+    expect(first.container.querySelector(".sf-task-main")).toHaveClass("sf-task-answering");
+    const earlier = first.container.querySelector("details.sf-qa-earlier") as HTMLElement;
+    expect(earlier).not.toHaveAttribute("open");
+    expect(earlier.querySelector("summary")).toHaveTextContent(/^Earlier question \(1\)$/);
+    expect(earlier).toHaveTextContent("You answered main at");
+    first.unmount();
+
+    const other = await seedTask({ title: "Moving" }, "build", { stage: "build" });
+    const { container } = renderTask(other.taskId);
+    await screen.findByRole("heading", { level: 1, name: "Moving" });
+    expect(container.querySelector(".sf-task-main")).not.toHaveClass("sf-task-answering");
+    expect(container.querySelector("details.sf-qa-earlier")).toBeNull();
+  });
+});
+
+describe("TaskView at 360px", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = atPhoneWidth();
+  });
+  afterEach(() => restore());
+
+  it("task_page_fits_360_with_phone_markup", async () => {
+    const task = await seedTask({ title: "Phone gate" }, "spec_review", { stage: "spec" });
+    await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nOne.", "spec-agent");
+    const { container } = renderTask(task.taskId);
+    const approve = await screen.findByRole("button", { name: "Approve spec v1" });
+    expect(container.querySelector(".sf-task-repo")).toHaveTextContent("data → dev");
+    const names = [...container.querySelectorAll(".sf-stepper-name")].map((el) => el.firstChild?.textContent);
+    expect(names).toEqual(["Spec", "Plan", "Build", "Verify", "Review", "PR"]);
+    const more = container.querySelector("details.sf-task-more") as HTMLElement;
+    expect(more).not.toHaveAttribute("open");
+    expect(more.querySelector("summary.sf-label")).toHaveTextContent("Details and history");
+    const bar = approve.closest(".sf-action-bar") as HTMLElement;
+    expect(bar).not.toBeNull();
+    expect(within(bar).getByRole("button", { name: "Request changes" })).toBeInTheDocument();
+    expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
+  });
+
+  it("question_panel_fits_360_with_phone_markup", async () => {
+    const question = "Which base?\nA. dev: matches (recommended)\nB. stg: later";
+    const task = await seedTask({ title: "Phone question" }, "blocked", { question, stage: "spec" });
+    const ask = (to: string, at: string) => ({ action: "set" as const, actor: "spec-writer · sdk · run R-1", at, factoryId: "blocks", field: "question", from: null, reason: "asked", taskId: task.taskId, to });
+    await fakeBoard().core.addEvents([
+      ask("Go on?", "2026-11-01T10:00:00.000Z"),
+      { action: "set", actor: "you", at: "2026-11-01T11:00:00.000Z", factoryId: "blocks", field: "answer", from: null, reason: "answered", taskId: task.taskId, to: "yes" },
+      ask(question, "2026-11-02T10:00:00.000Z")
+    ]);
+    const { container } = renderTask(task.taskId);
+    expect(await screen.findByRole("heading", { level: 2, name: "A question for you" })).toBeInTheDocument();
+    expect(container.querySelector("p.sf-question-from")).toHaveTextContent(/^Spec writer · Phone question$/);
+    expect(container.querySelectorAll(".sf-radio-card").length).toBeGreaterThan(0);
+    expect(container.querySelector("details.sf-qa-earlier")).not.toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "Send answer" }).parentElement).toHaveClass("sf-action-bar");
+    expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
   });
 });

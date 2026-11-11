@@ -9,6 +9,7 @@ import { fetchSessionClaims } from "../../lib/blocks/auth";
 import { clearAllUnsent } from "../../lib/unsent";
 import { blocksFactories, factory, merge, repoFixture } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard } from "../../test/fakeBoard";
+import { atPhoneWidth, BOARD_CSS, renderedClasses, tooWide } from "../../test/phoneWidth";
 import { checksSummary, gatesSummary, prGateNote, SettingsView } from "./SettingsView";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
@@ -782,5 +783,19 @@ describe("SettingsView action bars", () => {
     await screen.findByRole("form", { name: "Gates and limits" });
     expect(document.querySelectorAll(".sf-actions").length).toBeGreaterThan(0);
     expect(document.querySelector(".sf-action-bar")).toBeNull();
+  });
+});
+
+describe("SettingsView at 360px", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = atPhoneWidth();
+  });
+  afterEach(() => restore());
+
+  it("settings_fits_360", async () => {
+    const { container } = renderSettings();
+    expect(await screen.findByRole("form", { name: "Gates and limits" })).toBeInTheDocument();
+    expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
   });
 });

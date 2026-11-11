@@ -592,6 +592,14 @@ describe("board_css_task_card", () => {
     });
   });
 
+  it("card_question_line_ellipsizes_the_text_and_keeps_the_options_suffix", () => {
+    const line = t(".sf-card-question");
+    expect(line.display).toBe("flex");
+    expect(line).not.toHaveProperty("text-overflow");
+    expect(t(".sf-card-question-text")).toMatchObject({ "min-width": "0", overflow: "hidden", "text-overflow": "ellipsis", "white-space": "nowrap" });
+    expect(t(".sf-card-question-options")).toMatchObject({ flex: "none", "white-space": "pre" });
+  });
+
   it("card_id_uses_label_type", () => {
     expect(t(".sf-card-id")).toMatchObject({ ...labelType, color: "var(--sf-muted)" });
   });
@@ -628,9 +636,8 @@ describe("board_css_task_card", () => {
   });
 
   it("question_is_one_line_with_a_dashed_outline", () => {
-    expect(t(".sf-card-question")).toMatchObject({
-      border: "1px dashed var(--sf-border)", "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis", padding: "6px 8px"
-    });
+    expect(t(".sf-card-question")).toMatchObject({ border: "1px dashed var(--sf-border)", "white-space": "nowrap", overflow: "hidden", padding: "6px 8px" });
+    expect(t(".sf-card-question-text")).toMatchObject({ "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis" });
   });
 
   it("card_rows_are_6px_apart_with_no_extra_top_margins", () => {

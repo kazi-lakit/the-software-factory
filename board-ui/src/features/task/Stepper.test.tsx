@@ -119,3 +119,25 @@ describe("Stepper", () => {
     expect(screen.getByRole("img", { name: "Progress: Build, step 3 of 6" })).toBeInTheDocument();
   });
 });
+
+describe("Stepper short labels", () => {
+  const shortNames = (container: HTMLElement) =>
+    [...container.querySelectorAll(".sf-stepper-name")].map((el) => {
+      const copy = el.cloneNode(true) as HTMLElement;
+      copy.querySelector(".sf-stepper-more")?.remove();
+      return copy.textContent;
+    });
+
+  it("stepper_short_names_with_more_in_a_span", () => {
+    const { container } = renderStepper("plan_review", "plan", 1, "dev");
+    expect(shortNames(container)).toEqual(["Spec", "Plan", "Build", "Verify", "Review", "PR"]);
+    expect([...container.querySelectorAll(".sf-stepper-more")].map((el) => el.textContent)).toEqual([" · v1 waiting", " into dev"]);
+    expect(container.querySelectorAll(".sf-stepper-name")[1]?.querySelector(".sf-stepper-more")).not.toBeNull();
+  });
+
+  it("blocked_more_reads_question", () => {
+    const { container } = renderStepper("blocked", "build");
+    const build = container.querySelectorAll(".sf-stepper-name")[2];
+    expect(build?.querySelector(".sf-stepper-more")?.textContent).toBe(" · question");
+  });
+});
