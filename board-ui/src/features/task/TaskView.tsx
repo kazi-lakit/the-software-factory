@@ -55,7 +55,8 @@ function Section({ children, title }: { children: ReactNode; title: string }) {
   );
 }
 
-function BackToBoard({ label, onNavigate }: { label: string; onNavigate: (path: string) => void }) {
+/** The in-page link back to the Board, shared by the task and New task breadcrumbs. */
+export function BackToBoard({ label, onNavigate }: { label: string; onNavigate: (path: string) => void }) {
   return <a href="/" className="sf-back" onClick={(event) => followInApp(event, "/", onNavigate)}>{label}</a>;
 }
 

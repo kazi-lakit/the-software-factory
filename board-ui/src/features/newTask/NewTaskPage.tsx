@@ -10,6 +10,7 @@ import { useBoard } from "../board/useBoard";
 import { useFactories, useSelectedFactory, type FactoryEntry } from "../factories/useFactories";
 import { useSettings } from "../settings/useSettings";
 import { DependsOnPicker } from "../task/DependsOnPicker";
+import { BackToBoard } from "../task/TaskView";
 import { describeWriteError, NEVER_MAIN_BASE, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 import { setReadyProblem } from "./createdNotice";
 
@@ -39,6 +40,12 @@ const GATE_LABELS = [["spec", "Spec"], ["plan", "Plan"], ["pr", "PR"]] as const;
 type LinkChoice = { factory: string; repo: string; base: string };
 type LinkPrefill = { open: boolean; choice: LinkChoice | undefined };
 
+/** Keeps a field's unsent text, or forgets it when it equals the field's starting value. */
+function hold(field: (typeof NEW_TASK_FIELDS)[number], text: string, initial: string) {
+  if (text === initial) clearUnsent(newTaskId(field));
+  else keepUnsent(newTaskId(field), text);
+}
+
 /**
  * `/tasks/new?new=1&title=…&description=…&factory=…&repo=…&base=…` (made by /factory:new, forwarded from `/?new=1…`
  * by the Board) fills the form in. The values replace any unsent draft text and are written where the form reads its
@@ -48,10 +55,6 @@ type LinkPrefill = { open: boolean; choice: LinkChoice | undefined };
 function readLinkPrefill(): LinkPrefill {
   const params = new URLSearchParams(window.location.search);
   if (params.get("new") !== "1") return { choice: undefined, open: false };
-  const hold = (field: (typeof NEW_TASK_FIELDS)[number], text: string, initial: string) => {
-    if (text === initial) clearUnsent(newTaskId(field));
-    else keepUnsent(newTaskId(field), text);
-  };
   hold("title", (params.get("title") ?? "").slice(0, TITLE_MAX), "");
   hold("description", (params.get("description") ?? "").slice(0, DESCRIPTION_MAX), "");
   return {
@@ -73,10 +76,6 @@ function startFactory(entries: readonly FactoryEntry[], picked: string): Factory
  * repo; an unknown repo to the factory's first repo. The base is the link's, else the repo's own.
  */
 function applyLink(choice: LinkChoice, entries: readonly FactoryEntry[], picked: string): string {
-  const hold = (field: (typeof NEW_TASK_FIELDS)[number], text: string, initial: string) => {
-    if (text === initial) clearUnsent(newTaskId(field));
-    else keepUnsent(newTaskId(field), text);
-  };
   const fallback = startFactory(entries, picked);
   const named = choice.factory ? entries.find((entry) => entry.def.factoryId === choice.factory) : undefined;
   const unknownFactory = Boolean(choice.factory) && !named;
@@ -124,7 +123,7 @@ export function NewTaskPage({ onNavigate }: { onNavigate: Navigate }) {
   return (
     <div className="sf-view sf-new-task">
       <nav aria-label="Breadcrumb" className="sf-breadcrumb">
-        <a href="/" onClick={(event) => followInApp(event, "/", onNavigate)}>Board</a>
+        <BackToBoard label="Board" onNavigate={onNavigate} />
         <span> / New task</span>
       </nav>
       <h1 className="sf-page-title">New task</h1>

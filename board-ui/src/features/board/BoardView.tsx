@@ -23,7 +23,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const board = useBoard();
   const factories = useFactories();
   const filterId = useId();
-  const formId = useId();
+  const listIdBase = useId();
   const [picked, setPicked] = useSelectedFactory();
   const [repo, setRepo] = useState("");
   const [view, setView] = useBoardView();
@@ -159,7 +159,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             const stopped = lane.id === "stopped";
             // Done shows the two most recent (highest id); Stopped lists its cards only while open.
             const shown = lane.id === "done" ? [...tasks].sort((a, b) => byAge(b, a)).slice(0, 2) : stopped && !stoppedOpen ? [] : tasks;
-            const listId = stopped ? `${formId}-lane-stopped` : undefined;
+            const listId = stopped ? `${listIdBase}-lane-stopped` : undefined;
             const tone = lane.id === "needs-you" ? " sf-lane-needs-you" : stopped ? " sf-lane-stopped" : "";
             return (
               <section
@@ -217,7 +217,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             const collapsible = MUTED.has(status);
             const open = !collapsible || expanded.has(status);
             const listed = open && tasks.length > 0;
-            const listId = `${formId}-${status}`;
+            const listId = `${listIdBase}-${status}`;
             const tone = collapsible ? " sf-column-muted" : "";
             return (
               <section key={status} className={`sf-column${tone}${NEEDS_YOU.has(status) ? " sf-column-needs-you" : ""}${open ? "" : " sf-column-collapsed"}`} aria-label={STATUS_LABEL[status]}>
