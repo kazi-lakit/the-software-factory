@@ -113,9 +113,12 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
-        <div role="group" aria-label="Board view" className="sf-segmented">
-          <button type="button" className="sf-segment" aria-pressed={view === "lanes"} onClick={() => setView("lanes")}>Lanes</button>
-          <button type="button" className="sf-segment" aria-pressed={view === "stages"} onClick={() => setView("stages")}>All stages</button>
+        <div className="sf-board-view">
+          <span className="sf-label sf-board-view-label">View</span>
+          <div role="group" aria-label="Board view" className="sf-segmented">
+            <button type="button" className="sf-segment" aria-pressed={view === "lanes"} onClick={() => setView("lanes")}>Lanes</button>
+            <button type="button" className="sf-segment" aria-pressed={view === "stages"} onClick={() => setView("stages")}>All stages</button>
+          </div>
         </div>
         <a
           href={NEW_TASK_PATH}

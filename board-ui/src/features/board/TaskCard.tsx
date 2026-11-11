@@ -81,7 +81,12 @@ export function TaskCard({ onNavigate, showFactory = false, task, view = "lanes"
           ))}
         </p>
       ) : null}
-      {firstLine ? <p className="sf-card-question">{firstLine}</p> : null}
+      {firstLine ? (
+        <p className="sf-card-question">
+          {firstLine}
+          {options >= 2 ? <span className="sf-card-question-options"> · {options} options</span> : null}
+        </p>
+      ) : null}
       {cta ? (
         <a className="sf-button sf-button-small sf-card-cta" href={href} onClick={(event) => followInApp(event, href, onNavigate)}>
           {cta}

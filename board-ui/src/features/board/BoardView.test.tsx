@@ -5,6 +5,7 @@ import { factory, merge } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
 import { BoardView } from "./BoardView";
 import { BOARD_VIEW_KEY, resetBoardViewForTests } from "./useBoardView";
+import { atPhoneWidth, BOARD_CSS, renderedClasses, tooWide } from "../../test/phoneWidth";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
 
@@ -344,6 +345,37 @@ describe("BoardView toolbar", () => {
     await screen.findByRole("region", { name: "Needs you" });
     expect(search()).toHaveValue("");
   });
+
+  it("board_view_switch_has_a_view_label", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Needs you" });
+    const groups = screen.getAllByRole("group", { name: "Board view" });
+    expect(groups).toHaveLength(1);
+    const wrap = groups[0]!.parentElement!;
+    expect(wrap).toHaveClass("sf-board-view");
+    const label = wrap.querySelector("span.sf-label.sf-board-view-label");
+    expect(label).toHaveTextContent(/^View$/);
+    expect(within(groups[0]!).getAllByRole("button").map((b) => b.textContent)).toEqual(["Lanes", "All stages"]);
+  });
+});
+
+describe("BoardView at 360px", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = atPhoneWidth();
+  });
+  afterEach(() => restore());
+
+  it("board_fits_360_with_phone_markup", async () => {
+    await seedTask({ title: "Stuck" }, "blocked", { question: "Which base?\nA. dev: x (recommended)\nB. stg: y" });
+    const { container } = renderBoard();
+    await screen.findByText("Stuck");
+    expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
+    expect(container.querySelector(".sf-board-view-label")).toHaveTextContent("View");
+    expect(screen.getByRole("group", { name: "Board view" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Lane" })).toBeInTheDocument();
+    expect(screen.getByText("Oldest first. Tap a task to act on it.")).toBeInTheDocument();
+  });
 });
 
 describe("BoardView lanes", () => {
@@ -387,7 +419,7 @@ describe("BoardView lanes", () => {
     renderBoard();
     await within(await screen.findByRole("region", { name: "Needs you" })).findByText("Stuck");
     const needs = lane("Needs you");
-    expect(within(needs).getByText("Oldest first. Each card says what the factory waits for.")).toBeInTheDocument();
+    expect(within(needs).getByText("Oldest first. Tap a task to act on it.")).toBeInTheDocument();
     const name = needs.querySelector(".sf-lane-name");
     expect(name?.tagName).toBe("SPAN");
     expect(name).toHaveClass("sf-label");

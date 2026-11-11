@@ -2,6 +2,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ForbiddenError, type Task } from "@factory/core";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
+import { atPhoneWidth, BOARD_CSS, renderedClasses, tooWide } from "../../test/phoneWidth";
 import { TaskCard } from "./TaskCard";
 import { STATUS_LABEL } from "./status";
 import { BOARD_KEY } from "./useBoard";
@@ -163,6 +164,18 @@ describe("TaskCard", () => {
     expect(screen.queryByText(/The repo has dev and stg/)).not.toBeInTheDocument();
   });
 
+  it("blocked_card_question_line_ends_with_option_count", () => {
+    render(<TaskCard task={task({ question: "Which base?\nA. dev: x (recommended)\nB. stg: y\nC. main: z", status: "blocked" })} onNavigate={vi.fn()} />);
+    expect(document.querySelector(".sf-card-question")).toHaveTextContent(/^Which base\? · 3 options$/);
+    expect(document.querySelector(".sf-card-question-options")?.textContent).toBe(" · 3 options");
+  });
+
+  it("card_question_without_options_has_no_suffix", () => {
+    render(<TaskCard task={task({ question: "Which base?", status: "blocked" })} onNavigate={vi.fn()} />);
+    expect(document.querySelector(".sf-card-question")?.textContent).toBe("Which base?");
+    expect(document.querySelector(".sf-card-question-options")).toBeNull();
+  });
+
   it("a_blank_first_line_shows_no_question_box", () => {
     render(<TaskCard task={task({ question: "  \n x", status: "blocked" })} onNavigate={vi.fn()} />);
     expect(document.querySelector(".sf-card-question")).toBeNull();
@@ -313,5 +326,19 @@ describe("TaskCard Mark ready", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Mark ready" })).not.toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Mark ready" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
+describe("TaskCard at 360px", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = atPhoneWidth();
+  });
+  afterEach(() => restore());
+
+  it("card_fits_360_with_option_count", () => {
+    const { container } = render(<TaskCard task={task({ question: "Which base?\nA. dev: x (recommended)\nB. stg: y\nC. main: z", stage: "build", status: "blocked" })} onNavigate={vi.fn()} />);
+    expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
+    expect(container.querySelector(".sf-card-question-options")?.textContent).toBe(" · 3 options");
   });
 });

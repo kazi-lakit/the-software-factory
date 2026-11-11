@@ -3,9 +3,15 @@
 // rendered class a fixed width wider than the phone's content box. Content inside an `overflow-x: auto`
 // container scrolls on purpose (the lane pills, tables, code blocks), so it is skipped.
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { classesOf, expand, parseItems, type Rule, specificity, stripComments, subject } from "./cssMedia";
 
 const PHONE_WIDTH = 360;
+
+/** The app's board.css as text. */
+export const BOARD_CSS = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../app/board.css"), "utf8");
 
 /** Sets `window.innerWidth` to 360 and stubs `matchMedia` for width queries. Returns a function that restores both. */
 export function atPhoneWidth(): () => void {
