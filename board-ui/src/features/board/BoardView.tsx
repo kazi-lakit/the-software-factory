@@ -330,7 +330,10 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
 
       {board.data && view === "stages" ? (
         <>
-        <p className="sf-columns-hint">Every status as its own column. Outlined columns wait for you. Scroll sideways for Review, PR open, Done, Blocked and Cancelled</p>
+        <p className="sf-columns-hint">
+          <span>Every status as its own column. Outlined columns wait for you.</span>
+          <span>Scroll sideways for Review, PR open, Done, Blocked and Cancelled</span>
+        </p>
         <div className="sf-columns">
           {COLUMNS.map((status) => {
             const tasks = byStatus.get(status) ?? [];
@@ -342,17 +345,17 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             return (
               <section key={status} className={`sf-column${tone}${NEEDS_YOU.has(status) ? " sf-column-needs-you" : ""}${open ? "" : " sf-column-collapsed"}`} aria-label={STATUS_LABEL[status]}>
                 <h3 className="sf-column-head">
+                  <span className="sf-label sf-lane-name">{STATUS_LABEL[status]}</span>
+                  <span className="sf-count sf-mono">{tasks.length}</span>
                   {collapsible ? (
-                    <button type="button" className="sf-column-toggle" aria-expanded={open} aria-controls={listed ? listId : undefined} onClick={() => toggle(status)}>
-                      {STATUS_LABEL[status]} ({tasks.length})
+                    <button type="button" className="sf-show-toggle" aria-expanded={open} aria-controls={listed ? listId : undefined} onClick={() => toggle(status)}>
+                      {open ? "Hide" : "Show"}
                     </button>
-                  ) : (
-                    <>
-                      <span>{STATUS_LABEL[status]}</span>
-                      <span className="sf-count sf-mono">{tasks.length}</span>
-                    </>
-                  )}
+                  ) : null}
                 </h3>
+                {open && tasks.length === 0 ? (
+                  <p className="sf-empty sf-column-empty">{NEEDS_YOU.has(status) ? "Nothing waiting" : "Nothing here"}</p>
+                ) : null}
                 {listed ? (
                   <ul id={listId} className="sf-card-list">
                     {tasks.map((task) => (

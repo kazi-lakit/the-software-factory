@@ -18,6 +18,12 @@ function renderBoard() {
 }
 
 const column = (name: string) => screen.getByRole("region", { name });
+/** The Show/Hide button of a collapsible All stages column (Done, Cancelled). */
+const toggleOf = (name: string) => within(column(name)).getByRole("button", { name: /^(Show|Hide)$/ });
+const findToggle = async (name: string) => {
+  await screen.findByRole("region", { name });
+  return toggleOf(name);
+};
 
 /** The 13-column tests run in All stages; Lanes is the default. */
 const showStages = () => window.localStorage.setItem(BOARD_VIEW_KEY, "stages");
@@ -70,9 +76,12 @@ describe("BoardView", () => {
     await seedTask({ title: "Shipped" }, "done");
     await seedTask({ title: "Dropped" }, "cancelled");
     renderBoard();
-    const done = await screen.findByRole("button", { name: "Done (1)" });
+    const done = await findToggle("Done");
     expect(done).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByRole("button", { name: "Cancelled (1)" })).toHaveAttribute("aria-expanded", "false");
+    expect(done).toHaveTextContent("Show");
+    expect(toggleOf("Cancelled")).toHaveAttribute("aria-expanded", "false");
+    expect(toggleOf("Cancelled")).toHaveTextContent("Show");
+    expect(column("Done").querySelector(".sf-count")).toHaveTextContent("1");
     expect(screen.queryByText("Shipped")).not.toBeInTheDocument();
     fireEvent.click(done);
     expect(done).toHaveAttribute("aria-expanded", "true");
@@ -154,8 +163,8 @@ describe("BoardView", () => {
   it("points_aria_controls_only_at_a_rendered_list", async () => {
     await seedTask({ title: "Shipped" }, "done");
     renderBoard();
-    const done = await screen.findByRole("button", { name: "Done (1)" });
-    const cancelled = screen.getByRole("button", { name: "Cancelled (0)" });
+    const done = await findToggle("Done");
+    const cancelled = toggleOf("Cancelled");
     expect(done).not.toHaveAttribute("aria-controls");
     fireEvent.click(done);
     const listId = done.getAttribute("aria-controls");
@@ -753,8 +762,8 @@ describe("BoardView lanes", () => {
     expect(regionNames()).toEqual(ORDER);
     expect(window.localStorage.getItem("factory-board:view")).toBe("stages");
     expect(screen.getByRole("button", { name: "All stages" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Done (0)" })).toHaveAttribute("aria-expanded", "false");
-    expect(screen.getByRole("button", { name: "Cancelled (0)" })).toHaveAttribute("aria-expanded", "false");
+    expect(toggleOf("Done")).toHaveAttribute("aria-expanded", "false");
+    expect(toggleOf("Cancelled")).toHaveAttribute("aria-expanded", "false");
   });
 
   it("restores_the_stored_view_on_reload", async () => {
@@ -815,16 +824,40 @@ const NEEDS_YOU_NAMES = ["Spec review", "Plan review", "PR open", "Blocked"];
 describe("BoardView all stages restyle", () => {
   beforeEach(showStages);
 
-  it("shows_one_hint_line_above_the_strip", async () => {
+  it("shows_a_two_part_hint_row_above_the_columns", async () => {
     await seedTask({ title: "First" });
     const { container } = renderBoard();
-    const hint = await screen.findByText(/Every status as its own column\./);
-    expect(hint.textContent).toContain("Every status as its own column. Outlined columns wait for you.");
-    expect(hint.textContent).toContain("Scroll sideways for Review, PR open, Done, Blocked and Cancelled");
-    expect(hint.tagName).toBe("P");
-    expect(hint.nextElementSibling).toHaveClass("sf-columns");
+    await screen.findByText("First");
+    const hint = container.querySelector(".sf-columns-hint");
+    expect(hint).not.toBeNull();
+    expect([...hint!.children].map((c) => c.textContent)).toEqual([
+      "Every status as its own column. Outlined columns wait for you.",
+      "Scroll sideways for Review, PR open, Done, Blocked and Cancelled"
+    ]);
+    expect(hint!.nextElementSibling).toHaveClass("sf-columns");
     expect(container.querySelectorAll(".sf-columns")).toHaveLength(1);
     expect(container.querySelectorAll(".sf-columns > section")).toHaveLength(13);
+  });
+
+  it("empty_columns_say_nothing_here_or_nothing_waiting", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Inbox" });
+    expect(within(column("Inbox")).getByText("Nothing here")).toBeInTheDocument();
+    for (const name of NEEDS_YOU_NAMES) expect(within(column(name)).getByText("Nothing waiting")).toBeInTheDocument();
+    expect(within(column("Done")).queryByText(/Nothing/)).toBeNull();
+    fireEvent.click(toggleOf("Done"));
+    expect(within(column("Done")).getByText("Nothing here")).toBeInTheDocument();
+  });
+
+  it("column_names_use_the_lane_name_style", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Inbox" });
+    for (const name of ORDER) {
+      const label = column(name).querySelector(".sf-lane-name");
+      expect(label?.tagName).toBe("SPAN");
+      expect(label).toHaveClass("sf-label");
+      expect(label).toHaveTextContent(name);
+    }
   });
 
   it("marks_exactly_the_four_owner_columns_as_needs_you", async () => {
@@ -894,8 +927,9 @@ describe("BoardView all stages restyle", () => {
     await seedTask({ title: "Shipped" }, "done");
     await seedTask({ title: "Dropped" }, "cancelled");
     renderBoard();
-    for (const name of ["Done (1)", "Cancelled (1)"]) {
-      expect(await screen.findByRole("button", { name })).toHaveAttribute("aria-expanded", "false");
+    for (const name of ["Done", "Cancelled"]) {
+      expect(await findToggle(name)).toHaveAttribute("aria-expanded", "false");
+      expect(column(name).querySelector(".sf-count")).toHaveTextContent("1");
     }
     expect(column("Done")).toHaveClass("sf-column-collapsed");
     expect(column("Cancelled")).toHaveClass("sf-column-collapsed");
@@ -903,16 +937,19 @@ describe("BoardView all stages restyle", () => {
     expect(screen.queryByText("Dropped")).toBeNull();
   });
 
-  it("clicking_the_header_expands_and_clicking_again_collapses", async () => {
+  it("show_expands_and_hide_collapses", async () => {
     await seedTask({ title: "Shipped" }, "done");
     renderBoard();
-    const toggle = await screen.findByRole("button", { name: "Done (1)" });
+    const toggle = await findToggle("Done");
+    expect(toggle).toHaveTextContent("Show");
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "true");
+    expect(toggle).toHaveTextContent("Hide");
     expect(screen.getByText("Shipped")).toBeInTheDocument();
     expect(column("Done")).not.toHaveClass("sf-column-collapsed");
     fireEvent.click(toggle);
     expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).toHaveTextContent("Show");
     expect(screen.queryByText("Shipped")).toBeNull();
     expect(column("Done")).toHaveClass("sf-column-collapsed");
   });
@@ -920,7 +957,7 @@ describe("BoardView all stages restyle", () => {
   it("a_collapsed_column_with_tasks_has_no_aria_controls", async () => {
     await seedTask({ title: "Shipped" }, "done");
     renderBoard();
-    const toggle = await screen.findByRole("button", { name: "Done (1)" });
+    const toggle = await findToggle("Done");
     expect(toggle).not.toHaveAttribute("aria-controls");
     fireEvent.click(toggle);
     const target = toggle.getAttribute("aria-controls");
@@ -931,16 +968,16 @@ describe("BoardView all stages restyle", () => {
   it("expansion_is_not_remembered", async () => {
     await seedTask({ title: "Shipped" }, "done");
     renderBoard();
-    fireEvent.click(await screen.findByRole("button", { name: "Done (1)" }));
+    fireEvent.click(await findToggle("Done"));
     expect(screen.getByText("Shipped")).toBeInTheDocument();
     cleanup();
     renderBoard();
-    expect(await screen.findByRole("button", { name: "Done (1)" })).toHaveAttribute("aria-expanded", "false");
-    fireEvent.click(screen.getByRole("button", { name: "Done (1)" }));
+    expect(await findToggle("Done")).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggleOf("Done"));
     expect(screen.getByText("Shipped")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Lanes" }));
     fireEvent.click(screen.getByRole("button", { name: "All stages" }));
-    expect(screen.getByRole("button", { name: "Done (1)" })).toHaveAttribute("aria-expanded", "false");
+    expect(toggleOf("Done")).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("Shipped")).toBeNull();
   });
 
