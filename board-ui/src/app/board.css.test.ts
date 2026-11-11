@@ -86,10 +86,9 @@ describe("the stylesheets", () => {
     expect(cssClashes(read("styles.css"))).toEqual([]);
   });
 
-  it("styles_css_dark_block_does_not_use_prefers_color_scheme", () => {
+  it("styles_css_does_not_use_prefers_color_scheme", () => {
     const css = read("styles.css");
     expect(css).not.toContain("prefers-color-scheme");
-    expect(css).toContain(':root:not([data-theme="light"])');
   });
 });
 
@@ -1031,5 +1030,63 @@ describe("board_css_all_stages_window_fit", () => {
         expect(selector).not.toMatch(/\.sf-column$|\.sf-column-collapsed$|\.sf-columns-hint$/);
       }
     }
+  });
+});
+
+describe("board_css_screen_panel", () => {
+  const css = read("board.css");
+
+  it("screen_panel_is_a_centred_surface_panel", () => {
+    expect(tokens(css, ".sf-screen-panel")).toMatchObject({
+      background: "var(--sf-surface)",
+      border: "1px solid var(--sf-border)",
+      "border-radius": "var(--sf-radius)",
+      padding: "26px",
+      "max-width": "380px",
+      width: "100%",
+      "overflow-wrap": "anywhere"
+    });
+  });
+
+  it("screen_wrapper_centres_on_the_page_field", () => {
+    const t = tokens(css, ".sf-screen");
+    expect(t).toMatchObject({ display: "flex", "align-items": "center", "justify-content": "center", "min-height": "100vh" });
+    expect(t).not.toHaveProperty("background");
+    expect(t).not.toHaveProperty("background-color");
+  });
+
+  it("screen_in_the_shell_is_not_viewport_tall", () => {
+    expect(tokens(css, ".sf-main .sf-screen")["min-height"]).toBe("0");
+  });
+
+  it("screen_rules_use_only_sf_tokens", () => {
+    const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    let seen = 0;
+    for (const m of clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!(m[1] ?? "").trim().startsWith(".sf-screen")) continue;
+      seen++;
+      expect(m[2] ?? "").not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
+});
+
+describe("board_css_table_without_bare_rules", () => {
+  const css = read("board.css");
+
+  it("sf_table_is_full_width", () => {
+    expect(tokens(css, ".sf-table").width).toBe("100%");
+  });
+
+  it("sf_table_cells_align_left_and_middle", () => {
+    expect(tokens(css, ".sf-table th,\n.sf-table td")).toMatchObject({ "text-align": "left", "vertical-align": "middle" });
+  });
+
+  it("sf_table_rows_fade_their_hover", () => {
+    expect(tokens(css, ".sf-table tbody tr").transition).toBe("background-color 150ms ease");
+  });
+
+  it("checks_diff_pre_uses_sf_tokens", () => {
+    expect(tokens(css, ".sf-checks-diff pre")).toMatchObject({ background: "var(--sf-surface-sunk)", color: "var(--sf-text)" });
   });
 });

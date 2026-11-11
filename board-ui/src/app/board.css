@@ -591,6 +591,101 @@ textarea.sf-input {
   padding: 6px 10px;
 }
 
+/* One centred panel on the page field for the screens outside the Board:
+   not-owner, sign-in errors, loading, 404, error and profile. */
+.sf-screen {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px 16px;
+}
+
+.sf-main .sf-screen {
+  align-items: flex-start;
+  min-height: 0;
+  padding: 24px 0;
+}
+
+.sf-screen-panel {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 380px;
+  overflow-wrap: anywhere;
+  padding: 26px;
+  width: 100%;
+}
+
+.sf-screen-panel p {
+  margin: 0;
+}
+
+/* A link styled as a button (404, error page) sizes like a real button. */
+.sf-screen-panel > .sf-button {
+  align-self: flex-start;
+}
+
+.sf-screen-text {
+  color: var(--sf-muted);
+}
+
+.sf-screen-who {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.sf-screen-who .sf-avatar {
+  height: 40px;
+  width: 40px;
+}
+
+.sf-screen-name {
+  font-weight: 600;
+}
+
+.sf-screen-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+
+.sf-screen-facts dt {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
+.sf-screen-facts dd {
+  margin: 0;
+}
+
+.sf-screen-raw summary {
+  color: var(--sf-muted);
+  cursor: pointer;
+}
+
+.sf-json {
+  background: var(--sf-surface-sunk);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
+  font-family: var(--sf-mono);
+  font-size: 13px;
+  margin: 8px 0 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-wrap: normal;
+  padding: 10px 12px;
+  white-space: pre;
+}
+
 /* Board */
 .sf-toolbar {
   align-items: center;
@@ -1182,6 +1277,13 @@ textarea.sf-input {
   border-collapse: collapse;
   font-size: 13px;
   min-width: 0;
+  width: 100%;
+}
+
+.sf-table th,
+.sf-table td {
+  text-align: left;
+  vertical-align: middle;
 }
 
 .sf-table td {
@@ -1202,6 +1304,7 @@ textarea.sf-input {
 
 .sf-table tbody tr {
   border-bottom: 1px solid var(--sf-chrome-border);
+  transition: background-color 150ms ease;
 }
 
 .sf-table tbody tr:last-child {
@@ -1635,7 +1738,11 @@ textarea.sf-input {
 }
 
 .sf-checks-diff pre {
+  background: var(--sf-surface-sunk);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
   margin: 0;
+  padding: 10px 12px;
   overflow-x: auto;
   white-space: pre-wrap;
 }
