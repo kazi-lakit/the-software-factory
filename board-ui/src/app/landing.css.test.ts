@@ -90,9 +90,23 @@ describe("landing styles", () => {
     expect(f.height).toBe("100%");
     expect(f["pointer-events"]).toBe("none");
     expect(f["z-index"]).toBe("0");
-    const rest = tokens(css, ".sf-landing > :not(.sf-landing-field)");
+    const rest = tokens(css, ".sf-landing > :not(.sf-landing-field):not(.sf-topbar)");
     expect(rest.position).toBe("relative");
     expect(rest["z-index"]).toBe("1");
+  });
+
+  it("landing_top_bar_stays_sticky_like_the_shared_top_bar", () => {
+    // The content-lift rule must not reach the top bar, or it outranks .sf-topbar and unsticks it.
+    expect(css).not.toContain(".sf-landing > :not(.sf-landing-field) {");
+    const start = css.indexOf("/* Landing */");
+    const end = css.indexOf("/* Below the 1024px");
+    const landing = css.slice(start, end);
+    for (const m of landing.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+      const selector = (m[1] as string).trim();
+      if (/sf-topbar|:not\(\.sf-landing-field\)\s*$/.test(selector) && !selector.includes(":not(.sf-topbar)")) {
+        expect(m[2], selector).not.toMatch(/position\s*:/);
+      }
+    }
   });
 
   it("landing_section_has_no_shadow_raw_colour_or_other_radius", () => {

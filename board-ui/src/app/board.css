@@ -1720,7 +1720,8 @@ textarea.sf-input {
   z-index: 0;
 }
 
-.sf-landing > :not(.sf-landing-field) {
+/* Lift the content above the field. The top bar keeps its own sticky position and z-index. */
+.sf-landing > :not(.sf-landing-field):not(.sf-topbar) {
   position: relative;
   z-index: 1;
 }
