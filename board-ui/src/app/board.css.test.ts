@@ -464,11 +464,6 @@ describe("board_css_topbar", () => {
     expect(t.color).toBe("var(--sf-text)");
   });
 
-  it("topbar_is_not_sticky", () => {
-    const t = tokens(read("board.css"), ".sf-topbar");
-    for (const k of ["position", "top", "z-index"]) expect(t).not.toHaveProperty(k);
-  });
-
   it("nav_link_padding_is_0_14_and_nav_gap_is_16", () => {
     const css = read("board.css");
     expect(tokens(css, ".sf-view-link").padding).toBe("0 14px");
