@@ -406,7 +406,7 @@ describe("board_css_select", () => {
 
   it("labels_beside_selects_are_label_type_muted", () => {
     const css = read("board.css");
-    for (const s of [".sf-field > span,\n.sf-inline-field > span,\n.sf-doc-controls label", ".sf-fieldset legend"]) {
+    for (const s of [".sf-field > span,\n.sf-field > label,\n.sf-inline-field > span,\n.sf-doc-controls label", ".sf-fieldset legend"]) {
       const t = tokens(css, s);
       expect(t.color, s).toBe("var(--sf-muted)");
       expect(t, s).toMatchObject(labelType);

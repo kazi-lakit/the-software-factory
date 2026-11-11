@@ -531,6 +531,7 @@ textarea.sf-input {
 }
 
 .sf-field > span,
+.sf-field > label,
 .sf-inline-field > span,
 .sf-doc-controls label {
   color: var(--sf-muted);
