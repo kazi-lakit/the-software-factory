@@ -2,7 +2,7 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setTheme } from "../../lib/theme";
-import { DOT_ALPHA_MAX, DOT_RGB } from "./dotField";
+import { DOT_ALPHA_MAX, DOT_RGB, FRAGMENT_SHADER } from "./dotField";
 import { DotField } from "./DotField";
 
 type Fake = Record<string, ReturnType<typeof vi.fn>>;
@@ -134,11 +134,45 @@ describe("DotField", () => {
     expect(gl.uniform1f).toHaveBeenCalledWith(expect.anything(), DOT_ALPHA_MAX.light);
   });
 
-  it("blends_alpha_separately_so_the_dot_alpha_is_not_squared", () => {
-    const { gl } = withGl();
+  it.each(["dark", "light"] as const)("%s: a dot shows as its colour at its alpha over the page", (theme) => {
+    // Model what the page shows: the fragment output, the blend into the cleared canvas, then the browser
+    // compositing the canvas over the page (premultiplied unless the context opts out).
+    document.documentElement.setAttribute("data-theme", theme);
+    const { getContext, gl } = withGl();
     render(<DotField />);
-    expect(gl.blendFuncSeparate).toHaveBeenCalledWith(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    expect(gl.blendFunc).not.toHaveBeenCalled();
+    const attrs = (getContext.mock.calls[0]?.[1] ?? {}) as WebGLContextAttributes;
+    const premultiplied = attrs.premultipliedAlpha !== false;
+    const factor = (f: unknown, srcA: number, dstA: number): number => {
+      if (f === gl.ZERO) return 0;
+      if (f === gl.ONE) return 1;
+      if (f === gl.SRC_ALPHA) return srcA;
+      if (f === gl.ONE_MINUS_SRC_ALPHA) return 1 - srcA;
+      if (f === gl.DST_ALPHA) return dstA;
+      if (f === gl.ONE_MINUS_DST_ALPHA) return 1 - dstA;
+      throw new Error("unmodelled blend factor");
+    };
+    const separate = (gl.blendFuncSeparate as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    const single = (gl.blendFunc as ReturnType<typeof vi.fn>).mock.calls.at(-1);
+    const [srcRgb, dstRgb, srcAlpha, dstAlpha] = separate ?? (single ? [single[0], single[1], single[0], single[1]] : []);
+    expect(gl.enable).toHaveBeenCalledWith(gl.BLEND);
+    const out = /outColor\s*=\s*vec4\((.+),\s*vAlpha\);/.exec(FRAGMENT_SHADER)?.[1]?.trim();
+    const fragmentRgb = (c: number, a: number): number => {
+      if (out === "uColor") return c;
+      if (out === "uColor * vAlpha") return c * a;
+      throw new Error(`unmodelled fragment output: ${out}`);
+    };
+    const a = DOT_ALPHA_MAX[theme];
+    const bg = [0.3, 0.5, 0.7];
+    DOT_RGB[theme].forEach((channel, i) => {
+      const c = channel / 255;
+      const src = fragmentRgb(c, a);
+      // Over the cleared, transparent canvas the destination is 0 in every channel.
+      const storedRgb = src * factor(srcRgb, a, 0) + 0 * factor(dstRgb, a, 0);
+      const storedA = a * factor(srcAlpha, a, 0) + 0 * factor(dstAlpha, a, 0);
+      const shown = (premultiplied ? storedRgb : storedRgb * storedA) + (bg[i] as number) * (1 - storedA);
+      expect(storedA).toBeCloseTo(a, 6);
+      expect(shown).toBeCloseTo(c * a + (bg[i] as number) * (1 - a), 6);
+    });
   });
 
   it("survives_a_strict_mode_remount_on_the_same_canvas", async () => {

@@ -30,7 +30,7 @@ export function DotField() {
     if (!on || !canvas) return;
     clearTimeout(pendingLoss.current);
     pendingLoss.current = undefined;
-    const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: false }) as WebGL2RenderingContext | null;
+    const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: true }) as WebGL2RenderingContext | null;
     if (!gl || gl.isContextLost()) {
       setOn(false);
       return;

@@ -91,7 +91,8 @@ out vec4 outColor;
 void main() {
   vec2 p = gl_PointCoord - vec2(0.5);
   if (length(p) > 0.5) discard;
-  outColor = vec4(uColor, vAlpha);
+  // Premultiplied output, to match the default premultiplied canvas.
+  outColor = vec4(uColor * vAlpha, vAlpha);
 }
 `;
 
@@ -147,9 +148,9 @@ export function startField(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext
   gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
 
   gl.enable(gl.BLEND);
-  // Colour blends by source alpha; alpha accumulates as src + dst * (1 - src), so a dot over the cleared,
-  // transparent canvas keeps its own alpha (blendFunc would store srcA * srcA on a non-premultiplied canvas).
-  gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+  // Premultiplied "over": the fragment carries colour * alpha, and the canvas is premultiplied (the default),
+  // so the page shows uColor * a + page * (1 - a) for a dot of alpha a.
+  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   gl.clearColor(0, 0, 0, 0);
 
   let count = 0;
