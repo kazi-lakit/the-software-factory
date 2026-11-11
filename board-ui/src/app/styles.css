@@ -10,27 +10,5 @@ button { cursor: pointer; font: inherit; }
 :root { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 h1, h2, h3 { letter-spacing: -0.01em; }
 
-/* The signed-in shell and every other screen are AppShell.tsx + board.css
-   (sf-* classes). What is left here is the landing page (pages/Login.tsx)
-   and Alert, on --sf-* tokens until the landing page is replaced. */
-.brand-mark { align-items: center; background: var(--sf-primary); border-radius: var(--sf-radius); color: var(--sf-on-primary); display: flex; flex-shrink: 0; height: 30px; justify-content: center; width: 30px; }
-
-.primary-button { align-items: center; background: var(--sf-primary); border: 1px solid var(--sf-primary); border-radius: var(--sf-radius); color: var(--sf-on-primary); display: inline-flex; font-weight: 600; gap: 8px; min-height: 40px; padding: 0 13px; transition: background-color 150ms ease, transform 0.05s ease; }
-.primary-button:hover:not(:disabled) { background: var(--sf-primary-hover); }
-.primary-button:active:not(:disabled) { transform: translateY(1px); }
-.primary-button:disabled { cursor: not-allowed; opacity: 0.6; }
-
-/* Landing page */
-.auth-screen { align-items: center; display: flex; justify-content: center; min-height: 100vh; padding: 24px; }
-.auth-card { background: var(--sf-surface); border: 1px solid var(--sf-border); border-radius: var(--sf-radius); display: grid; gap: 14px; max-width: 380px; padding: 32px; width: 100%; }
-.auth-brand { align-items: center; display: flex; font-weight: 700; gap: 10px; }
-.auth-card h2 { font-size: 22px; margin: 0; }
-.auth-card > p { color: var(--sf-muted); margin: 0; }
-.auth-submit { justify-content: center; width: 100%; }
-
-/* Alerts */
-.alert { border: 1px solid var(--sf-border); border-radius: var(--sf-radius); font-size: 13px; line-height: 1.5; padding: 12px 14px; }
-.alert code { background: var(--sf-surface-sunk); border-radius: var(--sf-radius); padding: 1px 5px; }
-.alert-warn { background: var(--sf-primary-soft); color: var(--sf-on-primary-soft); }
-.alert-error { background: var(--sf-removed-soft); border-color: var(--sf-removed); color: var(--sf-text); }
-.alert-info { background: var(--sf-surface-sunk); color: var(--sf-text); }
+/* The signed-in shell, the landing page and every other screen are board.css
+   (sf-* classes). */

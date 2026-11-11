@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { DOT_ALPHA_MAX, DOT_RGB } from "../features/landing/dotField";
 import { tokens } from "../test/cssTokens";
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../app/board.css"), "utf8");
@@ -124,5 +125,60 @@ describe("danger_button_meets_4_5_to_1", () => {
     const t = themes[theme] as Record<string, string>;
     const r = ratio(parse(t["--sf-removed"] as string).rgb, parse(t[`--sf-${bg}`] as string).rgb);
     expect(r, `${theme}: removed on ${bg} is ${r.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+// The landing page: its text sits on the page field, under the static 16px grid dot and a WebGL dot at its brightest.
+describe("landing_text_meets_4_5_over_the_field", () => {
+  // The static grid dot, read from the body background in board.css so the check follows the CSS.
+  const gridDotOf = (selector: string) => {
+    const image = tokens(css, selector)["background-image"] ?? "";
+    const dot = image.match(/radial-gradient\(\s*(rgba\([^)]*\))/);
+    if (!dot) throw new Error(`no grid dot in ${selector} background-image`);
+    return parse(dot[1] as string);
+  };
+  const gridDot: Record<string, { rgb: Rgb; alpha: number }> = {
+    dark: gridDotOf("body"),
+    light: gridDotOf(':root[data-theme="light"] body')
+  };
+  const cases = (["dark", "light"] as const).flatMap((theme) => ["text", "muted", "accent-text"].map((fg) => [theme, fg] as const));
+  it.each(cases)("%s: %s over the field", (theme, fg) => {
+    const t = themes[theme] as Record<string, string>;
+    const bg = parse(t["--sf-bg"] as string).rgb;
+    const field = over({ rgb: DOT_RGB[theme], alpha: DOT_ALPHA_MAX[theme] }, over(gridDot[theme] as { rgb: Rgb; alpha: number }, bg));
+    const text = parse(t[`--sf-${fg}`] as string).rgb;
+    const onField = ratio(text, field);
+    expect(onField, `${theme}: ${fg} over the field is ${onField.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+    const onBg = ratio(text, bg);
+    expect(onBg, `${theme}: ${fg} on bg is ${onBg.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("landing_selectors_use_only_text_tokens", () => {
+  const rules: [string, string][] = [
+    [".sf-landing-title", "text"],
+    [".sf-landing-heading", "text"],
+    [".sf-landing-cell-title", "text"],
+    [".sf-landing-brand", "text"],
+    [".sf-landing-lead", "muted"],
+    [".sf-landing-kicker", "muted"],
+    [".sf-landing-cell-text", "muted"],
+    [".sf-landing-footer", "muted"]
+  ];
+  it.each(rules)("%s is %s", (selector, fg) => {
+    expect(tokens(css, selector).color, `${selector} colour`).toBe(`var(--sf-${fg})`);
+  });
+});
+
+describe("landing_notice_is_a_readable_warning", () => {
+  it("uses the warning surface pair", () => {
+    const t = tokens(css, ".sf-landing-notice");
+    expect(t.color).toBe("var(--sf-on-primary-soft)");
+    expect(t.background).toBe("var(--sf-primary-soft)");
+  });
+  it.each(["dark", "light"])("%s: notice text meets 4.5:1 on its surface", (theme) => {
+    const t = themes[theme] as Record<string, string>;
+    const value = ratio(parse(t["--sf-on-primary-soft"] as string).rgb, parse(t["--sf-primary-soft"] as string).rgb);
+    expect(value, `${theme}: ${value.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
   });
 });

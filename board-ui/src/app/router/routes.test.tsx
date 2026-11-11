@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { blocksClient } from "../../lib/blocks/client";
-import { completeLogin, fetchSessionClaims, onSessionExpired, renewSession } from "../../lib/blocks/auth";
+import { completeLogin, fetchSessionClaims, onSessionExpired, renewSession, startLogin } from "../../lib/blocks/auth";
 import { LocalizationProvider } from "../../lib/i18n/LocalizationProvider";
 import { AuthProvider } from "../providers/AuthProvider";
 import { AppRouter } from "./routes";
@@ -21,6 +21,12 @@ vi.mock("../../lib/blocks/auth", () => ({
   onSessionExpired: vi.fn(() => () => undefined),
   renewSession: vi.fn(async () => "rejected"),
   startLogin: vi.fn(async () => undefined)
+}));
+
+// Login is configured so the landing page's sign-in buttons are enabled.
+vi.mock("../../lib/blocks/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/blocks/config")>()),
+  isLoginConfigured: () => true
 }));
 
 // The shell reads the settings for its pause indicator; no test reaches Blocks Data.
@@ -303,5 +309,46 @@ describe("the callback route", () => {
     renderAt("/login/callback?code=c&state=s");
     await waitFor(() => expect(completeLogin).toHaveBeenCalledTimes(1));
     expect(window.location.pathname).toBe("/login/callback");
+  });
+});
+
+describe("the landing page", () => {
+  const headline = { level: 1, name: "Write the task. Merge the PR." } as const;
+
+  it("shows_the_landing_page_to_a_signed_out_visitor_at_login", async () => {
+    claims.mockResolvedValue(undefined);
+    renderAt("/login");
+    expect(await screen.findByRole("heading", headline)).toBeInTheDocument();
+  });
+
+  it("sends_a_signed_out_visitor_at_root_to_the_landing_page", async () => {
+    claims.mockResolvedValue(undefined);
+    renderAt("/");
+    await waitFor(() => expect(window.location.pathname).toBe("/login"));
+    expect(window.location.search).toBe("?returnTo=%2F");
+    expect(await screen.findByRole("heading", headline)).toBeInTheDocument();
+  });
+
+  it("sends_a_signed_in_visitor_at_login_to_the_board", async () => {
+    claims.mockResolvedValue({ sub: "me" });
+    me.mockResolvedValue({ data: { roles: ["factory-owner"] } } as never);
+    renderAt("/login");
+    await waitFor(() => expect(window.location.pathname).toBe("/"));
+    expect(await screen.findByRole("heading", { name: "Board" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", headline)).not.toBeInTheDocument();
+  });
+
+  it("continue_with_blocks_starts_sign_in_with_the_return_to", async () => {
+    claims.mockResolvedValue(undefined);
+    renderAt("/login?returnTo=%2Ftasks%2FT-12");
+    fireEvent.click(await screen.findByRole("button", { name: "Continue with Blocks" }));
+    await waitFor(() => expect(startLogin).toHaveBeenCalledWith("/tasks/T-12"));
+  });
+
+  it("sign_in_in_the_top_bar_starts_the_same_sign_in", async () => {
+    claims.mockResolvedValue(undefined);
+    renderAt("/login?returnTo=%2Ftasks%2FT-12");
+    fireEvent.click(await screen.findByRole("button", { name: "Sign in" }));
+    await waitFor(() => expect(startLogin).toHaveBeenCalledWith("/tasks/T-12"));
   });
 });

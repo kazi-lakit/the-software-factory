@@ -1702,6 +1702,178 @@ textarea.sf-input {
   background: transparent;
 }
 
+/* Landing */
+/* The signed-out page (pages/Landing.tsx). Full-bleed on the page field; the WebGL dot field
+   (features/landing) sits fixed behind everything, and the body's static dot grid shows when it is off. */
+.sf-landing {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.sf-landing-field {
+  height: 100%;
+  inset: 0;
+  pointer-events: none;
+  position: fixed;
+  width: 100%;
+  z-index: 0;
+}
+
+/* Lift the content above the field. The top bar keeps its own sticky position and z-index. */
+.sf-landing > :not(.sf-landing-field):not(.sf-topbar) {
+  position: relative;
+  z-index: 1;
+}
+
+.sf-landing-brand {
+  color: var(--sf-text);
+  white-space: nowrap;
+}
+
+.sf-landing-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 64px;
+  margin: 0 auto;
+  max-width: 1280px;
+  padding: 32px 16px 48px;
+  width: 100%;
+}
+
+.sf-landing-hero {
+  border: 1px solid var(--sf-chrome-border);
+  border-radius: var(--sf-radius);
+  display: grid;
+  gap: 24px 0;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  padding: 64px 32px;
+}
+
+.sf-landing-hero > * {
+  grid-column: 1 / span 9;
+}
+
+.sf-landing-title {
+  color: var(--sf-text);
+  font-family: var(--sf-font);
+  font-size: clamp(48px, 10vw, 128px);
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  line-height: 1;
+  margin: 0;
+}
+
+.sf-landing-lead {
+  color: var(--sf-muted);
+  font-size: 16px;
+  line-height: 24px;
+  margin: 0;
+  max-width: 60ch;
+}
+
+/* The not-configured warning: framed like the former warn alert, so it stands out next to the disabled buttons. */
+.sf-landing-notice {
+  background: var(--sf-primary-soft);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-on-primary-soft);
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+  padding: 12px 14px;
+}
+
+.sf-landing-notice code {
+  background: var(--sf-surface-sunk);
+  border-radius: var(--sf-radius);
+  font-family: var(--sf-mono);
+  padding: 1px 5px;
+}
+
+.sf-landing-actions {
+  align-items: flex-start;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.sf-landing-cta {
+  align-items: flex-start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sf-landing-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sf-landing-kicker {
+  color: var(--sf-muted);
+}
+
+.sf-landing-heading {
+  color: var(--sf-text);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 32px;
+  margin: 0 0 16px;
+}
+
+.sf-landing-steps,
+.sf-landing-cards {
+  display: grid;
+  gap: 12px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.sf-landing-steps {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.sf-landing-cards {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sf-landing-cell {
+  align-items: flex-start;
+  background: transparent;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+}
+
+.sf-landing-cell-title {
+  color: var(--sf-text);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 24px;
+  margin: 0;
+}
+
+.sf-landing-cell-text {
+  color: var(--sf-muted);
+  font-size: var(--sf-size-small);
+  line-height: 20px;
+  margin: 0;
+}
+
+.sf-landing-footer {
+  color: var(--sf-muted);
+  margin: 0;
+  padding: 16px;
+  text-align: center;
+}
+
 /* Below the 1024px desktop width the columns stack. */
 @media (max-width: 1023px) {
   .sf-columns {
@@ -1756,6 +1928,10 @@ textarea.sf-input {
 /* Lanes wrap to two columns below 1100px and to one below 640px. */
 @media (max-width: 1099px) {
   .sf-lanes {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .sf-landing-steps {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -2086,6 +2262,20 @@ textarea.sf-input {
   /* Lanes: one column (moved here from the old 639px block). */
   .sf-lanes {
     grid-template-columns: 1fr;
+  }
+
+  /* Landing: one column of cells and a full-width hero. */
+  .sf-landing-steps,
+  .sf-landing-cards {
+    grid-template-columns: 1fr;
+  }
+
+  .sf-landing-hero {
+    padding: 40px 16px;
+  }
+
+  .sf-landing-hero > * {
+    grid-column: 1 / -1;
   }
 
   /* Compact top bar: lead on the left, theme switch on the right. */
