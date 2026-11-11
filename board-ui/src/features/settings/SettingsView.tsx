@@ -102,10 +102,20 @@ const PICK_A_FACTORY = "Pick a factory to see its settings.";
 /** Input that means the user scrolls on their own, which ends the hold a clicked link puts on the nav. */
 const USER_SCROLL_EVENTS = ["wheel", "touchstart", "keydown", "mousedown"] as const;
 
+/** How far below the top bar a section's top may sit and still be the one being read; a nav jump leaves 16px. */
+const READING_SLACK = 24;
+
+/** The bottom edge of the app's sticky top bar, which covers the top of the viewport; 0 when there is none. */
+function topBarBottom(): number {
+  const bar = document.querySelector(".sf-topbar");
+  return bar ? Math.max(0, Math.round(bar.getBoundingClientRect().bottom)) : 0;
+}
+
 /**
- * The nav's current section: the first one, a clicked one, or, while scrolling, the visible section whose top is
- * nearest the top of the viewport. Positions are read live on every update, never kept from an earlier one. A clicked
- * link stays current until the user scrolls, since the anchor jump cannot always bring its section to the top.
+ * The nav's current section: the first one, a clicked one, or, while scrolling, the last visible section whose top
+ * has reached the reading line just below the sticky top bar. When none has, the visible section nearest that line.
+ * Positions are read live, at most once a frame while scrolling, never kept from an earlier update. A clicked link
+ * stays current until the user scrolls, since the anchor jump cannot always bring its section to the top.
  */
 function useCurrentSection(ids: readonly string[]): [string, (id: string) => void] {
   const [current, setCurrent] = useState<string>(ids[0] ?? "");
@@ -113,18 +123,34 @@ function useCurrentSection(ids: readonly string[]): [string, (id: string) => voi
   useEffect(() => {
     if (typeof IntersectionObserver === "undefined") return;
     const visible = new Set<Element>();
+    const bar = topBarBottom();
     const update = () => {
       if (held.current) return;
-      let best: string | undefined;
-      let bestDistance = Number.POSITIVE_INFINITY;
-      for (const element of visible) {
-        const distance = Math.abs(element.getBoundingClientRect().top);
-        if (distance < bestDistance) {
-          best = element.id;
-          bestDistance = distance;
+      const line = bar + READING_SLACK;
+      let reached: string | undefined;
+      let nearest: string | undefined;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      for (const id of ids) {
+        const element = document.getElementById(id);
+        if (!element || !visible.has(element)) continue;
+        const top = element.getBoundingClientRect().top;
+        if (top <= line) reached = id;
+        const distance = Math.abs(top - line);
+        if (distance < nearestDistance) {
+          nearest = id;
+          nearestDistance = distance;
         }
       }
+      const best = reached ?? nearest;
       if (best) setCurrent(best);
+    };
+    let frame: number | undefined;
+    const onScroll = () => {
+      if (frame !== undefined) return;
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        update();
+      });
     };
     const release = () => { held.current = false; };
     const observer = new IntersectionObserver((entries) => {
@@ -133,16 +159,17 @@ function useCurrentSection(ids: readonly string[]): [string, (id: string) => voi
         else visible.delete(entry.target);
       }
       update();
-    }, { rootMargin: "0px 0px -60% 0px" });
+    }, { rootMargin: `-${bar}px 0px -60% 0px` });
     for (const id of ids) {
       const element = document.getElementById(id);
       if (element) observer.observe(element);
     }
-    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("scroll", onScroll, { passive: true });
     for (const type of USER_SCROLL_EVENTS) window.addEventListener(type, release, { capture: true, passive: true });
     return () => {
       observer.disconnect();
-      window.removeEventListener("scroll", update);
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", onScroll);
       for (const type of USER_SCROLL_EVENTS) window.removeEventListener(type, release, { capture: true });
     };
   }, [ids]);
@@ -478,6 +505,8 @@ type RepoRowProps = ScopeProps & { global: Settings; noteId: string; stored: Rep
 
 function RepoRow({ mounted, open, onToggle, repo, ...rest }: RepoRowProps & { mounted: boolean; onToggle: () => void; open: boolean; repo: FactoryRepo }) {
   const { repoId } = repo;
+  // A closed form keeps its draft, so the row says so; the Gates column shows only what is saved.
+  const [unsaved, setUnsaved] = useState(false);
   return (
     <>
       <tr aria-label={repoId}>
@@ -487,12 +516,13 @@ function RepoRow({ mounted, open, onToggle, repo, ...rest }: RepoRowProps & { mo
         <td className="sf-mono">{checksSummary(repo.checks)}</td>
         <td>
           <button type="button" className="sf-button" aria-label={`Edit overrides for ${repoId}`} aria-expanded={open} onClick={onToggle}>Edit</button>
+          {!open && unsaved ? <span className="sf-muted"> Unsaved changes</span> : null}
         </td>
       </tr>
       {mounted ? (
         <tr className="sf-repo-edit-row" hidden={!open}>
           <td colSpan={5}>
-            <RepoOverrideForm {...rest} repo={repoId} onClose={onToggle} />
+            <RepoOverrideForm {...rest} repo={repoId} onClose={onToggle} onUnsavedChange={setUnsaved} />
           </td>
         </tr>
       ) : null}
@@ -501,8 +531,10 @@ function RepoRow({ mounted, open, onToggle, repo, ...rest }: RepoRowProps & { mo
 }
 
 /** One repo's gate and limit overrides; Inherit and an empty limit save as null. */
-function RepoOverrideForm({ factoryId, global, noteId, onClose, onNotice, onReload, repo, stored }: RepoRowProps & { onClose: () => void; repo: string }) {
+function RepoOverrideForm({ factoryId, global, noteId, onClose, onNotice, onReload, onUnsavedChange, repo, stored }: RepoRowProps & { onClose: () => void; onUnsavedChange: (unsaved: boolean) => void; repo: string }) {
   const draft = useScopeDraft(REPO_KEYS, repoDraft(stored));
+  const unsaved = draft.changed.length > 0;
+  useEffect(() => { onUnsavedChange(unsaved); }, [onUnsavedChange, unsaved]);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<WriteProblem>();
   const [done, setDone] = useState(false);

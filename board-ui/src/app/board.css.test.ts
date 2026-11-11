@@ -1217,6 +1217,11 @@ describe("board_css_settings_page", () => {
     expect(nav.top).toBeDefined();
   });
 
+  it("settings_nav_and_section_targets_clear_the_sticky_top_bar", () => {
+    expect(t(".sf-settings-nav").top).toBe("calc(var(--sf-bar-height) + 16px)");
+    expect(t(".sf-settings-section")["scroll-margin-top"]).toBe("calc(var(--sf-bar-height) + 16px)");
+  });
+
   it("current_settings_link_is_underlined", () => {
     expect(t('.sf-settings-nav a[aria-current="location"]')).toMatchObject({ "text-decoration": "underline", color: "var(--sf-text)" });
   });

@@ -51,8 +51,9 @@ export function FactoriesSection() {
     await Promise.all([client.invalidateQueries({ queryKey: FACTORIES_KEY }), client.invalidateQueries({ queryKey: HISTORY_KEY })]);
   }
 
-  // The page shows the loading and load-error messages once, above the sections.
-  if (factories.loading || (factories.error && entries.length === 0)) return null;
+  // The page shows the loading and load-error messages once, above the sections; a failed load leaves a short note here.
+  if (factories.loading) return null;
+  if (factories.error && entries.length === 0) return <p className="sf-empty">Settings are not available.</p>;
 
   const form = (() => {
     if (!editing) return null;

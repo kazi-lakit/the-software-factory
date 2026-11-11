@@ -307,6 +307,23 @@ describe("repos table", () => {
     expect(within(overrides("iam")).getByLabelText("iam turn limit")).toHaveValue("25");
     expect(write).not.toHaveBeenCalled();
   });
+
+  it("marks_a_closed_repo_row_that_has_unsaved_overrides", async () => {
+    renderSettings();
+    await screen.findByRole("table", { name: "Repos" });
+    const row = () => repoRow("iam");
+    openOverrides("iam");
+    expect(within(row()).queryByText("Unsaved changes")).toBeNull();
+    fireEvent.change(within(overrides("iam")).getByLabelText("iam turn limit"), { target: { value: "25" } });
+    fireEvent.click(within(overrides("iam")).getByRole("button", { name: "Close" }));
+    expect(within(row()).getByText("Unsaved changes")).toBeInTheDocument();
+    expect(within(repoRow("data")).queryByText("Unsaved changes")).toBeNull();
+    openOverrides("iam");
+    expect(within(row()).queryByText("Unsaved changes")).toBeNull();
+    fireEvent.change(within(overrides("iam")).getByLabelText("iam turn limit"), { target: { value: "" } });
+    fireEvent.click(within(overrides("iam")).getByRole("button", { name: "Close" }));
+    expect(within(row()).queryByText("Unsaved changes")).toBeNull();
+  });
 });
 
 describe("factory picker and scope", () => {
@@ -423,6 +440,7 @@ describe("factory picker and scope", () => {
     const list = vi.spyOn(fakeBoard().owner, "listFactoryDefs").mockRejectedValueOnce(new Error("blocks: unavailable"));
     renderSettings();
     expect(await screen.findAllByText("Could not load the factories.")).toHaveLength(1);
+    expect(within(region("Factories")).getByText("Settings are not available.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByRole("form", { name: "Gates and limits" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Factory", { selector: "select" })).toBeNull();
@@ -517,14 +535,45 @@ class FakeIO {
   static last: FakeIO | undefined;
   readonly targets: Element[] = [];
   readonly callback: (entries: unknown[]) => void;
-  constructor(callback: (entries: unknown[]) => void) {
+  readonly options: IntersectionObserverInit | undefined;
+  constructor(callback: (entries: unknown[]) => void, options?: IntersectionObserverInit) {
     this.callback = callback;
+    this.options = options;
     FakeIO.last = this;
   }
   observe(target: Element) { this.targets.push(target); }
   unobserve() {}
   disconnect() {}
 }
+
+/** Queues animation frames so a test decides when they run; returns how many are queued and a flush. */
+function stubFrames() {
+  const queue: FrameRequestCallback[] = [];
+  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => queue.push(cb));
+  vi.stubGlobal("cancelAnimationFrame", () => { queue.length = 0; });
+  return {
+    pending: () => queue.length,
+    flush: () => act(() => { for (const cb of queue.splice(0)) cb(0); })
+  };
+}
+
+/** Puts the app's sticky top bar in the page, its bottom edge at the given height. */
+function stubTopBar(bottom: number) {
+  const bar = document.createElement("header");
+  bar.className = "sf-topbar";
+  document.body.prepend(bar);
+  vi.spyOn(bar, "getBoundingClientRect").mockImplementation(() => ({ top: 0, bottom, height: bottom }) as DOMRect);
+  return bar;
+}
+
+function stubTops(tops: Record<string, number>) {
+  for (const id of Object.keys(tops)) {
+    vi.spyOn(document.getElementById(id)!, "getBoundingClientRect").mockImplementation(() => ({ top: tops[id] }) as DOMRect);
+  }
+}
+
+const enter = (io: FakeIO, tops: Record<string, number>) =>
+  io.callback(Object.entries(tops).map(([id, top]) => ({ boundingClientRect: { top }, isIntersecting: true, target: document.getElementById(id) })));
 
 describe("settings page layout", () => {
   it("renders_one_page_with_no_tabs_and_four_sections_in_order", () => {
@@ -592,6 +641,7 @@ describe("settings page layout", () => {
 
   it("reads_live_positions_while_scrolling_not_the_ones_saved_when_a_section_entered", () => {
     vi.stubGlobal("IntersectionObserver", FakeIO);
+    const frames = stubFrames();
     renderSettings();
     const io = FakeIO.last!;
     const tops: Record<string, number> = { "settings-factory": -50, "settings-gates-and-limits": 300 };
@@ -609,11 +659,13 @@ describe("settings page layout", () => {
     tops["settings-factory"] = -500;
     tops["settings-gates-and-limits"] = 20;
     act(() => { fireEvent.scroll(window); });
+    frames.flush();
     expect(currentLinks()).toEqual(["Gates and limits"]);
   });
 
   it("a_clicked_link_stays_current_until_the_user_scrolls", () => {
     vi.stubGlobal("IntersectionObserver", FakeIO);
+    const frames = stubFrames();
     renderSettings();
     const io = FakeIO.last!;
     const tops: Record<string, number> = { "settings-repos": -10, "settings-factories": 500 };
@@ -630,12 +682,66 @@ describe("settings page layout", () => {
       ]);
       fireEvent.scroll(window);
     });
+    frames.flush();
     expect(currentLinks()).toEqual(["Factories"]);
     act(() => {
       fireEvent.wheel(window);
       fireEvent.scroll(window);
     });
+    frames.flush();
     expect(currentLinks()).toEqual(["Repos"]);
+  });
+
+  it("observes_sections_below_the_sticky_top_bar", () => {
+    vi.stubGlobal("IntersectionObserver", FakeIO);
+    stubTopBar(52);
+    renderSettings();
+    expect(FakeIO.last!.options?.rootMargin).toBe("-52px 0px -60% 0px");
+  });
+
+  it("a_section_jumped_to_below_the_top_bar_becomes_current", () => {
+    vi.stubGlobal("IntersectionObserver", FakeIO);
+    stubTopBar(52);
+    renderSettings();
+    // A nav jump puts the section's top 16px under the bar (scroll-margin-top); the section above has scrolled past.
+    const tops = { "settings-factory": -300, "settings-gates-and-limits": 68 };
+    stubTops(tops);
+    act(() => enter(FakeIO.last!, tops));
+    expect(currentLinks()).toEqual(["Gates and limits"]);
+  });
+
+  it("a_long_section_filling_the_top_stays_current_while_the_next_one_comes_up", () => {
+    vi.stubGlobal("IntersectionObserver", FakeIO);
+    stubTopBar(52);
+    renderSettings();
+    // Repos still fills the space under the bar; Factories is near, but its top is not up to the bar yet.
+    const tops = { "settings-repos": -400, "settings-factories": 200 };
+    stubTops(tops);
+    act(() => enter(FakeIO.last!, tops));
+    expect(currentLinks()).toEqual(["Repos"]);
+  });
+
+  it("reads_positions_at_most_once_per_frame_while_scrolling", () => {
+    vi.stubGlobal("IntersectionObserver", FakeIO);
+    const frames = stubFrames();
+    renderSettings();
+    const tops: Record<string, number> = { "settings-factory": -50, "settings-gates-and-limits": 300 };
+    stubTops(tops);
+    act(() => enter(FakeIO.last!, tops));
+    const reads = vi.spyOn(document.getElementById("settings-gates-and-limits")!, "getBoundingClientRect");
+    reads.mockClear();
+    tops["settings-factory"] = -500;
+    tops["settings-gates-and-limits"] = 10;
+    act(() => {
+      fireEvent.scroll(window);
+      fireEvent.scroll(window);
+      fireEvent.scroll(window);
+    });
+    expect(frames.pending()).toBe(1);
+    expect(reads).not.toHaveBeenCalled();
+    frames.flush();
+    expect(reads).toHaveBeenCalledTimes(1);
+    expect(currentLinks()).toEqual(["Gates and limits"]);
   });
 
   it("does_not_crash_without_intersection_observer", () => {

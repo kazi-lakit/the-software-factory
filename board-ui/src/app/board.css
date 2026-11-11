@@ -1625,7 +1625,8 @@ textarea.sf-input {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  scroll-margin-top: 16px;
+  /* Clear the sticky top bar when a nav link jumps here. */
+  scroll-margin-top: calc(var(--sf-bar-height) + 16px);
 }
 
 .sf-settings-section > h2 {
@@ -1639,7 +1640,8 @@ textarea.sf-input {
 .sf-settings-nav {
   align-self: start;
   position: sticky;
-  top: 16px;
+  /* Stick below the app's sticky top bar, not under it. */
+  top: calc(var(--sf-bar-height) + 16px);
 }
 
 .sf-settings-nav ul {
