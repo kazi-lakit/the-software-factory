@@ -1,48 +1,12 @@
 import { useId, useState } from "react";
-import type { FormEvent } from "react";
-import {
-  AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, ensureMain, saveFactory, validateFactoryDef, VersionConflictError, type AgentModel, type AgentStep, type FactoryDef,
-} from "@factory/core";
-import { boardStore } from "../../lib/board";
-import { describeWriteError, now, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
+import { AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, type AgentModel, type AgentStep, type FactoryDef } from "@factory/core";
+import { WriteProblemNotice } from "../task/writeOutcome";
+import { addProtectedBranch, draftOf, useFactorySave, type Draft } from "./factoryDraft";
 
-export const DEFINITION_CONFLICT = "This definition changed elsewhere. Reload to see the latest.";
-
-/** A failed definition save: a conflict gets the definition wording, the rest are shared with other writes. */
-export function describeDefinitionError(error: unknown, existsText?: string): WriteProblem {
-  // Adding: a version conflict can only mean the id is taken, not that the owner's copy is stale.
-  if (error instanceof VersionConflictError && existsText) return { kind: "message", message: existsText };
-  if (error instanceof VersionConflictError) return { kind: "conflict", message: DEFINITION_CONFLICT };
-  return describeWriteError(error);
-}
+export { DEFINITION_CONFLICT, describeDefinitionError } from "./factoryDraft";
 
 const MODEL_LABEL: Record<AgentModel, string> = { opus: "Opus", sonnet: "Sonnet", haiku: "Haiku", fable: "Fable" };
 const STAGE_LABEL: Record<AgentStep, string> = { spec: "Spec", plan: "Plan", build: "Build", verify: "Verify", review: "Review" };
-
-type Draft = {
-  active: boolean;
-  docsPath: string;
-  factoryId: string;
-  gitEmail: string;
-  gitName: string;
-  /** The gh CLI login; left empty, the core's validation saves DEFAULT_GH_USER. */
-  ghUser: string;
-  /** The model per stage; "" is Same as session, left out of the saved agentModels. */
-  models: Record<AgentStep, AgentModel | "">;
-  name: string;
-  protectedBranches: string[];
-};
-
-const modelsOf = (def: FactoryDef | null): Draft["models"] =>
-  Object.fromEntries(AGENT_STEPS.map((s) => [s, def?.agentModels?.[s] ?? ""])) as Draft["models"];
-
-const draftOf = (def: FactoryDef | null): Draft =>
-  def
-    ? {
-        active: def.active, docsPath: def.docsPath, factoryId: def.factoryId, gitEmail: def.gitEmail, ghUser: def.ghUser, gitName: def.gitName,
-        models: modelsOf(def), name: def.name, protectedBranches: def.protectedBranches,
-      }
-    : { active: true, docsPath: "", factoryId: "", gitEmail: "", ghUser: "", gitName: "", models: modelsOf(null), name: "", protectedBranches: ensureMain(["dev", "stg"]) };
 
 type Props = {
   /** The stored definition being edited; null adds a factory. */
@@ -59,43 +23,16 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
   const [base, setBase] = useState(before);
   const [draft, setDraft] = useState(() => draftOf(before));
   const [branch, setBranch] = useState("");
-  const [problem, setProblem] = useState<WriteProblem>();
-  const [invalidText, setInvalidText] = useState("");
-  const [busy, setBusy] = useState(false);
+  const saving = useFactorySave({ base, onSaved });
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
   function addBranch() {
-    const name = branch.trim();
-    // `main` stays last, so a new branch lands before it.
-    if (name !== "") set("protectedBranches", ensureMain([...draft.protectedBranches.filter((b) => b !== "main"), name]));
+    set("protectedBranches", addProtectedBranch(draft.protectedBranches, branch));
     setBranch("");
   }
 
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (busy) return;
-    setProblem(undefined);
-    const { models, ...rest } = draft;
-    // Same as session ("") leaves the stage out; the core drops an empty map.
-    const agentModels = Object.fromEntries(AGENT_STEPS.flatMap((s) => (models[s] ? [[s, models[s]]] : [])));
-    const checked = validateFactoryDef({ ...rest, agentModels, version: base?.version ?? 1 });
-    if (!checked.ok) {
-      setInvalidText(checked.error);
-      return;
-    }
-    setInvalidText("");
-    setBusy(true);
-    try {
-      onSaved(await saveFactory(boardStore, now, base, checked.value));
-    } catch (error) {
-      setProblem(describeDefinitionError(error, base === null ? `Factory ${draft.factoryId} already exists. Pick another id.` : undefined));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function reload() {
-    setProblem(undefined);
+    saving.clearProblem();
     const latest = await onReload();
     if (!latest) {
       onCancel();
@@ -114,7 +51,7 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
   );
 
   return (
-    <form className="sf-panel sf-form" aria-label={before ? `Edit factory ${before.factoryId}` : "Add factory"} noValidate onSubmit={(event) => void save(event)}>
+    <form className="sf-panel sf-form" aria-label={before ? `Edit factory ${before.factoryId}` : "Add factory"} noValidate onSubmit={(event) => { event.preventDefault(); void saving.save(draft); }}>
       <div className="sf-field">
         <label className="sf-field-label" htmlFor={`${ids}-id`}>Factory id</label>
         <input
@@ -187,10 +124,10 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
         ))}
         <span className="sf-hint">Same as session runs the stage on the model of the session that runs /factory:run.</span>
       </fieldset>
-      {invalidText ? <p className="sf-problem" role="alert">{invalidText}</p> : null}
-      <WriteProblemNotice problem={problem} onReload={() => void reload()} />
+      {saving.invalidText ? <p className="sf-problem" role="alert">{saving.invalidText}</p> : null}
+      <WriteProblemNotice problem={saving.problem} onReload={() => void reload()} />
       <div className="sf-actions">
-        <button type="submit" className="sf-button sf-button-primary" disabled={busy}>{before ? "Save factory" : "Create factory"}</button>
+        <button type="submit" className="sf-button sf-button-primary" disabled={saving.busy}>{before ? "Save factory" : "Create factory"}</button>
         <button type="button" className="sf-button" onClick={onCancel}>Cancel</button>
       </div>
     </form>
