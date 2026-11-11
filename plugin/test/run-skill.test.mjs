@@ -16,6 +16,14 @@ const fm = Object.fromEntries(
 );
 
 describe('run skill', () => {
+  it('passes the ticket model to the Agent tool only when present', () => {
+    const step2 = body.match(/^2\. .*$/m)[0];
+    expect(step2).toContain('model?');
+    const step5 = body.slice(body.indexOf('5. Otherwise'), body.indexOf('\n6. '));
+    expect(step5).toMatch(/If the ticket has `model`[^\n]*Agent tool's `model` parameter/);
+    expect(step5).toMatch(/leave the `model` parameter out[^\n]*session's model/);
+  });
+
   it('has the frontmatter and no disable-model-invocation', () => {
     expect(m).not.toBeNull();
     expect(fm.name).toBe('run');
@@ -103,6 +111,10 @@ describe('run skill', () => {
 
   it('reports no factories on the Board and stops (R13)', () => {
     expect(body).toMatch(/If the output is `no factories on the Board; run factory migrate --check`, reply `factory: no factories on the Board; run factory migrate --check` and stop\./);
+  });
+
+  it('reports a task that is waiting on its dependencies and stops', () => {
+    expect(body).toContain('If the output contains ` is waiting on `, reply `factory: <output>` and stop.');
   });
 
   it('reports a paused factory (M2)', () => {

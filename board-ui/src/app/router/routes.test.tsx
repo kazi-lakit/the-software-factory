@@ -29,7 +29,7 @@ vi.mock("../../lib/board", () => ({
     getSettings: vi.fn(async () => ({ factories: { blocks: { factory: { gates: { spec: true, plan: true, pr: true }, maxParallel: 1, maxTurnsPerStage: 1, maxCostPerTaskUsd: 1, paused: false }, repos: {} } } })),
     getTask: vi.fn(async (id: string) => ({
       answer: null, attempt: 0, baseBranch: "dev", blockedReason: null, branch: null, claimBy: null, claimUntil: null, costUsd: 0, description: "",
-      factoryId: "blocks", gateOverrides: {}, prUrl: null, question: null, repo: "data", stage: null, status: "inbox", taskId: id, title: "Routed task", version: 1
+      factoryId: "blocks", gateOverrides: {}, dependsOn: [], prUrl: null, question: null, repo: "data", stage: null, status: "inbox", taskId: id, title: "Routed task", version: 1
     })),
     listApprovals: vi.fn(async () => []),
     listDocs: vi.fn(async () => []),
@@ -159,7 +159,7 @@ describe("the owner views", () => {
     renderAt(path);
     expect(await screen.findByRole("heading", { name: heading })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: heading })).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Account" })).toBeInTheDocument();
   });
 });
 

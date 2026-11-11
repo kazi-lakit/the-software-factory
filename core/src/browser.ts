@@ -5,8 +5,8 @@ export type { TokenSource } from './blocks/token.js';
 export { PROTECTED_TASK_FIELDS } from './blocks/schema.js';
 export { assertMove, canMove, IllegalMoveError, STEP_STATUS, TERMINAL } from './status.js';
 export { isMainRef, isProtected } from './branches.js';
-export { DEFAULT_GH_USER, ensureMain, validateFactoryDef, validateFactoryRepo, FactoryConfig } from './factories.js';
-export type { FactoryDef, FactoryRepo, FactoryHealth } from './factories.js';
+export { AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, ensureMain, validateFactoryDef, validateFactoryRepo, FactoryConfig } from './factories.js';
+export type { AgentModel, AgentModels, FactoryDef, FactoryRepo, FactoryHealth } from './factories.js';
 export { IMPORT_FORMAT, validateImportFile } from './importFile.js';
 export type { ImportFile } from './importFile.js';
 export { GATE_DOC, resolveSettings, resolveGates, validApproval, shouldMerge } from './gates.js';
@@ -19,3 +19,4 @@ export { ForbiddenError, VersionConflictError, NotFoundError, canonicalJson } fr
 export type { BoardStore, StoredSettings } from './boardStore.js';
 export { diffEvents } from './history.js';
 export * from './owner.js';
+export * from './dependencies.js';

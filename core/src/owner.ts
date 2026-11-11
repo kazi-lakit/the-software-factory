@@ -5,6 +5,7 @@ import { GATE_DOC } from './gates.js';
 import { diffEvents } from './history.js';
 import { isMainRef } from './branches.js';
 import { DEFAULT_SETTINGS } from './defaults.js';
+import { createsCycle, normalizeDeps } from './dependencies.js';
 import { isValidId, validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from './factories.js';
 import { validateImportFile, type ImportFile } from './importFile.js';
 import { assertMove } from './status.js';
@@ -38,7 +39,7 @@ const GATES: readonly Gate[] = ['spec', 'plan', 'pr'];
 export const GATE_STATUS: Readonly<Record<Gate, Status>> = { spec: 'spec_review', plan: 'plan_review', pr: 'pr_open' };
 /** Later the core is working on the task, so its definition is fixed. */
 export const EDITABLE_STATUSES: readonly Status[] = ['inbox', 'ready'];
-const EDITABLE_FIELDS = ['title', 'description', 'repo', 'baseBranch', 'gateOverrides'] as const;
+const EDITABLE_FIELDS = ['title', 'description', 'repo', 'baseBranch', 'gateOverrides', 'dependsOn'] as const;
 export type TaskEdit = Partial<Pick<Task, (typeof EDITABLE_FIELDS)[number]>>;
 /** `<factoryId>` or `<factoryId>/<repoId>`. */
 export type SettingsScope = string;
@@ -118,9 +119,34 @@ async function requireRepo(store: BoardStore, factoryId: string, repoId: string)
   if (!(await store.listFactoryRepos(factoryId)).some((r) => r.repoId === repoId)) invalid(`repo ${repoId} is not in factory ${factoryId}`);
 }
 
+/**
+ * Validates a dependency list and returns it normalized. Every id must be a stored task of `factoryId`. `taskId` is the
+ * task being edited (null for a new one: nothing can depend on it yet, so no self or cycle check).
+ * Ids in `stored` (the task's current list) skip the existence and factory checks: a missing task counts as finished, so
+ * an edit may keep or drop one.
+ */
+async function checkDeps(store: BoardStore, factoryId: string, taskId: string | null, deps: unknown, stored: readonly string[] = []): Promise<string[]> {
+  if (!Array.isArray(deps) || !deps.every((d) => typeof d === 'string')) return invalid('dependsOn must be a list of task ids');
+  const ids = normalizeDeps(deps as string[]);
+  const tasks = await store.listTasks();
+  for (const id of ids) {
+    if (id === taskId) invalid(`${id} cannot depend on itself`);
+    if (stored.includes(id)) continue;
+    const found = tasks.find((t) => t.taskId === id);
+    if (!found) invalid(`dependency ${id} does not exist`);
+    if (found!.factoryId !== factoryId) invalid(`dependency ${id} is not in factory ${factoryId}`);
+  }
+  // Two simultaneous edits can each pass this check and together close a cycle; with a single owner that is accepted.
+  if (taskId !== null && createsCycle(taskId, ids, tasks)) {
+    const closing = ids.find((id) => createsCycle(taskId, [id], tasks));
+    invalid(`${closing ?? 'these dependencies'} would make a cycle`);
+  }
+  return ids;
+}
+
 /** The shared validation and insert-then-event of both creators; `actor` and `reason` name who made the task. */
 async function insertTask(
-  store: BoardStore, now: () => Date, input: { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string; status?: 'inbox' | 'ready' },
+  store: BoardStore, now: () => Date, input: { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string; status?: 'inbox' | 'ready'; dependsOn?: string[] },
   actor: string, reason: string,
 ): Promise<Task> {
   if (!isValidId(input.factoryId)) invalid(`factoryId must be a factory id (${REPO_ID_RULE})`);
@@ -131,17 +157,19 @@ async function insertTask(
   if (input.baseBranch !== undefined && isMainRef(input.baseBranch)) invalid(NEVER_MAIN);
   await requireFactory(store, input.factoryId);
   await requireRepo(store, input.factoryId, input.repo);
+  const dependsOn = input.dependsOn === undefined ? undefined : await checkDeps(store, input.factoryId, null, input.dependsOn);
   const at = now().toISOString();
   const task = await store.createTask({
     factoryId: input.factoryId, title: input.title.trim(), description: input.description, repo: input.repo,
     ...(input.baseBranch !== undefined ? { baseBranch: input.baseBranch } : {}), ...(input.status !== undefined ? { status: input.status } : {}),
+    ...(dependsOn !== undefined ? { dependsOn } : {}),
   });
   await writeEvents(store, [{ taskId: task.taskId, factoryId: task.factoryId, actor, action: 'create', field: null, from: null, to: task.status, reason, at }]);
   return task;
 }
 
 export async function createTask(
-  store: BoardStore, now: () => Date, input: { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string },
+  store: BoardStore, now: () => Date, input: { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string; dependsOn?: string[] },
 ): Promise<Task> {
   return insertTask(store, now, input, OWNER_ACTOR, 'created');
 }
@@ -153,7 +181,7 @@ export const CORE_NEW_ACTOR = 'core · new';
  * the owner-only fields stay the owner's afterwards (the Blocks column rule). The base is never main.
  */
 export async function createTaskAsCore(
-  store: BoardStore, now: () => Date, input: { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string; ready?: boolean },
+  store: BoardStore, now: () => Date, input: { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string; ready?: boolean; dependsOn?: string[] },
 ): Promise<Task> {
   if (typeof input.baseBranch === 'string' && isMainRef(input.baseBranch)) invalid(NEVER_MAIN);
   const { ready, baseBranch, ...rest } = input;
@@ -239,6 +267,7 @@ export async function editTask(store: BoardStore, now: () => Date, taskId: strin
   }
   if (task.version !== expectedVersion) throw new VersionConflictError(taskId, expectedVersion, task.version);
   if (clean.baseBranch !== undefined && clean.baseBranch !== task.baseBranch && isMainRef(clean.baseBranch)) invalid(NEVER_MAIN);
+  if (clean.dependsOn !== undefined) clean.dependsOn = await checkDeps(store, task.factoryId, task.taskId, clean.dependsOn, task.dependsOn);
   if (!EDITABLE_FIELDS.some((f) => f in clean && canon(clean[f]) !== canon(task[f]))) return task;
   if (clean.repo !== undefined && clean.repo !== task.repo) await requireRepo(store, task.factoryId, clean.repo);
   return ownerUpdate(store, now, task, clean, 'edited');
@@ -384,19 +413,26 @@ function mergeSettings(current: RepoSettings, patch: RepoSettingsPatch): RepoSet
   return next as RepoSettings;
 }
 
-const DEF_FIELDS = ['name', 'protectedBranches', 'gitName', 'gitEmail', 'docsPath', 'ghUser', 'active'] as const;
+const DEF_FIELDS = ['name', 'protectedBranches', 'gitName', 'gitEmail', 'docsPath', 'ghUser', 'active', 'agentModels'] as const;
 const REPO_FIELDS = ['remote', 'baseBranch', 'checks'] as const;
 const eventText = (v: unknown): string => (typeof v === 'string' ? v : canon(v));
 
-/** One event per field whose value differs (every field on an insert, from null). */
+/**
+ * A field's value for history and import comparison. A missing agentModels is `{}` (every stage uses the session's model),
+ * so absent and empty compare equal and an event never says `undefined`.
+ */
+const fieldValue = <T extends object>(row: T, f: keyof T & string): unknown =>
+  f === 'agentModels' ? (row[f] ?? {}) : row[f];
+
+/** One event per field whose value differs (every field on an insert, from null, except an absent optional field). */
 function fieldEvents<T extends object>(
   fields: readonly (keyof T & string)[], before: T | null, after: T, factoryId: string, name: (f: string) => string, reason: string, at: string,
 ): FactoryEvent[] {
   return fields
-    .filter((f) => before === null || canon(before[f]) !== canon(after[f]))
+    .filter((f) => (before === null ? after[f] !== undefined : canon(fieldValue(before, f)) !== canon(fieldValue(after, f))))
     .map((f) => ({
       taskId: '-', factoryId, actor: OWNER_ACTOR, action: 'set' as const, field: name(f),
-      from: before === null ? null : eventText(before[f]), to: eventText(after[f]), reason, at,
+      from: before === null ? null : eventText(fieldValue(before, f)), to: eventText(fieldValue(after, f)), reason, at,
     }));
 }
 
@@ -457,7 +493,7 @@ export interface ImportResult {
 
 const rowPlan = <T extends object>(fields: readonly (keyof T & string)[], stored: T | undefined, wanted: T): ImportPlanRow => {
   if (!stored) return { action: 'create', differs: [] };
-  const differs = fields.filter((f) => canon(stored[f]) !== canon(wanted[f]));
+  const differs = fields.filter((f) => canon(fieldValue(stored, f)) !== canon(fieldValue(wanted, f)));
   return { action: differs.length === 0 ? 'already' : 'kept', differs };
 };
 

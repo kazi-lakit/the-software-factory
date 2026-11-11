@@ -23,7 +23,7 @@ export const CORE_TASK_FIELDS: readonly (keyof Task)[] = [
 
 type Value = string | number | null;
 const TASK_KEYS = new Set<string>([
-  'factoryId', 'title', 'description', 'repo', 'baseBranch', 'gateOverrides', ...CORE_TASK_FIELDS,
+  'factoryId', 'title', 'description', 'repo', 'baseBranch', 'gateOverrides', 'dependsOn', ...CORE_TASK_FIELDS,
 ]);
 /** A current doc with the same body and author counts as a lost-reply retry only if it was created this recently. */
 export const DOC_RETRY_WINDOW_MS = 120_000;
@@ -40,6 +40,17 @@ function parseObject(v: Value | undefined): Record<string, unknown> | undefined 
     return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
   } catch {
     return undefined;
+  }
+}
+
+/** A JSON array of strings, or [] for null, malformed JSON or anything else. */
+function parseStringArray(v: Value | undefined): string[] {
+  if (v === null || v === undefined) return [];
+  try {
+    const parsed: unknown = JSON.parse(String(v));
+    return Array.isArray(parsed) && parsed.every((x) => typeof x === 'string') ? (parsed as string[]) : [];
+  } catch {
+    return [];
   }
 }
 
@@ -99,7 +110,7 @@ const num = (v: Value | undefined): number => Number(v ?? 0);
 const decimalText = (n: number | null): string | null => (n === null ? null : String(n));
 
 function encodeTaskValue(key: keyof Task, value: Task[keyof Task]): Value {
-  if (key === 'gateOverrides') return JSON.stringify(value);
+  if (key === 'gateOverrides' || key === 'dependsOn') return JSON.stringify(value);
   if (key === 'costUsd') return String(value);
   return value as Value;
 }
@@ -121,6 +132,7 @@ function decodeTask(r: Row): Task {
     question: opt(r.question),
     answer: opt(r.answer),
     gateOverrides: (parseObject(r.gateOverrides) ?? {}) as Task['gateOverrides'],
+    dependsOn: parseStringArray(r.dependsOn),
     claimBy: opt(r.claimBy),
     claimUntil: opt(r.claimUntil),
     costUsd: num(r.costUsd),
@@ -164,10 +176,31 @@ const decodeBranches = (v: Value | undefined): string[] => {
   return text(v) as unknown as string[];
 };
 
-const decodeDef = (r: Row): FactoryDef => ({
-  factoryId: text(r.factoryId), name: text(r.name), protectedBranches: decodeBranches(r.protectedBranches), gitName: text(r.gitName),
-  gitEmail: text(r.gitEmail), docsPath: text(r.docsPath), ghUser: text(r.ghUser), active: num(r.active) === 1, version: num(r.version),
-});
+/**
+ * A missing column, empty text or `{}` means no agentModels. Text that is not a JSON object decodes to the raw text,
+ * which validation refuses, so the factory is skipped with a reason instead of guessing.
+ */
+const decodeAgentModels = (v: Value | undefined): FactoryDef['agentModels'] | undefined => {
+  if (v === null || v === undefined || v === '') return undefined;
+  try {
+    const parsed: unknown = JSON.parse(text(v));
+    if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+      return Object.keys(parsed).length === 0 ? undefined : (parsed as FactoryDef['agentModels']);
+    }
+  } catch {
+    // falls through to the refused value
+  }
+  return text(v) as never;
+};
+
+const decodeDef = (r: Row): FactoryDef => {
+  const agentModels = decodeAgentModels(r.agentModels);
+  return {
+    factoryId: text(r.factoryId), name: text(r.name), protectedBranches: decodeBranches(r.protectedBranches), gitName: text(r.gitName),
+    gitEmail: text(r.gitEmail), docsPath: text(r.docsPath), ghUser: text(r.ghUser), active: num(r.active) === 1,
+    ...(agentModels === undefined ? {} : { agentModels }), version: num(r.version),
+  };
+};
 
 /** A repo whose checks are not a JSON object decodes with empty checks, which validation then skips. */
 const decodeRepo = (r: Row): FactoryRepo => ({
@@ -180,6 +213,8 @@ const decodeHealth = (r: Row): FactoryHealth => ({ factoryId: text(r.factoryId),
 const encodeDef = (d: FactoryDef): Record<string, Value> => ({
   name: d.name, protectedBranches: JSON.stringify(d.protectedBranches), gitName: d.gitName, gitEmail: d.gitEmail, docsPath: d.docsPath,
   ghUser: d.ghUser, active: d.active ? 1 : 0,
+  // Always written, so an edit can clear every entry: Blocks ignores null in an update.
+  agentModels: JSON.stringify(d.agentModels ?? {}),
 });
 
 const encodeRepo = (r: FactoryRepo): Record<string, Value> => ({ remote: r.remote, baseBranch: r.baseBranch, checks: canonicalJson(r.checks) });
@@ -276,6 +311,7 @@ export class BlocksStore implements BoardStore {
         question: null,
         answer: null,
         gateOverrides: {},
+        dependsOn: [...(t.dependsOn ?? [])],
         claimBy: null,
         claimUntil: null,
         costUsd: 0,
@@ -284,7 +320,11 @@ export class BlocksStore implements BoardStore {
       // The writeId finds this row again if the insert's reply is lost.
       const writeId = randomUUID();
       const row: Record<string, Value> = { writeId };
-      for (const [key, value] of Object.entries(task)) row[key] = encodeTaskValue(key as keyof Task, value);
+      for (const [key, value] of Object.entries(task)) {
+        // An empty list is left out so creates work before the schema has the field; a missing value reads as [].
+        if (key === 'dependsOn' && task.dependsOn.length === 0) continue;
+        row[key] = encodeTaskValue(key as keyof Task, value);
+      }
       let r: Awaited<ReturnType<BlocksData['insert']>>;
       try {
         r = await this.data.insert('FactoryTask', row);

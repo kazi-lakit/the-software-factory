@@ -83,6 +83,44 @@ describe('BlocksStore factories', () => {
     },
   );
 
+  it('stores agentModels as JSON text and reads it back', async () => {
+    const data = new FakeBlocksData('any');
+    const s = new BlocksStore(data, 'owner');
+    const saved = await s.saveFactoryDef(null, defFixture('delta', { agentModels: { spec: 'opus', review: 'haiku' } }));
+    expect(JSON.parse(String(data.rows('FactoryDef')[0]!.agentModels))).toEqual({ spec: 'opus', review: 'haiku' });
+    expect((await s.listFactoryDefs())[0]!.agentModels).toEqual({ spec: 'opus', review: 'haiku' });
+    await s.saveFactoryDef(saved, { ...saved, agentModels: undefined });
+    expect(data.rows('FactoryDef')[0]!.agentModels).toBe('{}');
+    const def = (await s.listFactoryDefs())[0]!;
+    expect('agentModels' in def).toBe(false);
+  });
+
+  it.each([['missing', undefined], ['empty text', ''], ['an empty object', '{}']])(
+    'a def whose agentModels is %s has none and stays valid',
+    async (_what, raw) => {
+      const data = new FakeBlocksData('any');
+      const row = { ...defFixture('delta'), protectedBranches: '["dev","main"]', active: 1, writeId: '' } as Record<string, unknown>;
+      if (raw === undefined) delete row.agentModels;
+      else row.agentModels = raw;
+      data.seed('FactoryDef', row as never);
+      const defs = await new BlocksStore(data, 'owner').listFactoryDefs();
+      expect('agentModels' in defs[0]!).toBe(false);
+      expect(new FactoryConfig(defs, []).factory('delta')).toBeDefined();
+    },
+  );
+
+  it.each([['not json', '{opus'], ['a list', '["opus"]'], ['a bad model', '{"build":"gpt"}']])(
+    'a def whose agentModels is %s is skipped with a reason',
+    async (_what, raw) => {
+      const data = new FakeBlocksData('any');
+      const row = { ...defFixture('delta'), protectedBranches: '["dev","main"]', active: 1, writeId: '', agentModels: raw } as Record<string, unknown>;
+      data.seed('FactoryDef', row as never);
+      const cfg = new FactoryConfig(await new BlocksStore(data, 'owner').listFactoryDefs(), []);
+      expect(cfg.factory('delta')).toBeUndefined();
+      expect(cfg.skipped()[0]!.reason).toMatch(/^agentModels/);
+    },
+  );
+
   it('a repo id may exist in two factories: they are two rows', async () => {
     const s = new BlocksStore(new FakeBlocksData('any'), 'owner');
     await s.saveFactoryRepo(null, repoFixture('delta', 'api'));
@@ -297,6 +335,20 @@ describe('BlocksStore', () => {
     await expect(s.updateTask('T-1', 1, { title: 'x' })).rejects.toThrow('factory core may not change title');
     await expect(s.updateTask('T-1', 1, { status: 'ready', gateOverrides: {} })).rejects.toThrow('factory core may not change gateOverrides');
     expect(data.calls).toBe(0);
+  });
+
+  it('dependsOn decodes any non-string-array to [] and is inserted as JSON text', async () => {
+    const data = new FakeBlocksData('any');
+    const s = new BlocksStore(data, 'owner');
+    for (let i = 0; i < 6; i++) await s.createTask({ factoryId: 'blocks', title: 't', description: '', repo: 'data' });
+    expect(data.rows('FactoryTask')[0]!.dependsOn).toBeNull(); // not sent on insert; the fake null-fills
+    await s.createTask({ factoryId: 'blocks', title: 't', description: '', repo: 'data', dependsOn: ['T-1'] });
+    expect(data.rows('FactoryTask')[6]!.dependsOn).toBe('["T-1"]');
+    const raws = [undefined, null, 'not json', '{"a":1}', '[1,2]', '["T-3"]'];
+    for (const [i, v] of raws.entries()) {
+      expect(await data.update('FactoryTask', { taskId: `T-${i + 1}` }, { dependsOn: v as string })).toEqual({ kind: 'applied' });
+    }
+    expect((await s.listTasks()).map((t) => t.dependsOn)).toEqual([[], [], [], [], [], ['T-3'], ['T-1']]);
   });
 
   it('core identity can update core fields of an owner-created task', async () => {

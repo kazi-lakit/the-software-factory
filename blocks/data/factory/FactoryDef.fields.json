@@ -49,6 +49,12 @@
       "description": "1 if the factory is active, else 0."
     },
     {
+      "name": "agentModels",
+      "type": "String",
+      "isArray": false,
+      "description": "JSON text of the per-stage agent models (stage to opus, sonnet, haiku or fable)."
+    },
+    {
       "name": "version",
       "type": "Int",
       "isArray": false,

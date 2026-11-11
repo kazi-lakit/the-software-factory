@@ -1,4 +1,4 @@
-import type { MouseEvent, ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useAuth } from "./providers/AuthProvider";
 import { useCurrentUser, userDisplayName, userInitials } from "../features/profile/useCurrentUser";
 import { useFactories, useSelectedFactory } from "../features/factories/useFactories";
@@ -7,6 +7,7 @@ import { NEEDS_YOU } from "../features/board/status";
 import { ThemeSwitch } from "../shared/ui/ThemeSwitch";
 import { useSettings } from "../features/settings/useSettings";
 import { clearAllUnsent } from "../lib/unsent";
+import { TopBarLeadContext, type Lead } from "./topBarLead";
 
 export const PROJECT_NAME = "the-software-factory";
 
@@ -26,6 +27,12 @@ type ShellProps = { activePath: string; children: ReactNode; onNavigate: (path: 
 // board.css (sf-* classes and tokens) so light and dark come from the tokens.
 export function AppShell({ activePath, children, onNavigate }: ShellProps) {
   const { logout } = useAuth();
+  const [lead, setLead] = useState<Lead | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const pillRef = useRef<HTMLButtonElement>(null);
+  const signOutRef = useRef<HTMLButtonElement>(null);
+  const menuId = useId();
   const me = useCurrentUser();
   const settings = useSettings();
   const profile = me.data?.data;
@@ -59,6 +66,22 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
     onNavigate(href);
   }
 
+  // The open account menu takes focus on Sign out and closes on a press anywhere outside it and the pill.
+  useEffect(() => {
+    if (!menuOpen) return;
+    signOutRef.current?.focus();
+    const onDown = (event: globalThis.MouseEvent) => {
+      if (!wrapRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
+
+  function closeMenu(returnFocus: boolean) {
+    setMenuOpen(false);
+    if (returnFocus) pillRef.current?.focus();
+  }
+
   // A deliberate sign out drops unsent text (a session that merely ended keeps it). A failed logout
   // still leaves for /login and never becomes an unhandled rejection.
   async function signOut() {
@@ -73,9 +96,17 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
   }
 
   return (
-    <div className="sf-app">
+    <TopBarLeadContext.Provider value={setLead}>
+    <div className={lead ? "sf-app sf-shell-detail" : "sf-app"}>
       <header className="sf-topbar">
-        <span className="sf-project sf-label">{PROJECT_NAME}</span>
+        {lead ? (
+          <button type="button" className="sf-topbar-lead" onClick={lead.onClick}>
+            {lead.label}
+          </button>
+        ) : null}
+        <a className="sf-project sf-label" href="/" onClick={(event) => follow(event, "/")}>
+          {PROJECT_NAME}
+        </a>
         <nav className="sf-views" aria-label="Views">
           {views.map((view) => (
             <a
@@ -94,19 +125,46 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
           {waiting > 0 ? <span className="sf-badge">{`${waiting} waiting for you`}</span> : null}
           {/* Always present, so a screen reader hears the change when the factory pauses. */}
           <span className={pauseClass} role="status">{pauseText}</span>
-          <button
-            type="button"
-            className="sf-account"
-            title={user || undefined}
-            aria-label={first ? `Sign out (${first})` : "Sign out"}
-            onClick={() => void signOut()}
-          >
-            <span className="sf-avatar" aria-hidden="true">{userInitials(profile)}</span>
-            <span className="sf-account-name">{first}</span>
-          </button>
+          <div className="sf-account-wrap" ref={wrapRef}>
+            <button
+              ref={pillRef}
+              type="button"
+              className="sf-account"
+              title={user || undefined}
+              aria-label={first ? `Account (${first})` : "Account"}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              aria-controls={menuId}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              <span className="sf-avatar" aria-hidden="true">{userInitials(profile)}</span>
+              <span className="sf-account-name">{first}</span>
+            </button>
+            {menuOpen ? (
+              <div
+                id={menuId}
+                role="menu"
+                aria-label="Account"
+                className="sf-account-menu sf-label"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") closeMenu(true);
+                }}
+              >
+                {profile?.email ? (
+                  <span role="none" className="sf-account-email">
+                    {profile.email}
+                  </span>
+                ) : null}
+                <button ref={signOutRef} type="button" role="menuitem" className="sf-account-menu-item" onClick={() => void signOut()}>
+                  Sign out
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </header>
       <main className="sf-main">{children}</main>
     </div>
+    </TopBarLeadContext.Provider>
   );
 }

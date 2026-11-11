@@ -2,11 +2,13 @@ import { useEffect, useId, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FormEvent, KeyboardEvent } from "react";
 import {
-  canMove, cancelTask, editTask, EDITABLE_STATUSES, isMainRef, markReady, type RepoId, type Task, type TaskEdit
+  canMove, cancelTask, editTask, EDITABLE_STATUSES, isMainRef, markReady, normalizeDeps, type RepoId, type Task, type TaskEdit
 } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { clearUnsent, hasUnsent, useUnsent } from "../../lib/unsent";
+import { useBoard } from "../board/useBoard";
 import { useFactories } from "../factories/useFactories";
+import { DependsOnPicker } from "./DependsOnPicker";
 import { describeWriteError, NEVER_MAIN_BASE, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "./writeOutcome";
 
 type Reload = () => unknown;
@@ -85,7 +87,7 @@ export function TaskActions({ onCancelled, onReload, task }: ActionsProps) {
           </button>
         ) : null}
         {canCancel ? (
-          <button ref={cancelButton} type="button" className="sf-button" disabled={busy} onClick={() => setConfirming(true)}>
+          <button ref={cancelButton} type="button" className="sf-button sf-button-danger" disabled={busy} onClick={() => setConfirming(true)}>
             Cancel task
           </button>
         ) : null}
@@ -174,6 +176,10 @@ function EditForm({ onDone, onReload, task }: { onDone: () => void; onReload: Re
   const [problem, setProblem] = useState<WriteProblem>();
   const [baseProblem, setBaseProblem] = useState("");
   const [busy, setBusy] = useState(false);
+  const [depsOrigin, setDepsOrigin] = useState<string[]>(() => normalizeDeps(task.dependsOn));
+  const [dependsOn, setDependsOn] = useState<string[]>(depsOrigin);
+  const allTasks = useBoard().data ?? [];
+  const depsChanged = () => normalizeDeps(dependsOn).join() !== depsOrigin.join();
   const invalidate = useInvalidateAfterWrite();
   // The task's own factory's repos; the current repo stays listed even when its factory is not visible.
   const factoryRepos = useFactories().byId.get(task.factoryId)?.repos.map((r) => r.repoId) ?? [];
@@ -187,6 +193,7 @@ function EditForm({ onDone, onReload, task }: { onDone: () => void; onReload: Re
     if (busy) return;
     const patch: TaskEdit = {};
     for (const field of ownChanges()) Object.assign(patch, { [field]: field === "repo" ? (value(field) as RepoId) : value(field) });
+    if (depsChanged()) patch.dependsOn = normalizeDeps(dependsOn);
     if (patch.baseBranch !== undefined && isMainRef(patch.baseBranch)) {
       setBaseProblem(NEVER_MAIN_BASE);
       return;
@@ -214,6 +221,11 @@ function EditForm({ onDone, onReload, task }: { onDone: () => void; onReload: Re
     if (!isTask(fresh)) return;
     const changed = new Set(ownChanges());
     const latest = fieldsOf(fresh);
+    if (!depsChanged()) {
+      const latestDeps = normalizeDeps(fresh.dependsOn);
+      setDepsOrigin(latestDeps);
+      setDependsOn(latestDeps);
+    }
     const next: Fields = { ...origin };
     for (const field of EDIT_FIELDS) {
       if (changed.has(field)) continue;
@@ -266,6 +278,7 @@ function EditForm({ onDone, onReload, task }: { onDone: () => void; onReload: Re
           />
         </label>
       </div>
+      <DependsOnPicker id={`${formId}-deps`} factoryId={task.factoryId} selfId={task.taskId} tasks={allTasks} value={dependsOn} onChange={setDependsOn} />
       {baseProblem ? <p className="sf-problem" role="alert">{baseProblem}</p> : null}
       <WriteProblemNotice problem={problem} onReload={() => void reload()} />
       <div className="sf-actions">

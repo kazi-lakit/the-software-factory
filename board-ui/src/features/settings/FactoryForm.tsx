@@ -1,6 +1,8 @@
 import { useId, useState } from "react";
 import type { FormEvent } from "react";
-import { DEFAULT_GH_USER, ensureMain, saveFactory, validateFactoryDef, VersionConflictError, type FactoryDef } from "@factory/core";
+import {
+  AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, ensureMain, saveFactory, validateFactoryDef, VersionConflictError, type AgentModel, type AgentStep, type FactoryDef,
+} from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { describeWriteError, now, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
 
@@ -14,6 +16,9 @@ export function describeDefinitionError(error: unknown, existsText?: string): Wr
   return describeWriteError(error);
 }
 
+const MODEL_LABEL: Record<AgentModel, string> = { opus: "Opus", sonnet: "Sonnet", haiku: "Haiku", fable: "Fable" };
+const STAGE_LABEL: Record<AgentStep, string> = { spec: "Spec", plan: "Plan", build: "Build", verify: "Verify", review: "Review" };
+
 type Draft = {
   active: boolean;
   docsPath: string;
@@ -22,14 +27,22 @@ type Draft = {
   gitName: string;
   /** The gh CLI login; left empty, the core's validation saves DEFAULT_GH_USER. */
   ghUser: string;
+  /** The model per stage; "" is Same as session, left out of the saved agentModels. */
+  models: Record<AgentStep, AgentModel | "">;
   name: string;
   protectedBranches: string[];
 };
 
+const modelsOf = (def: FactoryDef | null): Draft["models"] =>
+  Object.fromEntries(AGENT_STEPS.map((s) => [s, def?.agentModels?.[s] ?? ""])) as Draft["models"];
+
 const draftOf = (def: FactoryDef | null): Draft =>
   def
-    ? { active: def.active, docsPath: def.docsPath, factoryId: def.factoryId, gitEmail: def.gitEmail, ghUser: def.ghUser, gitName: def.gitName, name: def.name, protectedBranches: def.protectedBranches }
-    : { active: true, docsPath: "", factoryId: "", gitEmail: "", ghUser: "", gitName: "", name: "", protectedBranches: ensureMain(["dev", "stg"]) };
+    ? {
+        active: def.active, docsPath: def.docsPath, factoryId: def.factoryId, gitEmail: def.gitEmail, ghUser: def.ghUser, gitName: def.gitName,
+        models: modelsOf(def), name: def.name, protectedBranches: def.protectedBranches,
+      }
+    : { active: true, docsPath: "", factoryId: "", gitEmail: "", ghUser: "", gitName: "", models: modelsOf(null), name: "", protectedBranches: ensureMain(["dev", "stg"]) };
 
 type Props = {
   /** The stored definition being edited; null adds a factory. */
@@ -62,7 +75,10 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
     event.preventDefault();
     if (busy) return;
     setProblem(undefined);
-    const checked = validateFactoryDef({ ...draft, version: base?.version ?? 1 });
+    const { models, ...rest } = draft;
+    // Same as session ("") leaves the stage out; the core drops an empty map.
+    const agentModels = Object.fromEntries(AGENT_STEPS.flatMap((s) => (models[s] ? [[s, models[s]]] : [])));
+    const checked = validateFactoryDef({ ...rest, agentModels, version: base?.version ?? 1 });
     if (!checked.ok) {
       setInvalidText(checked.error);
       return;
@@ -151,6 +167,26 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
       {text("gitEmail", "Git email")}
       {text("docsPath", "Docs path")}
       {text("ghUser", "GitHub login", `The gh CLI account the factory opens PRs with (gh auth login on this Mac). Empty uses ${DEFAULT_GH_USER}.`)}
+      <fieldset className="sf-fieldset">
+        <legend>Agent models</legend>
+        {AGENT_STEPS.map((s) => (
+          <div key={s} className="sf-field">
+            <label className="sf-field-label" htmlFor={`${ids}-model-${s}`}>{STAGE_LABEL[s]} model</label>
+            <select
+              id={`${ids}-model-${s}`}
+              className="sf-select"
+              value={draft.models[s]}
+              onChange={(event) => set("models", { ...draft.models, [s]: event.target.value as AgentModel | "" })}
+            >
+              <option value="">Same as session</option>
+              {AGENT_MODELS.map((m) => (
+                <option key={m} value={m}>{MODEL_LABEL[m]}</option>
+              ))}
+            </select>
+          </div>
+        ))}
+        <span className="sf-hint">Same as session runs the stage on the model of the session that runs /factory:run.</span>
+      </fieldset>
       {invalidText ? <p className="sf-problem" role="alert">{invalidText}</p> : null}
       <WriteProblemNotice problem={problem} onReload={() => void reload()} />
       <div className="sf-actions">

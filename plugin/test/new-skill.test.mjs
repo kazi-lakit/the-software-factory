@@ -18,7 +18,7 @@ describe('new skill', () => {
     expect(m).not.toBeNull();
     expect(fm.name).toBe('new');
     expect(fm.description).toBe("Draft a factory task from the user's words and create it on the Board (use only when the user runs /factory:new)");
-    expect(fm['argument-hint']).toBe('[--ready] [<factory>:] <what you want done>');
+    expect(fm['argument-hint']).toBe('[--ready] [--depends-on <ids>] [<factory>:] <what you want done>');
     expect(fm['allowed-tools']).toBe('Read, Write, Bash(node:*), Bash(HUSKY=0 node:*), Bash(printenv:*)');
   });
 
@@ -90,9 +90,34 @@ describe('new skill', () => {
   });
 
   it('adds --ready only when the user asked for it, and strips the flag from the prompt', () => {
-    expect(body.match(/^2\. .*$/m)[0]).toMatch(/first word of `\$ARGUMENTS` is `--ready`[^\n]*remove it from the prompt/);
-    expect(body.match(/^4\. .*$/m)[0]).toMatch(/Add `--ready`[^\n]*only if the first word of the user's arguments was `--ready`/);
+    expect(body.match(/^2\. .*$/m)[0]).toMatch(/`\$ARGUMENTS` may start with the flags `--ready`[^\n]*remove them from the prompt/);
+    expect(body.match(/^4\. .*$/m)[0]).toMatch(/Add `--ready`[^\n]*only if the user's arguments started with the `--ready` flag/);
     expect(body.match(/--ready/g).length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('takes --depends-on with comma-separated task ids among the leading flags and strips it from the prompt', () => {
+    const step2 = body.match(/^2\. [\s\S]*?(?=^3\. )/m)[0];
+    expect(step2).toContain('`--depends-on <ids>`');
+    expect(step2).toMatch(/in either order/);
+    expect(step2).toContain('`^T-[0-9]+(,T-[0-9]+)*$`');
+    expect(step2).toMatch(/does not match[^\n]*stop and ask/);
+    expect(step2).toMatch(/remove them from the prompt/);
+  });
+
+  it('asks before turning dependencies written in words into --depends-on', () => {
+    const step2 = body.match(/^2\. [\s\S]*?(?=^3\. )/m)[0];
+    expect(step2).toMatch(/depends on or waits for[^\n]*no `--depends-on`[^\n]*ask/);
+  });
+
+  it('passes --depends-on to new only when the user gave ids', () => {
+    const step4 = body.match(/^4\. .*$/m)[0];
+    expect(step4).toMatch(/Add `--depends-on "<ids>"`[^\n]*only if/);
+  });
+
+  it('shows the dependencies and keeps them in the fallback', () => {
+    const step5 = body.match(/^5\. .*$/m)[0];
+    expect(step5).toMatch(/Depends on/);
+    expect(step5).toMatch(/link[^\n]*\*\*Depends on\*\*/);
   });
 
   it('strips quote, backtick, dollar and backslash from the title', () => {

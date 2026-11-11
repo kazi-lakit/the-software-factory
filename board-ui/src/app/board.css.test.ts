@@ -47,6 +47,19 @@ function cssClashes(css: string): string[] {
 const here = dirname(fileURLToPath(import.meta.url));
 const read = (name: string) => readFileSync(join(here, name), "utf8");
 
+/** Body of the first top-level at-rule whose prelude is exactly `prelude`, by brace counting. */
+function atBlock(css: string, prelude: string): string {
+  const start = css.indexOf(`${prelude} {`);
+  if (start < 0) return "";
+  const open = css.indexOf("{", start);
+  let depth = 0;
+  for (let i = open; i < css.length; i++) {
+    if (css[i] === "{") depth++;
+    else if (css[i] === "}" && --depth === 0) return css.slice(open + 1, i);
+  }
+  return "";
+}
+
 describe("cssClashes", () => {
   it("flags_the_tailwind_names_and_a_bare_aside", () => {
     expect(cssClashes(".grid { display: grid; }")).toHaveLength(1);
@@ -188,10 +201,29 @@ describe("board_css_theme_tokens", () => {
       expect(css, s).toContain(s);
   });
 
-  it("accent_text_replaces_accent_for_paused_and_badge", () => {
+  it("badge_is_accent_text_and_paused_is_muted", () => {
     const css = read("board.css");
-    expect(tokens(css, ".sf-paused").color).toBe("var(--sf-accent-text)");
+    expect(tokens(css, ".sf-paused").color).toBe("var(--sf-muted)");
     expect(tokens(css, ".sf-badge").color).toBe("var(--sf-accent-text)");
+  });
+
+  it("size_small_is_14px", () => {
+    expect(tokens(read("board.css"), ":root")["--sf-size-small"]).toBe("14px");
+  });
+
+  it("chevron_token_is_a_10x6_svg_data_uri_in_both_themes", () => {
+    const css = read("board.css");
+    const dark = tokens(css, ":root")["--sf-chevron"] ?? "";
+    const light = tokens(css, ':root[data-theme="light"]')["--sf-chevron"] ?? "";
+    for (const v of [dark, light]) {
+      expect(v).toMatch(/^url\("data:image\/svg\+xml,/);
+      expect(v).toContain("width='10'");
+      expect(v).toContain("height='6'");
+      expect(v).toContain("viewBox='0 0 10 6'");
+      expect(v).not.toContain(";");
+    }
+    expect(dark).toContain("%239db0af");
+    expect(light).toContain("%233e5150");
   });
 
   it("focus_outlines_use_the_focus_token", () => {
@@ -258,11 +290,16 @@ describe("board_css_buttons", () => {
     expect(h["text-decoration"]).toBe("underline");
   });
 
-  it("danger_stays_an_outline", () => {
-    const d = tokens(read("board.css"), ".sf-button-danger");
+  it("danger_is_a_transparent_red_outline", () => {
+    const css = read("board.css");
+    const d = tokens(css, ".sf-button-danger");
+    expect(d.background).toBe("transparent");
     expect(d["border-color"]).toBe("var(--sf-removed)");
     expect(d.color).toBe("var(--sf-removed)");
-    expect(d).not.toHaveProperty("background");
+    const h = tokens(css, ".sf-button-danger:hover:not(:disabled)");
+    expect(h["border-color"]).toBe("var(--sf-removed)");
+    expect(h.color).toBe("var(--sf-removed)");
+    expect(css.indexOf(".sf-button-danger:hover:not(:disabled) {")).toBeGreaterThan(css.indexOf(".sf-button:hover:not(:disabled) {"));
   });
 });
 
@@ -280,10 +317,25 @@ describe("board_css_chips_badges_inputs", () => {
 
   it("waiting_badge_is_accent_text_and_outline", () => {
     const css = read("board.css");
-    for (const s of [".sf-badge", ".sf-paused"]) {
+    for (const s of [".sf-badge"]) {
       expect(tokens(css, s).color).toBe("var(--sf-accent-text)");
       expect(tokens(css, s).border).toContain("var(--sf-accent)");
     }
+  });
+
+  it("badge_padding_is_2_6_with_no_margin", () => {
+    const t = tokens(read("board.css"), ".sf-badge");
+    expect(t.padding).toBe("2px 6px");
+    for (const k of ["margin", "margin-left", "margin-right"]) expect(t).not.toHaveProperty(k);
+  });
+
+  it("paused_pill_is_a_muted_outlined_label_chip", () => {
+    const t = tokens(read("board.css"), ".sf-paused");
+    expect(t.background).toBe("transparent");
+    expect(t.border).toBe("1px solid var(--sf-border)");
+    expect(t.color).toBe("var(--sf-muted)");
+    expect(t).toMatchObject(labelType);
+    expect(t).not.toHaveProperty("font-weight");
   });
 
   it("input_is_transparent_outlined_3px", () => {
@@ -309,12 +361,16 @@ describe("board_css_select", () => {
     expect(t).not.toHaveProperty("outline");
   });
 
-  it("select_has_exactly_one_chevron", () => {
+  it("select_uses_the_chevron_token_and_no_gradient", () => {
     const css = read("board.css");
     const t = tokens(css, ".sf-select");
-    expect(t["background-image"]?.match(/linear-gradient\(/g)).toHaveLength(2);
-    expect(t["background-image"]).toContain("currentColor");
+    expect(t["background-image"]).toBe("var(--sf-chevron)");
+    expect(t["background-position"]).toBe("right 10px center");
     expect(t["background-repeat"]).toBe("no-repeat");
+    expect(t["background-size"]).toBe("10px 6px");
+    const rules = css.match(/[^{}]*\.sf-select[^{}]*\{[^}]*\}/g) ?? [];
+    expect(rules.length).toBeGreaterThan(0);
+    for (const r of rules) expect(r).not.toContain("linear-gradient");
     const lists = selectorLists(css).join("\n");
     expect(lists).not.toMatch(/\.sf-select::after/);
     expect(lists).not.toMatch(/\.sf-(field|inline-field)::after/);
@@ -375,11 +431,25 @@ describe("board_css_motion", () => {
 const labelLine = { ...labelType, "line-height": "var(--sf-label-line)" };
 
 describe("board_css_topbar", () => {
-  it("topbar_is_transparent_with_one_chrome_border_hairline", () => {
+  it("topbar_is_opaque_surface_with_one_chrome_border_hairline", () => {
     const t = tokens(read("board.css"), ".sf-topbar");
-    expect(t.background).toBe("transparent");
+    expect(t.background).toBe("var(--sf-surface)");
     expect(t["border-bottom"]).toBe("1px solid var(--sf-chrome-border)");
     for (const k of ["border", "border-top", "border-left", "border-right", "box-shadow"]) expect(t).not.toHaveProperty(k);
+  });
+
+  it("surface_token_is_opaque_in_dark_and_light", () => {
+    const css = read("board.css");
+    const opaqueHex = /^#[0-9a-fA-F]{6}$/;
+    expect(tokens(css, ":root")["--sf-surface"]).toMatch(opaqueHex);
+    expect(tokens(css, ':root[data-theme="light"]')["--sf-surface"]).toMatch(opaqueHex);
+  });
+
+  it("topbar_stays_sticky_at_top_in_flow", () => {
+    const t = tokens(read("board.css"), ".sf-topbar");
+    expect(t.position).toBe("sticky");
+    expect(t.top).toBe("0");
+    expect(t["z-index"]).toBe("10");
   });
 
   it("topbar_height_token_is_52px", () => {
@@ -393,6 +463,23 @@ describe("board_css_topbar", () => {
     expect(t).toMatchObject(labelLine);
     expect(t).not.toHaveProperty("font-weight");
     expect(t.color).toBe("var(--sf-text)");
+  });
+
+  it("topbar_is_not_sticky", () => {
+    const t = tokens(read("board.css"), ".sf-topbar");
+    for (const k of ["position", "top", "z-index"]) expect(t).not.toHaveProperty(k);
+  });
+
+  it("nav_link_padding_is_0_14_and_nav_gap_is_16", () => {
+    const css = read("board.css");
+    expect(tokens(css, ".sf-view-link").padding).toBe("0 14px");
+    expect(tokens(css, ".sf-views").gap).toBe("16px");
+  });
+
+  it("project_name_is_a_plain_link_that_underlines_on_hover", () => {
+    const css = read("board.css");
+    expect(tokens(css, ".sf-project")["text-decoration"]).toBe("none");
+    expect(tokens(css, ".sf-project:hover")["text-decoration"]).toBe("underline");
   });
 
   it("nav_links_are_label_type_muted", () => {
@@ -450,6 +537,38 @@ describe("board_css_account_pill", () => {
     expect(t["white-space"]).toBe("nowrap");
   });
 
+  it("account_wrap_positions_the_menu", () => {
+    expect(tokens(read("board.css"), ".sf-account-wrap").position).toBe("relative");
+  });
+
+  it("account_menu_is_an_outlined_label_panel_without_shadow", () => {
+    const t = tokens(read("board.css"), ".sf-account-menu");
+    expect(t).toMatchObject({
+      position: "absolute",
+      right: "0",
+      top: "calc(100% + 4px)",
+      border: "1px solid var(--sf-border)",
+      "border-radius": "var(--sf-radius)",
+      background: "var(--sf-surface)",
+      ...labelLine
+    });
+    expect(t).not.toHaveProperty("box-shadow");
+  });
+
+  it("account_menu_email_is_muted", () => {
+    expect(tokens(read("board.css"), ".sf-account-email").color).toBe("var(--sf-muted)");
+  });
+
+  it("sign_out_item_hovers_like_a_button", () => {
+    const css = read("board.css");
+    expect(tokens(css, ".sf-account-menu-item:hover")).toMatchObject({
+      background: "var(--sf-primary-soft)",
+      color: "var(--sf-on-primary-soft)",
+      "text-decoration": "underline"
+    });
+    expect(tokens(css, ".sf-account-menu-item")).toMatchObject({ background: "transparent", border: "0", color: "var(--sf-text)" });
+  });
+
   it("topbar_end_has_12px_gap_and_auto_margin", () => {
     const t = tokens(read("board.css"), ".sf-topbar-end");
     expect(t.gap).toBe("12px");
@@ -495,6 +614,8 @@ describe("board_css_task_card", () => {
     expect(t('.sf-step[data-state="current"]').background).toBe("var(--sf-muted)");
     expect(t('.sf-step[data-state="waiting"]').background).toBe("var(--sf-accent)");
     expect(t('.sf-step[data-state="todo"]').background).toBe("var(--sf-border)");
+    expect(t(".sf-step")["border-radius"]).toBe("var(--sf-radius)");
+    expect(t(".sf-steps").gap).toBe("4px");
   });
 
   it("done_cards_use_done_colours_for_chip_and_steps", () => {
@@ -574,8 +695,16 @@ describe("board_css_lanes", () => {
     expect(tokens(css(), ".sf-lane-name")["margin"]).toBe("0");
   });
   it("segmented_switch_styles", () => {
+    expect(tokens(css(), ".sf-segmented")).toMatchObject({
+      display: "inline-flex",
+      border: "1px solid var(--sf-chrome-border)",
+      "border-radius": "var(--sf-radius)",
+      padding: "2px",
+      gap: "0"
+    });
     const t = tokens(css(), ".sf-segment");
-    expect(t["border"]).toBe("1px solid var(--sf-border)");
+    expect(t["height"]).toBe("32px");
+    expect(t["border"]).toBe("0");
     expect(t["border-radius"]).toBe("var(--sf-radius)");
     expect(t["background"]).toBe("transparent");
     expect(t["font-family"]).toBe("var(--sf-mono)");
@@ -584,6 +713,13 @@ describe("board_css_lanes", () => {
     const on = tokens(css(), '.sf-segment[aria-pressed="true"]');
     expect(on["background"]).toBe("var(--sf-primary-soft)");
     expect(on["color"]).toBe("var(--sf-on-primary-soft)");
+    expect(on["font-weight"]).toBe("600");
+  });
+  it("theme_switch_has_no_separate_frame_or_button_rules", () => {
+    expect(tokens(css(), ".sf-theme-switch")).toEqual({});
+    expect(tokens(css(), ".sf-theme-switch button")).toEqual({});
+    expect(tokens(css(), '.sf-theme-switch button[aria-pressed="true"]')).toEqual({});
+    for (const k of Object.keys(tokens(css(), ".sf-theme-switch .sf-segment"))) expect(["padding", "width"]).toContain(k);
   });
   it("lanes_wrap_to_two_columns_below_1100px_and_one_below_640px", () => {
     const raw = css();
@@ -654,9 +790,27 @@ describe("board_css_task_page", () => {
     expect(t(".sf-stepper-item-waiting .sf-stepper-label")).toMatchObject({ color: "var(--sf-accent-text)", "font-weight": "700" });
   });
 
-  it("stepper_bars_are_fill_width", () => {
-    expect(t(".sf-stepper .sf-step").width).toBe("100%");
+  it("stepper_steps_are_full_width_chips", () => {
+    expect(t(".sf-stepper .sf-step")).toMatchObject({
+      width: "100%", height: "auto", padding: "4px 8px", "border-radius": "var(--sf-radius)", ...labelType
+    });
     expect(t(".sf-step")).toMatchObject({ width: "14px", height: "4px" });
+    expect(t(".sf-stepper").gap).toBe("4px");
+  });
+
+  it("stepper_chip_state_colours", () => {
+    expect(t('.sf-stepper .sf-step[data-state="done"]')).toMatchObject({
+      color: "var(--sf-done)", background: "var(--sf-done-soft)", border: "0"
+    });
+    expect(t('.sf-stepper .sf-step[data-state="current"]')).toMatchObject({
+      color: "var(--sf-text)", background: "transparent", border: "1px solid var(--sf-muted)"
+    });
+    expect(t('.sf-stepper .sf-step[data-state="waiting"]')).toMatchObject({
+      color: "var(--sf-accent-text)", background: "var(--sf-accent-soft)", border: "1px solid var(--sf-accent)", "font-weight": "700"
+    });
+    expect(t('.sf-stepper .sf-step[data-state="todo"]')).toMatchObject({
+      color: "var(--sf-muted)", background: "transparent", border: "1px solid var(--sf-border)"
+    });
   });
 
   it("decision_panel_has_accent_border_on_all_sides", () => {
@@ -784,5 +938,103 @@ describe("board_css_question_and_radio_cards", () => {
     const why = tokens(css, ".sf-radio-why");
     expect(why["white-space"]).toBe("nowrap");
     expect(why["text-overflow"]).toBe("ellipsis");
+  });
+});
+
+// T-20: in All stages on desktop the shell is the window height and the column strip is the one
+// scroll container, so its horizontal scrollbar sits on the bottom edge of the window.
+describe("board_css_all_stages_window_fit", () => {
+  const DESK = "@media (min-width: 1024px)";
+  const block = () => atBlock(read("board.css"), DESK);
+
+  it("desktop_block_exists_once_and_sits_before_the_phone_block", () => {
+    const css = read("board.css");
+    expect(css.split(DESK).length - 1).toBe(1);
+    const at = css.indexOf(DESK);
+    expect(at).toBeGreaterThan(css.indexOf("@media (max-width: 1023px)"));
+    expect(at).toBeLessThan(css.lastIndexOf("@media (max-width: 639px)"));
+  });
+
+  it("shell_is_exactly_the_window_height_in_all_stages", () => {
+    const app = tokens(block(), ".sf-app:has(.sf-view-stages)");
+    expect(app.height).toBe("100dvh");
+    expect(app.overflow).toBe("hidden");
+    expect(block()).toMatch(/\.sf-app:has\(\.sf-view-stages\)\s*\{[^}]*height:\s*100vh;[^}]*height:\s*100dvh;/);
+  });
+
+  it("main_fits_and_has_no_bottom_padding_in_all_stages", () => {
+    expect(tokens(block(), ".sf-app:has(.sf-view-stages) .sf-main")).toMatchObject({
+      display: "flex",
+      "flex-direction": "column",
+      "min-height": "0",
+      "overflow-x": "hidden",
+      "overflow-y": "auto",
+      "padding-bottom": "0",
+    });
+  });
+
+  it("view_is_a_column_that_fills_main", () => {
+    expect(tokens(block(), ".sf-view.sf-view-stages")).toMatchObject({
+      display: "flex",
+      "flex-direction": "column",
+      flex: "1 0 auto",
+      "min-height": "0",
+      "min-width": "0",
+    });
+  });
+
+  it("chrome_keeps_its_natural_height", () => {
+    expect(tokens(block(), ".sf-view-stages > *")["flex-shrink"]).toBe("0");
+  });
+
+  it("strip_is_the_one_scroll_container_with_a_240px_floor", () => {
+    expect(tokens(block(), ".sf-view-stages > .sf-columns")).toMatchObject({
+      flex: "1 1 0",
+      "min-height": "240px",
+      overflow: "auto",
+    });
+    expect(tokens(read("board.css"), ".sf-columns")).toMatchObject({
+      "overflow-x": "auto",
+      gap: "10px",
+      "padding-bottom": "8px",
+    });
+  });
+
+  it("every_desktop_rule_is_scoped_to_all_stages", () => {
+    const lists = selectorLists(block());
+    expect(lists.length).toBeGreaterThan(0);
+    for (const list of lists) {
+      for (const selector of list.split(",").map((s) => s.trim())) expect(selector).toContain("sf-view-stages");
+    }
+  });
+
+  it("desktop_block_has_no_raw_colour_shadow_or_scaffold_clash", () => {
+    const css = block();
+    expect(css).not.toBe("");
+    expect(css).not.toMatch(/box-shadow|#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
+    expect(cssClashes(css)).toEqual([]);
+    const classes = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/\.([\w-]+)/g)].map((m) => m[1] ?? "");
+    expect(classes.length).toBeGreaterThan(0);
+    expect(classes.every((name) => name.startsWith("sf-"))).toBe(true);
+  });
+
+  it("stacking_below_1024px_is_unchanged", () => {
+    const css = read("board.css");
+    const narrow = atBlock(css, "@media (max-width: 1023px)");
+    expect(tokens(narrow, ".sf-columns")).toEqual({ "flex-direction": "column", "overflow-x": "visible" });
+    expect(tokens(narrow, ".sf-column,\n  .sf-column-collapsed")).toMatchObject({ "flex-basis": "auto", width: "100%" });
+    expect(css).toMatch(/@media \(max-width: 1023px\)\s*\{\s*\.sf-columns/);
+  });
+
+  it("column_sizes_and_hint_are_unchanged", () => {
+    const css = read("board.css");
+    expect(tokens(css, ".sf-column").flex).toBe("0 0 216px");
+    expect(tokens(css, ".sf-column-collapsed")["flex-basis"]).toBe("140px");
+    expect(tokens(css, ".sf-columns-hint")["white-space"]).toBe("nowrap");
+    for (const list of selectorLists(block())) {
+      for (const selector of list.split(",").map((s) => s.trim())) {
+        expect(selector).not.toMatch(/\.sf-column$|\.sf-column-collapsed$|\.sf-columns-hint$/);
+      }
+    }
   });
 });

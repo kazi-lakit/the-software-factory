@@ -26,6 +26,8 @@ export interface Task {
   question: string | null;
   answer: string | null;
   gateOverrides: Partial<Record<Gate, boolean>>;
+  /** Ids of the tasks this one waits for. */
+  dependsOn: string[];
   claimBy: string | null;
   /** ISO timestamp */
   claimUntil: string | null;

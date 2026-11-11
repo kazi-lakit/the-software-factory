@@ -6,10 +6,11 @@ import { AGENT_FOR, DEFAULT_SETTINGS } from './defaults.js';
 import { GATE_DOC, resolveGates, resolveSettings, shouldMerge, validApproval } from './gates.js';
 import type { GitRepos } from './git.js';
 import { PrBaseMismatchError, type GitHub, type GitHubFor } from './github.js';
+import { unfinishedDeps } from './dependencies.js';
 import { diffEvents } from './history.js';
 import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
 import type { Checks } from './checksSchema.js';
-import type { FactoryConfig, FactoryDef, FactoryRepo } from './factories.js';
+import type { AgentModel, FactoryConfig, FactoryDef, FactoryRepo } from './factories.js';
 import { GhLoginMissingError, SecretMissingError } from './secrets.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from './limits.js';
 import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
@@ -39,6 +40,8 @@ export interface Ticket {
   step: Step;
   worktree: string;
   runId: string | null;
+  /** The model the factory set for this agent step's stage; absent means the session's model. */
+  model?: AgentModel;
   context: {
     task: Task;
     factory: { factoryId: string; name: string; docsPath: string };
@@ -53,7 +56,10 @@ export interface Ticket {
 }
 
 /** `no-factories`: the Board has no factory definition at all (before the first Import); nothing was changed. */
-export type NextOutcome = { kind: 'ticket'; ticket: Ticket } | { kind: 'none'; reason: 'nothing to do' | 'paused' | 'inactive' | 'no-factories' };
+export type NextOutcome = { kind: 'ticket'; ticket: Ticket } | { kind: 'none'; reason: 'nothing to do' | 'paused' | 'inactive' | 'no-factories' }
+  | { kind: 'none'; reason: 'waiting'; taskId: string; waitingOn: string[] }
+  /** Only with `peek`: the task `next` would claim now. Nothing was claimed. */
+  | { kind: 'work'; taskId: string };
 
 /** What the CLI prints for `no-factories`. */
 export const NO_FACTORIES = 'no factories on the Board; run factory migrate --check';
@@ -219,8 +225,11 @@ export class Engine {
     return undefined;
   }
 
-  /** `filter` limits claiming to those factories; left out, every factory. */
-  async next(taskId?: string, filter?: string[]): Promise<NextOutcome> {
+  /**
+   * `filter` limits claiming to those factories; left out, every factory. With `peek`, it syncs and picks exactly as
+   * it would, but claims nothing and returns the first candidate as `work`: a free check for a watcher.
+   */
+  async next(taskId?: string, filter?: string[], opts: { peek?: boolean } = {}): Promise<NextOutcome> {
     const { store, now, claimant } = this.deps;
     const cfg = await this.loadFactories();
     if (!cfg.hasDefinitions()) return { kind: 'none', reason: 'no-factories' };
@@ -251,13 +260,18 @@ export class Engine {
     if (target && targetDef) {
       if (this.settingsFor(stored, target).paused) return { kind: 'none', reason: 'paused' };
       if (!targetDef.active) return { kind: 'none', reason: 'inactive' };
+      // A named task not started yet waits for its dependencies; one past ready is never held back.
+      const waitingOn = target.status === 'ready' ? unfinishedDeps(target, tasks) : [];
+      if (waitingOn.length > 0) return { kind: 'none', reason: 'waiting', taskId: target.taskId, waitingOn };
     }
     const candidates = tasks
       .filter((t) => openIds.has(t.factoryId) && hasRoom(t.factoryId) && cfg.repo(t.factoryId, t.repo))
       .filter((t) => !this.settingsFor(stored, t).paused)
+      .filter((t) => taskId !== undefined || t.status !== 'ready' || unfinishedDeps(t, tasks).length === 0)
       .filter((t) => (taskId === undefined ? workable(t) && claimExpired(t, now()) : t.taskId === taskId && workable(t)))
       .sort((a, b) => taskNum(a.taskId) - taskNum(b.taskId));
 
+    if (opts.peek) return candidates[0] ? { kind: 'work', taskId: candidates[0].taskId } : { kind: 'none', reason: 'nothing to do' };
     for (const candidate of candidates) {
       let claimed: Task | null;
       try {
@@ -559,7 +573,8 @@ export class Engine {
     for (const [k, v] of Object.entries(values) as [keyof typeof values, string | undefined][]) {
       if (v !== undefined) context[k] = v;
     }
-    return { taskId: task.taskId, step, worktree, runId, context };
+    const model = AGENT_STEPS.has(step) ? def.agentModels?.[step as AgentStep] : undefined;
+    return { taskId: task.taskId, step, worktree, runId, ...(model ? { model } : {}), context };
   }
 
   /** Best effort: records a setup failure on the task's history; errors are ignored. */

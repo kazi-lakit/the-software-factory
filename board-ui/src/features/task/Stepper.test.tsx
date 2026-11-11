@@ -14,7 +14,16 @@ describe("Stepper", () => {
     renderStepper("plan_review", "plan");
     const items = screen.getAllByRole("listitem", { hidden: true });
     expect(items).toHaveLength(6);
-    expect(items.map((li) => li.querySelector(".sf-stepper-label")?.firstChild?.textContent)).toEqual(["Spec", "Plan", "Build", "Verify", "Review", "PR"]);
+    for (const li of items) expect(li.querySelectorAll(".sf-step")).toHaveLength(1);
+    expect(items.map((li) => li.querySelector(".sf-step")?.firstChild?.textContent)).toEqual(["Spec", "Plan", "Build", "Verify", "Review", "PR"]);
+    for (const li of items) expect(li.querySelector(".sf-step")).toHaveClass("sf-stepper-label", "sf-label");
+  });
+
+  it("stepper_has_no_separate_bar", () => {
+    const { container } = renderStepper("plan_review", "plan");
+    const steps = [...container.querySelectorAll(".sf-step")];
+    expect(steps).toHaveLength(6);
+    for (const step of steps) expect(step.textContent?.trim()).not.toBe("");
   });
 
   it("stepper_has_role_img_and_progress_label", () => {

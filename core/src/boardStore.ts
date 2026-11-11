@@ -93,7 +93,7 @@ export function parseScope(scope: string): { factoryId: string; repoId?: string 
 }
 
 /** `status` is where the task starts (default inbox); the owner's Board and `factory new` choose it. */
-export interface NewTask { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string; status?: 'inbox' | 'ready' }
+export interface NewTask { factoryId: string; title: string; description: string; repo: RepoId; baseBranch?: string; status?: 'inbox' | 'ready'; dependsOn?: string[] }
 
 /** A task is created only in inbox or ready; the type is no defence against a JS caller. */
 export function assertNewStatus(status: unknown): void {

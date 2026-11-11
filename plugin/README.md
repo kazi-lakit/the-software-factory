@@ -53,7 +53,7 @@ A factory session needs a built core: run `cd core && npm run build` once (and a
 
 - Mode 3, one step by hand: `/factory:run`, or `/factory:run T-12` for one task, or `/factory:run <factory>` to take work from one factory only (one factory per run; the skill passes it to the CLI as `--factory "<factory>"`, and the runner's `--factory` is repeatable). With no argument every active factory is considered.
 - Mode 2, steady loop: `/loop 2m /factory:run --loop`, or `/loop 2m /factory:run <factory> --loop` for one factory.
-- The runner prints `factory: paused`, `factory: inactive` or `factory: nothing to do` from the CLI. The build prompt takes the repo's check commands from the ticket's `context.checks`, and the spec prompt gets the factory's docs folder (`context.factory.docsPath`), or is told there are none.
+- The runner prints `factory: paused`, `factory: inactive`, `factory: nothing to do` or, for a named task whose dependencies are unfinished, `factory: T-n is waiting on T-m` from the CLI. The build prompt takes the repo's check commands from the ticket's `context.checks`, and the spec prompt gets the factory's docs folder (`context.factory.docsPath`), or is told there are none.
 
 Each run does one step of one task and stops. Pause stops new claims and the skill reports `factory: paused`; a step that is already running still finishes. If the skill reports `factory: factory root not found or session env missing` or `factory: session env missing`, the session start hook's environment did not apply (for example after `/clear` or a resume) or no factory root resolved: set `FACTORY_ROOT` in the shell that starts `claude` if the factory is not at the default path, and restart the session.
 
@@ -67,9 +67,21 @@ The factory runs on Linux too (tested on macOS; the Linux paths are unit-tested)
 
 - A stage agent that hits its turn limit (`maxTurns` 60) ends without a `<factory-result>` block. The core then records a malformed reply ("no `<factory-result>` block"), not a turn-limit block: verify and review go back to build (using up one return); spec, plan and build block.
 
+## Watch the Board without a loop
+
+A `/loop` pays for every iteration, even one that ends in `nothing to do`. `tools/watch.sh` checks for free instead and starts Claude only when there is work:
+
+```bash
+tools/watch.sh                      # check every 60 s, one run at a time, every active factory
+tools/watch.sh --max 2 --factory tsf
+tools/watch.sh --once               # one check, for cron or a systemd timer
+```
+
+Each check is `factory next --peek`: the same sync and pick as `next` (paused, `maxParallel`, dependencies), but it claims nothing. It prints `work T-5` and exits 0 when there is work, or the reason and exits 1. Only on 0, and while fewer than `--max` runs are going, the watcher starts `claude -p --permission-mode auto -- "/factory:run --loop"` in the factory root (set other flags with `FACTORY_CLAUDE_ARGS`). That run does one step, as an interactive `/factory:run` does. The watcher logs changes to `runs/.watch/watch.log` and each run to its own `runs/.watch/run-*.log`; one watcher runs per factory root. Stop it with Ctrl-C; runs already started finish on their own.
+
 ## Create a task from a prompt
 
-`/factory:new [--ready] [<factory>:] <what you want done>` drafts a task from your words (factory, repo, base branch, title, description with acceptance criteria) and creates it on the Board by running `factory new --factory <id>` from your session. It learns the factories and their repos from `factories --json`. The factory is the `<factory>:` prefix if you give one, else the factory whose repo your prompt names; with no match, or more than one, it asks you. The fallback Board link carries `factory` too. The task starts in **inbox**; click **Mark ready** on the Board, then run `/factory:run`. With `--ready` it starts in ready, so you can run `/factory:run` straight away. Its history reads `core · new`. After creation the factory still can't edit the title, description, repo, base branch or gate overrides; only you can, on the Board. The guard denies the factory CLI to stage agents (regex defence in depth).
+`/factory:new [--ready] [--depends-on <ids>] [<factory>:] <what you want done>` drafts a task from your words (factory, repo, base branch, title, description with acceptance criteria) and creates it on the Board by running `factory new --factory <id>` from your session. It learns the factories and their repos from `factories --json`. The factory is the `<factory>:` prefix if you give one, else the factory whose repo your prompt names; with no match, or more than one, it asks you. The fallback Board link carries `factory` too. The task starts in **inbox**; click **Mark ready** on the Board, then run `/factory:run`. With `--ready` it starts in ready, so you can run `/factory:run` straight away. With `--depends-on T-19,T-20` (comma-separated task ids, before your words) it passes `--depends-on` to `factory new`, so the task waits until those tasks are PR open, done or cancelled; if your words mention such ids without the flag, it asks first. The fallback Board link doesn't carry dependencies: set **Depends on** in the form. Its history reads `core · new`. After creation the factory still can't edit the title, description, repo, base branch, gate overrides or dependencies; only you can, on the Board. The guard denies the factory CLI to stage agents (regex defence in depth).
 
 This needs the Blocks rules to let the factory core insert a task (`blocks/data/rules.json`, regenerated with `npm run -s blocks:resources`). You deploy them; until then `factory new` fails with a one-line error.
 

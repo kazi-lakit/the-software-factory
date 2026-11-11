@@ -11,8 +11,10 @@ export function Stepper({ stage, status }: { stage: Task["stage"]; status: Statu
         const waiting = state === "waiting";
         return (
           <li key={step} className={waiting ? "sf-stepper-item sf-stepper-item-waiting" : "sf-stepper-item"} data-state={state}>
-            <span className="sf-step" data-state={state} />
-            <span className={waiting ? "sf-stepper-label sf-label sf-stepper-label-waiting" : "sf-stepper-label sf-label"}>
+            <span
+              className={waiting ? "sf-step sf-stepper-label sf-label sf-stepper-label-waiting" : "sf-step sf-stepper-label sf-label"}
+              data-state={state}
+            >
               {step}
               {waiting ? <span className="sf-visually-hidden"> (waiting for you)</span> : null}
             </span>

@@ -120,7 +120,7 @@ function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryE
           </label>
         ) : null}
         <WriteProblemNotice problem={problem} onReload={() => void onReload()} />
-        <div className="sf-actions">
+        <div className="sf-actions sf-action-bar">
           <button type="submit" className="sf-button sf-button-accent" disabled={busy}>Send answer</button>
         </div>
       </form>

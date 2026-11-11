@@ -515,6 +515,53 @@ describe('migrate', () => {
   });
 });
 
+describe('next --peek', () => {
+  test('prints the task and exits 0 when there is work, claiming nothing', async () => {
+    const { store, out, go } = setup();
+    await put(store, { status: 'ready' });
+    expect(await go('next', '--peek')).toBe(0);
+    expect(out).toEqual(['work T-1']);
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', claimBy: null });
+  });
+
+  test('prints the reason and exits 1 when there is none', async () => {
+    const { store, out, go } = setup();
+    await put(store, { status: 'inbox' });
+    expect(await go('next', '--peek')).toBe(1);
+    expect(out).toEqual(['nothing to do']);
+  });
+
+  test('refuses --peek with --json', async () => {
+    const { go } = setup();
+    expect(await go('next', '--peek', '--json')).toBe(1);
+  });
+});
+
+describe('dependencies', () => {
+  test('next T-2 prints what it waits on', async () => {
+    const { store, out, go } = setup();
+    await put(store, { status: 'inbox' });
+    await put(store, { status: 'ready', dependsOn: ['T-1'] });
+    expect(await go('next', 'T-2')).toBe(0);
+    expect(out).toEqual(['T-2 is waiting on T-1']);
+  });
+
+  test('new --depends-on stores the list', async () => {
+    const { store, go } = setup();
+    await put(store, {});
+    await put(store, {});
+    expect(await go('new', '--repo', 'data', '--title', 'X', '--description', 'd', '--depends-on', 'T-1, T-2')).toBe(0);
+    expect((await store.getTask('T-3')).dependsOn).toEqual(['T-1', 'T-2']);
+  });
+
+  test('dev add --depends-on stores the list', async () => {
+    const { store, go } = setup();
+    await put(store, {});
+    expect(await go('dev', 'add', '--repo', 'data', '--title', 'X', '--depends-on', 'T-1')).toBe(0);
+    expect((await store.getTask('T-2')).dependsOn).toEqual(['T-1']);
+  });
+});
+
 describe('new', () => {
   const dir = () => mkdtempSync(join(tmpdir(), 'factory-new-'));
 

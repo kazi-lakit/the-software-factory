@@ -181,16 +181,55 @@ describe("TaskActions edit with several factories", () => {
 });
 
 describe("TaskActions styling", () => {
-  it("cancel_task_is_outlined_and_not_danger", async () => {
+  it("cancel_task_uses_the_danger_outline", async () => {
     renderActions(await seedTask());
     const cancel = screen.getByRole("button", { name: "Cancel task" });
-    expect(cancel).toHaveClass("sf-button");
-    for (const filled of ["sf-button-accent", "sf-button-primary", "sf-button-danger"]) expect(cancel).not.toHaveClass(filled);
+    expect(cancel).toHaveClass("sf-button", "sf-button-danger");
+    for (const filled of ["sf-button-accent", "sf-button-primary"]) expect(cancel).not.toHaveClass(filled);
   });
 
   it("confirm_dialog_danger_button_unchanged", async () => {
     renderActions(await seedTask());
     fireEvent.click(screen.getByRole("button", { name: "Cancel task" }));
     expect(screen.getByRole("button", { name: "Yes, cancel it" })).toHaveClass("sf-button-danger");
+  });
+});
+
+describe("TaskActions dependencies", () => {
+  it("saves_changed_dependencies_of_an_inbox_task", async () => {
+    const dep = await seedTask({ title: "Dep" });
+    const task = await seedTask({ title: "Child" });
+    renderActions(task);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: new RegExp(dep.taskId) }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(async () => expect((await stored(task)).dependsOn).toEqual([dep.taskId]));
+  });
+
+  it("has_no_edit_or_picker_for_a_spec_task_but_a_ready_task_edit_form_has_one", async () => {
+    await seedTask({ title: "Dep" });
+    const spec = await seedTask({}, "spec", { stage: "spec" });
+    const { unmount } = renderActions(spec);
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: "Depends on" })).not.toBeInTheDocument();
+    unmount();
+    const ready = await seedTask({}, "ready");
+    renderActions(ready);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(await screen.findByRole("group", { name: "Depends on" })).toBeInTheDocument();
+  });
+
+  it("sends_no_dependsOn_when_only_the_title_changed", async () => {
+    const dep = await seedTask({ title: "Dep" });
+    const task = await seedTask({ title: "Child" });
+    const edit = vi.spyOn(fakeBoard().owner, "updateTask");
+    renderActions(task);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await screen.findByRole("checkbox", { name: new RegExp(dep.taskId) });
+    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Renamed" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(edit).toHaveBeenCalled());
+    for (const call of edit.mock.calls) expect(call[2]).not.toHaveProperty("dependsOn");
+    expect((await stored(task)).title).toBe("Renamed");
   });
 });

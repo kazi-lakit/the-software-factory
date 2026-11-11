@@ -156,7 +156,7 @@ describe('FileStore factories', () => {
       settings: { global: { ...DEFAULT_SETTINGS, paused: true }, repos: { data: { maxParallel: 1 } } } };
     writeFileSync(join(root, 'board.json'), JSON.stringify(legacy));
     const s = new FileStore(join(root, 'board.json'));
-    expect((await s.listTasks())[0]).toMatchObject({ taskId: 'T-1', factoryId: 'blocks' });
+    expect((await s.listTasks())[0]).toMatchObject({ taskId: 'T-1', factoryId: 'blocks', dependsOn: [] });
     expect((await s.listEvents('T-1'))[0]).toMatchObject({ factoryId: 'blocks' });
     expect(await s.getSettings()).toEqual({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: { data: { maxParallel: 1 } } } } });
     await s.updateSettingsScope('blocks/data', { maxParallel: 1 }, { maxParallel: 2 });

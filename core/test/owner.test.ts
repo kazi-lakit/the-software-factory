@@ -267,6 +267,97 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
     });
   });
 
+  describe('dependencies', () => {
+    const base = { factoryId: 'blocks', title: 'X', description: '', repo: 'data' };
+    const code = (p: Promise<unknown>) => p.then(() => null, (e: unknown) => (e instanceof OwnerActionError ? e.code : e));
+
+    test('create stores the list deduped and sorted', async () => {
+      const { owner, put } = setup();
+      await put();
+      await put();
+      const t = await createTask(owner, now, { ...base, dependsOn: ['T-2', 'T-1', 'T-1'] });
+      expect(t.dependsOn).toEqual(['T-1', 'T-2']);
+      expect((await owner.getTask(t.taskId)).dependsOn).toEqual(['T-1', 'T-2']);
+    });
+
+    test.each([
+      ['a non-array', 'T-1'],
+      ['a non-string item', [1]],
+      ['an unknown id', ['T-99']],
+    ])('create refuses %s', async (_n, dependsOn) => {
+      const { owner, put } = setup();
+      await put();
+      expect(await code(createTask(owner, now, { ...base, dependsOn: dependsOn as never }))).toBe('invalid');
+    });
+
+    test('create refuses a task in another factory', async () => {
+      const { owner } = setup();
+      const other = await owner.createTask({ factoryId: 'other', title: 'O', description: '', repo: 'data' });
+      expect(await code(createTask(owner, now, { ...base, dependsOn: [other.taskId] }))).toBe('invalid');
+    });
+
+    test('createTaskAsCore accepts dependsOn', async () => {
+      const { owner, put } = setup();
+      await put();
+      await put();
+      const t = await createTaskAsCore(owner, now, { ...base, dependsOn: ['T-2', 'T-1'] } as never);
+      expect(t.dependsOn).toEqual(['T-1', 'T-2']);
+      expect(await code(createTaskAsCore(owner, now, { ...base, dependsOn: ['T-99'] } as never))).toBe('invalid');
+    });
+
+    test('edit refuses self and cycles', async () => {
+      const { owner, put } = setup();
+      const a = await put();
+      const b = await put({}, { dependsOn: ['T-1'] });
+      expect(await code(editTask(owner, now, 'T-1', a.version, { dependsOn: ['T-1'] }))).toBe('invalid');
+      expect(await code(editTask(owner, now, 'T-1', a.version, { dependsOn: ['T-2'] }))).toBe('invalid');
+      expect(b.dependsOn).toEqual(['T-1']);
+      expect((await owner.getTask('T-1')).dependsOn).toEqual([]);
+    });
+
+    test('edit names the id that closes the cycle', async () => {
+      const { owner, put } = setup();
+      const a = await put();
+      await put({}, { dependsOn: ['T-1'] });
+      await expect(editTask(owner, now, 'T-1', a.version, { dependsOn: ['T-2'] })).rejects.toThrow(/T-2 would make a cycle/);
+    });
+
+    test('a dependency that no longer exists can be dropped, and does not block other edits', async () => {
+      const { owner, put } = setup();
+      const t = await put();
+      await put();
+      const seeded = await owner.updateTask(t.taskId, t.version, { dependsOn: ['T-9'] });
+      const renamed = await editTask(owner, now, 'T-1', seeded.version, { title: 'New title' });
+      expect(renamed).toMatchObject({ title: 'New title', dependsOn: ['T-9'] });
+      expect(await code(editTask(owner, now, 'T-1', renamed.version, { dependsOn: ['T-9', 'T-8'] }))).toBe('invalid');
+      const kept = await editTask(owner, now, 'T-1', renamed.version, { dependsOn: ['T-9', 'T-1'].filter((d) => d !== 'T-1').concat('T-2') });
+      expect(kept.dependsOn).toEqual(['T-2', 'T-9']);
+      const cleared = await editTask(owner, now, 'T-1', kept.version, { dependsOn: [] });
+      expect(cleared.dependsOn).toEqual([]);
+      expect((await owner.getTask('T-1')).dependsOn).toEqual([]);
+    });
+
+    test('edit refuses a bad shape and a task the core is working on', async () => {
+      const { owner, put } = setup();
+      await put();
+      const t = await put({ status: 'spec', stage: 'spec' });
+      expect(await code(editTask(owner, now, 'T-1', 1, { dependsOn: 'T-2' as never }))).toBe('invalid');
+      expect(await code(editTask(owner, now, 'T-2', t.version, { dependsOn: ['T-1'] }))).toBe('not-editable');
+    });
+
+    test('edit writes one set event; an edit that normalizes to the stored list writes nothing', async () => {
+      const { owner, put, ownerEvents } = setup();
+      const t = await put();
+      await put();
+      const u = await editTask(owner, now, 'T-2', 1, { dependsOn: ['T-1'] });
+      expect(u.dependsOn).toEqual(['T-1']);
+      expect(await ownerEvents('T-2')).toEqual([you({ taskId: 'T-2', field: 'dependsOn', from: '[]', to: '["T-1"]', reason: 'edited' })]);
+      expect(await editTask(owner, now, 'T-2', u.version, { dependsOn: ['T-1', 'T-1'] })).toEqual(u);
+      expect(await ownerEvents('T-2')).toHaveLength(1);
+      expect(t.version).toBe(1);
+    });
+  });
+
   describe('editTask', () => {
     test.each(['inbox', 'ready'] as const)('edits a %s task and writes one event per changed field', async (status) => {
       const { owner, put, ownerEvents } = setup();
@@ -613,6 +704,32 @@ describe.each([
     ]);
   });
 
+  test('saveFactory writes a def.agentModels event when the models change, and none when they stay the same', async () => {
+    const s = make();
+    const first = await saveFactory(s, now, null, defFixture('delta'));
+    const mark = (await s.listEvents('-')).length;
+    const second = await saveFactory(s, now, first, { ...first, agentModels: { review: 'opus', build: 'sonnet' } });
+    expect((await factoryEvents(s)).slice(mark)).toEqual([
+      ['delta', 'you', 'def.agentModels', '{}', '{"build":"sonnet","review":"opus"}'],
+    ]);
+    const mark2 = (await s.listEvents('-')).length;
+    const third = await saveFactory(s, now, second, { ...second, agentModels: { build: 'sonnet', review: 'opus' } });
+    expect((await s.listEvents('-')).length).toBe(mark2);
+    const { agentModels: _drop, ...noModels } = third;
+    await saveFactory(s, now, third, noModels);
+    expect((await factoryEvents(s)).slice(mark2)).toEqual([
+      ['delta', 'you', 'def.agentModels', '{"build":"sonnet","review":"opus"}', '{}'],
+    ]);
+  });
+
+  test('saveFactory inserting a factory with agentModels writes a def.agentModels event', async () => {
+    const s = make();
+    await saveFactory(s, now, null, defFixture('delta', { agentModels: { spec: 'haiku' } }));
+    expect((await factoryEvents(s)).filter((e) => e[2] === 'def.agentModels')).toEqual([
+      ['delta', 'you', 'def.agentModels', null, '{"spec":"haiku"}'],
+    ]);
+  });
+
   test('saveFactory refuses an invalid definition and a stale version, and writes nothing', async () => {
     const s = make();
     await expect(saveFactory(s, now, null, defFixture('Bad Id'))).rejects.toMatchObject({ code: 'invalid' });
@@ -812,6 +929,22 @@ describe.each([
     expect(plan.repos[1]!.action).toBe('create');
     result = await importFactory(s, now, f);
     expect([result.factory, ...result.repos.map((r) => r.outcome)]).toEqual(['kept', 'kept', 'created']);
+  });
+
+  test('planImport and importFactory see a difference in agentModels only', async () => {
+    const s = make();
+    await s.saveFactoryDef(null, defFixture('blocks', { agentModels: { review: 'opus' } }));
+    const plan = await planImport(s, file());
+    expect(plan.factory).toEqual({ action: 'kept', differs: ['agentModels'] });
+    expect((await importFactory(s, now, file())).factory).toBe('kept');
+    const same = { ...file(), factory: defFixture('blocks', { agentModels: { review: 'opus' } }) };
+    expect((await planImport(s, same)).factory).toEqual({ action: 'already', differs: [] });
+  });
+
+  test('importFactory creating a factory with agentModels writes a def.agentModels event', async () => {
+    const s = make();
+    await importFactory(s, now, { ...file(), factory: defFixture('blocks', { agentModels: { plan: 'fable' } }) });
+    expect((await s.listEvents('-')).filter((e) => e.field === 'def.agentModels').map((e) => [e.from, e.to])).toEqual([[null, '{"plan":"fable"}']]);
   });
 
   test('planImport refuses an invalid file', async () => {

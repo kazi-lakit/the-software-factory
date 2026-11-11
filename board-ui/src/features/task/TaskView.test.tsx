@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAllUnsent } from "../../lib/unsent";
 import { factory } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
+import { TopBarLeadContext, type Lead } from "../../app/topBarLead";
 import { TaskView } from "./TaskView";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
@@ -236,6 +237,20 @@ describe("TaskView page layout", () => {
   });
 });
 
+describe("TaskView dependencies", () => {
+  it("links_each_dependency_with_its_status", async () => {
+    const { owner } = fakeBoard();
+    const dep = await seedTask({ title: "Dep" }, "build", { stage: "build" });
+    const t = await owner.createTask({ dependsOn: [dep.taskId], description: "", factoryId: "blocks", repo: "data", title: "Child" });
+    const { onNavigate } = renderTask(t.taskId);
+    const link = await screen.findByRole("link", { name: new RegExp(dep.taskId) });
+    expect(link).toHaveAttribute("href", `/tasks/${dep.taskId}`);
+    await waitFor(() => expect(link.closest("li")).toHaveTextContent("Build"));
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledWith(`/tasks/${dep.taskId}`);
+  });
+});
+
 describe("TaskView questions and answers", () => {
   const LETTERED = "Which branch?\nA. main: fits (recommended)\nB. develop: more work";
   const at = (n: number) => `2026-11-0${n}T10:00:00.000Z`;
@@ -278,5 +293,55 @@ describe("TaskView questions and answers", () => {
     await screen.findByRole("heading", { level: 2, name: "Gate" });
     expect(screen.queryByRole("region", { name: "Questions and answers" })).toBeNull();
     expect(screen.queryByText("please change X")).toBeNull();
+  });
+
+  describe("top bar Back", () => {
+    function renderWithLead(taskId: string) {
+      const onNavigate = vi.fn();
+      const leads: Array<Lead | null> = [];
+      const setter = (lead: Lead | null) => void leads.push(lead);
+      const view = renderWithClient(
+        <TopBarLeadContext.Provider value={setter}>
+          <TaskView taskId={taskId} onNavigate={onNavigate} />
+        </TopBarLeadContext.Provider>
+      );
+      return { leads, onNavigate, ...view };
+    }
+
+    it("registers_Back_when_loaded_and_navigates_to_the_board", async () => {
+      const task = await seedTask({ title: "Back me" });
+      const { leads, onNavigate } = renderWithLead(task.taskId);
+      await screen.findByRole("heading", { level: 2, name: "Back me" });
+      const lead = leads[leads.length - 1];
+      expect(lead?.label).toBe("Back");
+      lead?.onClick();
+      expect(onNavigate).toHaveBeenCalledWith("/");
+    });
+
+    it("registers_Back_while_loading", () => {
+      const { leads } = renderWithLead("T-1");
+      expect(screen.getByRole("status")).toHaveTextContent("Loading T-1");
+      expect(leads[0]?.label).toBe("Back");
+    });
+
+    it("registers_Back_when_the_task_is_not_found", async () => {
+      const { leads } = renderWithLead("T-404");
+      await screen.findByText(/was not found/);
+      expect(leads[leads.length - 1]?.label).toBe("Back");
+    });
+
+    it("registers_Back_when_loading_failed", async () => {
+      vi.spyOn(fakeBoard().owner, "getTask").mockRejectedValue(new Error("boom"));
+      const { leads } = renderWithLead("T-1");
+      await screen.findByText(/Could not load/);
+      expect(leads[leads.length - 1]?.label).toBe("Back");
+    });
+
+    it("clears_the_lead_on_unmount", async () => {
+      const { leads, unmount } = renderWithLead("T-404");
+      await screen.findByText(/was not found/);
+      unmount();
+      expect(leads[leads.length - 1]).toBeNull();
+    });
   });
 });

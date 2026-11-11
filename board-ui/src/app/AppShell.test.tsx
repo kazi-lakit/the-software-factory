@@ -11,6 +11,12 @@ import { resetSelectedFactoryForTests, useSelectedFactory } from "../features/fa
 import type { Task } from "@factory/core";
 import { AppShell } from "./AppShell";
 import { AuthProvider } from "./providers/AuthProvider";
+import { useTopBarLead } from "./topBarLead";
+
+function LeadProbe({ onClick }: { onClick: () => void }) {
+  useTopBarLead({ label: "Back", onClick });
+  return <h2>Page body</h2>;
+}
 
 vi.mock("../lib/blocks/client", () => ({ blocksClient: { iam: { me: vi.fn() } } }));
 
@@ -38,6 +44,13 @@ function Picker() {
   const [, setPicked] = useSelectedFactory();
   return <button type="button" onClick={() => setPicked("delta")}>Pick delta</button>;
 }
+
+async function openMenu(): Promise<HTMLElement> {
+  fireEvent.click(await screen.findByRole("button", { name: "Account (Kazi)" }));
+  return screen.getByRole("menu");
+}
+
+const signOutItem = (menu: HTMLElement) => within(menu).getByRole("menuitem", { name: "Sign out" });
 
 function renderShell(activePath = "/", body: ReactNode = <h2>Page body</h2>) {
   const onNavigate = vi.fn();
@@ -101,7 +114,7 @@ describe("AppShell", () => {
     expect(board).not.toHaveAttribute("aria-current");
     expect(screen.getByText("the-software-factory")).toBeInTheDocument();
     expect(screen.getByRole("main")).toContainElement(screen.getByRole("heading", { name: "Page body" }));
-    const pill = await screen.findByRole("button", { name: "Sign out (Kazi)" });
+    const pill = await screen.findByRole("button", { name: "Account (Kazi)" });
     expect(pill).toHaveTextContent("KR");
     expect(pill).toHaveTextContent("Kazi");
   });
@@ -128,7 +141,7 @@ describe("AppShell", () => {
     getSettings.mockResolvedValue(settings(false, { ghost: true }));
     renderShell();
     await waitFor(() => expect(getSettings).toHaveBeenCalled());
-    await screen.findByRole("button", { name: /^Sign out \(/ });
+    await screen.findByRole("button", { name: /^Account \(/ });
     await waitFor(() => expect(screen.queryByText(/paused/)).not.toBeInTheDocument());
   });
 
@@ -158,7 +171,7 @@ describe("AppShell", () => {
     window.localStorage.setItem("factory-board:factory", "blocks");
     renderShell();
     await waitFor(() => expect(getSettings).toHaveBeenCalled());
-    await screen.findByRole("button", { name: /^Sign out \(/ });
+    await screen.findByRole("button", { name: /^Account \(/ });
     expect(screen.queryByText(/paused/)).not.toBeInTheDocument();
     cleanup();
     resetSelectedFactoryForTests();
@@ -171,7 +184,7 @@ describe("AppShell", () => {
     getSettings.mockResolvedValue(settings(false, { delta: true }));
     window.localStorage.setItem("factory-board:factory", "blocks");
     renderShell("/", <Picker />);
-    await screen.findByRole("button", { name: /^Sign out \(/ });
+    await screen.findByRole("button", { name: /^Account \(/ });
     expect(screen.queryByText(/paused/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Pick delta" }));
     expect(await screen.findByText("Factory paused")).toBeInTheDocument();
@@ -181,14 +194,14 @@ describe("AppShell", () => {
     window.localStorage.setItem("factory-board:factory", "newbie");
     renderShell();
     await waitFor(() => expect(getSettings).toHaveBeenCalled());
-    await screen.findByRole("button", { name: /^Sign out \(/ });
+    await screen.findByRole("button", { name: /^Account \(/ });
     expect(screen.queryByText(/paused/)).not.toBeInTheDocument();
   });
 
   it("shows_no_pause_indicator_while_the_factory_runs", async () => {
     renderShell();
     await waitFor(() => expect(getSettings).toHaveBeenCalled());
-    await screen.findByRole("button", { name: /^Sign out \(/ });
+    await screen.findByRole("button", { name: /^Account \(/ });
     expect(screen.queryByText("Factory paused")).not.toBeInTheDocument();
   });
 
@@ -228,29 +241,52 @@ describe("AppShell", () => {
 
   it("titles_the_user_text_so_a_truncated_name_can_be_read", async () => {
     renderShell();
-    expect(await screen.findByRole("button", { name: "Sign out (Kazi)" })).toHaveAttribute("title", "Kazi Rahman");
+    expect(await screen.findByRole("button", { name: "Account (Kazi)" })).toHaveAttribute("title", "Kazi Rahman");
   });
 
   it("goes_to_login_even_when_sign_out_fails", async () => {
     vi.mocked(logout).mockRejectedValueOnce(new Error("network"));
     const { onNavigate } = renderShell();
-    fireEvent.click(await screen.findByRole("button", { name: "Sign out (Kazi)" }));
+    fireEvent.click(signOutItem(await openMenu()));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("/login"));
   });
 
   it("drops_unsent_text_on_sign_out", async () => {
     sessionStorage.setItem("factory-board:unsent:answer:T-1", "draft");
     const { onNavigate } = renderShell();
-    fireEvent.click(await screen.findByRole("button", { name: "Sign out (Kazi)" }));
+    fireEvent.click(signOutItem(await openMenu()));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("/login"));
     expect(sessionStorage.getItem("factory-board:unsent:answer:T-1")).toBeNull();
   });
 
   it("signs_out_and_goes_to_login", async () => {
     const { onNavigate } = renderShell();
-    fireEvent.click(await screen.findByRole("button", { name: "Sign out (Kazi)" }));
+    fireEvent.click(signOutItem(await openMenu()));
     await waitFor(() => expect(onNavigate).toHaveBeenCalledWith("/login"));
     expect(logout).toHaveBeenCalledTimes(1);
+  });
+
+  it("factory_name_is_a_link_to_the_board", () => {
+    renderShell("/history");
+    const link = screen.getByRole("link", { name: "the-software-factory" });
+    expect(link).toHaveAttribute("href", "/");
+    expect(link).toHaveClass("sf-project", "sf-label");
+    expect(link).not.toHaveAttribute("aria-current");
+    expect(screen.getByRole("navigation", { name: "Views" })).not.toContainElement(link);
+    expect(document.querySelectorAll("nav.sf-views a")).toHaveLength(3);
+  });
+
+  it("factory_name_plain_click_navigates_to_the_board", () => {
+    const { onNavigate } = renderShell("/history");
+    fireEvent.click(screen.getByRole("link", { name: "the-software-factory" }));
+    expect(onNavigate).toHaveBeenCalledWith("/");
+  });
+
+  it("factory_name_modified_click_is_left_to_the_browser", () => {
+    const { onNavigate } = renderShell("/history");
+    document.addEventListener("click", (event) => event.preventDefault(), { once: true });
+    fireEvent.click(screen.getByRole("link", { name: "the-software-factory" }), { metaKey: true });
+    expect(onNavigate).not.toHaveBeenCalled();
   });
 
   it("ctrl_shift_alt_and_middle_clicks_do_not_navigate", () => {
@@ -284,14 +320,14 @@ describe("AppShell waiting badge", () => {
     vi.mocked(boardStore.listTasks).mockResolvedValue([task("a", "build"), task("b", "done")]);
     renderShell();
     await waitFor(() => expect(boardStore.listTasks).toHaveBeenCalled());
-    await screen.findByRole("button", { name: "Sign out (Kazi)" });
+    await screen.findByRole("button", { name: "Account (Kazi)" });
     expect(screen.queryByText(/waiting for you/)).toBeNull();
   });
 
   it("shows_no_badge_and_no_error_while_tasks_load", async () => {
     vi.mocked(boardStore.listTasks).mockReturnValue(new Promise(() => undefined));
     renderShell();
-    await screen.findByRole("button", { name: "Sign out (Kazi)" });
+    await screen.findByRole("button", { name: "Account (Kazi)" });
     expect(screen.queryByText(/waiting for you/)).toBeNull();
     expect(badgeText()).not.toMatch(/error|failed/i);
   });
@@ -300,7 +336,7 @@ describe("AppShell waiting badge", () => {
     vi.mocked(boardStore.listTasks).mockRejectedValue(new Error("boom"));
     renderShell();
     await waitFor(() => expect(boardStore.listTasks).toHaveBeenCalled());
-    await screen.findByRole("button", { name: "Sign out (Kazi)" });
+    await screen.findByRole("button", { name: "Account (Kazi)" });
     expect(screen.queryByText(/waiting for you/)).toBeNull();
     expect(badgeText()).not.toMatch(/error|failed|boom/i);
   });
@@ -338,7 +374,7 @@ describe("AppShell waiting badge", () => {
 describe("AppShell account pill", () => {
   it("pill_shows_initials_in_a_circle_and_the_first_name", async () => {
     renderShell();
-    const pill = await screen.findByRole("button", { name: "Sign out (Kazi)" });
+    const pill = await screen.findByRole("button", { name: "Account (Kazi)" });
     expect(pill).toHaveClass("sf-account");
     expect(pill).toHaveAttribute("type", "button");
     expect(pill).toHaveAttribute("title", "Kazi Rahman");
@@ -349,7 +385,7 @@ describe("AppShell account pill", () => {
   it("pill_falls_back_to_the_email_when_there_is_no_first_name", async () => {
     vi.mocked(blocksClient.iam.me).mockResolvedValue({ data: { email: "kazi@example.test", roles: [] } } as never);
     renderShell();
-    const pill = await screen.findByRole("button", { name: "Sign out (kazi@example.test)" });
+    const pill = await screen.findByRole("button", { name: "Account (kazi@example.test)" });
     expect(pill.querySelector(".sf-avatar")).toHaveTextContent("K");
     expect(pill.querySelector(".sf-account-name")).toHaveTextContent("kazi@example.test");
   });
@@ -357,7 +393,7 @@ describe("AppShell account pill", () => {
   it("pill_shows_a_question_mark_before_a_profile_exists", async () => {
     vi.mocked(blocksClient.iam.me).mockRejectedValue(new Error("nope"));
     renderShell();
-    const pill = await screen.findByRole("button", { name: "Sign out" });
+    const pill = await screen.findByRole("button", { name: "Account" });
     expect(pill.querySelector(".sf-avatar")).toHaveTextContent("?");
   });
 
@@ -365,15 +401,104 @@ describe("AppShell account pill", () => {
     const long = "A".repeat(40);
     vi.mocked(blocksClient.iam.me).mockResolvedValue({ data: { firstName: long, lastName: "Rahman", roles: [] } } as never);
     renderShell();
-    const pill = await screen.findByRole("button", { name: `Sign out (${long})` });
+    const pill = await screen.findByRole("button", { name: `Account (${long})` });
     expect(pill.querySelector(".sf-account-name")).toHaveTextContent(long);
     expect(pill).toHaveAttribute("title", `${long} Rahman`);
   });
 
   it("no_separate_sign_out_button_or_user_text", async () => {
     renderShell();
-    await screen.findByRole("button", { name: "Sign out (Kazi)" });
-    expect(screen.getAllByRole("button", { name: /Sign out/ })).toHaveLength(1);
+    await screen.findByRole("button", { name: "Account (Kazi)" });
+    expect(screen.queryAllByRole("button", { name: /Sign out/ })).toHaveLength(0);
+    expect(screen.queryByRole("menuitem")).toBeNull();
+    const menu = await openMenu();
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(1);
+    expect(signOutItem(menu)).toBeInTheDocument();
     expect(document.querySelector(".sf-user")).toBeNull();
+  });
+
+  it("renders the lead button first in the top bar and marks the shell sf-shell-detail", () => {
+    renderShell("/tasks/T-1", <LeadProbe onClick={() => undefined} />);
+    const lead = screen.getByRole("button", { name: "Back" });
+    expect(lead).toHaveClass("sf-topbar-lead");
+    expect(document.querySelector(".sf-topbar")?.firstElementChild).toBe(lead);
+    expect(document.querySelector(".sf-app")).toHaveClass("sf-shell-detail");
+  });
+
+  it("clicking the lead button calls its onClick", () => {
+    const onClick = vi.fn();
+    renderShell("/tasks/T-1", <LeadProbe onClick={onClick} />);
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("has no lead button and no sf-shell-detail by default", () => {
+    renderShell("/");
+    expect(document.querySelector(".sf-topbar-lead")).toBeNull();
+    expect(document.querySelector(".sf-app")).not.toHaveClass("sf-shell-detail");
+  });
+
+  it("keeps one nav.sf-views with three links", () => {
+    renderShell("/", <LeadProbe onClick={() => undefined} />);
+    expect(document.querySelectorAll("nav.sf-views")).toHaveLength(1);
+    expect(document.querySelectorAll("nav.sf-views a")).toHaveLength(3);
+  });
+});
+
+describe("AppShell account menu", () => {
+  it("account_button_announces_a_menu", async () => {
+    renderShell();
+    const pill = await screen.findByRole("button", { name: "Account (Kazi)" });
+    expect(pill).toHaveAttribute("aria-haspopup", "menu");
+    expect(pill).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menu")).toBeNull();
+    fireEvent.click(pill);
+    const menu = screen.getByRole("menu");
+    expect(pill).toHaveAttribute("aria-expanded", "true");
+    expect(pill.getAttribute("aria-controls")).toBe(menu.id);
+    expect(menu.id).not.toBe("");
+  });
+
+  it("opening_the_menu_shows_the_email_and_sign_out_and_does_not_sign_out", async () => {
+    const { onNavigate } = renderShell();
+    const menu = await openMenu();
+    expect(within(menu).getByText("kazi@example.test")).not.toHaveAttribute("role", "menuitem");
+    expect(within(menu).getAllByRole("menuitem")).toHaveLength(1);
+    const item = signOutItem(menu);
+    await waitFor(() => expect(document.activeElement).toBe(item));
+    expect(logout).not.toHaveBeenCalled();
+    expect(onNavigate).not.toHaveBeenCalledWith("/login");
+  });
+
+  it("menu_leaves_out_the_email_when_the_profile_has_none", async () => {
+    vi.mocked(blocksClient.iam.me).mockResolvedValue({ data: { firstName: "Kazi", roles: [] } } as never);
+    renderShell();
+    const menu = await openMenu();
+    expect(menu).toHaveTextContent(/^Sign out$/);
+  });
+
+  it("escape_closes_the_menu_and_returns_focus_to_the_pill", async () => {
+    renderShell();
+    const menu = await openMenu();
+    const pill = screen.getByRole("button", { name: "Account (Kazi)" });
+    fireEvent.keyDown(menu, { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(pill).toHaveAttribute("aria-expanded", "false");
+    expect(document.activeElement).toBe(pill);
+  });
+
+  it("clicking_outside_closes_the_menu", async () => {
+    renderShell();
+    await openMenu();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(logout).not.toHaveBeenCalled();
+  });
+
+  it("clicking_the_pill_again_closes_the_menu", async () => {
+    renderShell();
+    await openMenu();
+    fireEvent.click(screen.getByRole("button", { name: "Account (Kazi)" }));
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 });

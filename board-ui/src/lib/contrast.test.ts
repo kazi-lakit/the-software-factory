@@ -95,3 +95,33 @@ describe("task_page_text_pairs_meet_4_5_to_1", () => {
     expect(r, `${theme}: ${selector} is ${r.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
   });
 });
+
+// Task-page step chips: each state's text on its own fill (or on the page when transparent).
+describe("step_chip_text_pairs_meet_4_5_to_1", () => {
+  const rules: [string, string, string][] = [
+    ['.sf-stepper .sf-step[data-state="done"]', "done", "done-soft"],
+    ['.sf-stepper .sf-step[data-state="current"]', "text", "bg"],
+    ['.sf-stepper .sf-step[data-state="waiting"]', "accent-text", "accent-soft"],
+    ['.sf-stepper .sf-step[data-state="todo"]', "muted", "bg"]
+  ];
+  const cases = Object.keys(themes).flatMap((t) => rules.map(([sel, fg, bg]) => [t, sel, fg, bg] as const));
+  it.each(cases)("%s: %s (%s on %s)", (theme, selector, fg, bg) => {
+    expect(tokens(css, selector).color, `${selector} sets no colour`).toBe(`var(--sf-${fg})`);
+    const t = themes[theme] as Record<string, string>;
+    const r = ratio(parse(t[`--sf-${fg}`] as string).rgb, parse(t[`--sf-${bg}`] as string).rgb);
+    expect(r, `${theme}: ${selector} is ${r.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+// The danger outline (Cancel task) on the page, a panel and its own hover fill.
+describe("danger_button_meets_4_5_to_1", () => {
+  it("uses_the_removed_colour", () => {
+    expect(tokens(css, ".sf-button-danger").color).toBe("var(--sf-removed)");
+  });
+  const cases = Object.keys(themes).flatMap((t) => ["bg", "surface", "primary-soft"].map((bg) => [t, bg] as const));
+  it.each(cases)("%s: removed on %s", (theme, bg) => {
+    const t = themes[theme] as Record<string, string>;
+    const r = ratio(parse(t["--sf-removed"] as string).rgb, parse(t[`--sf-${bg}`] as string).rgb);
+    expect(r, `${theme}: removed on ${bg} is ${r.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+});

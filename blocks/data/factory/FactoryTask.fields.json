@@ -85,6 +85,12 @@
       "description": "JSON text of the gate overrides."
     },
     {
+      "name": "dependsOn",
+      "type": "String",
+      "isArray": false,
+      "description": "JSON text of the task ids this task depends on."
+    },
+    {
       "name": "claimBy",
       "type": "String",
       "isArray": false,
