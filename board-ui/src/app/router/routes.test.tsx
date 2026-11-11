@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { blocksClient } from "../../lib/blocks/client";
 import { completeLogin, fetchSessionClaims, onSessionExpired, renewSession } from "../../lib/blocks/auth";
@@ -185,6 +185,25 @@ describe("the task route", () => {
     renderAt("/tasks/T-12");
     await waitFor(() => expect(window.location.pathname).toBe("/login"));
     expect(window.location.search).toBe(`?returnTo=${encodeURIComponent("/tasks/T-12")}`);
+  });
+});
+
+describe("the 404 page", () => {
+  it("shows_page_not_found_with_a_link_to_the_board", async () => {
+    renderAt("/nope");
+    const h1 = await screen.findByRole("heading", { level: 1, name: "Page not found" });
+    expect(h1).toHaveClass("sf-page-title");
+    expect(h1.closest(".sf-screen-panel")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Back to the Board" })).toHaveAttribute("href", "/");
+  });
+
+  it("the_link_navigates_to_the_board", async () => {
+    claims.mockResolvedValue({ sub: "me" });
+    me.mockResolvedValue({ data: { roles: ["factory-owner"] } } as never);
+    renderAt("/nope");
+    fireEvent.click(await screen.findByRole("link", { name: "Back to the Board" }));
+    expect(window.location.pathname).toBe("/");
+    expect(await screen.findByRole("heading", { name: "Board" })).toBeInTheDocument();
   });
 });
 
