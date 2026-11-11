@@ -63,7 +63,6 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 /* The signed-in shell is AppShell.tsx + board.css (sf-* classes). The
    scaffold's sidebar layout and its bare aside/nav/main/section rules are gone:
    they styled every such element on the page. */
-.brand-mark { align-items: center; background: hsl(var(--primary)); border-radius: 8px; color: hsl(var(--primary-foreground)); display: flex; flex-shrink: 0; height: 30px; justify-content: center; width: 30px; }
 
 .page-header { align-items: flex-start; display: flex; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .page-header h2 { font-size: 28px; font-weight: 700; margin: 0 0 6px; }
@@ -122,14 +121,6 @@ pre { background: hsl(var(--foreground)); border-radius: var(--radius); color: h
 .icon-button:disabled { cursor: not-allowed; opacity: 0.5; }
 
 @keyframes blocks-menu-in { from { opacity: 0; transform: scale(0.96) translateY(-4px); } to { opacity: 1; transform: scale(1) translateY(0); } }
-
-/* Auth screens: login + callback */
-.auth-screen { align-items: center; background: linear-gradient(160deg, hsl(var(--secondary)), hsl(var(--background))); display: flex; justify-content: center; min-height: 100vh; padding: 24px; }
-.auth-card { background: hsl(var(--card)); border: 1px solid hsl(var(--border)); border-radius: 16px; display: grid; gap: 14px; max-width: 380px; padding: 32px; width: 100%; }
-.auth-brand { align-items: center; display: flex; font-weight: 700; gap: 10px; }
-.auth-card h2 { font-size: 22px; margin: 0; }
-.auth-card > p { color: hsl(var(--muted-foreground)); margin: 0; }
-.auth-submit { justify-content: center; width: 100%; }
 
 /* Alerts */
 .alert { border-radius: 8px; font-size: 13px; line-height: 1.5; padding: 12px 14px; }

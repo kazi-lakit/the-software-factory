@@ -49,6 +49,16 @@ describe("CallbackPage", () => {
     expect(await screen.findByText("Sign-in could not be completed. Try again.")).toBeInTheDocument();
   });
 
+  it("shows_the_failure_on_sf_classes", async () => {
+    vi.mocked(completeLogin).mockResolvedValue({ ok: false, message: "Denied" });
+    const { container } = render(<CallbackPage onNavigate={vi.fn()} />);
+    expect(await screen.findByRole("heading", { name: "auth.failed" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "auth.back" })).toBeInTheDocument();
+    expect(screen.getByText("Denied")).toHaveClass("sf-problem");
+    expect(container.querySelector(".sf-status-card")).not.toBeNull();
+    expect(container.querySelector('[class*="auth-"]')).toBeNull();
+  });
+
   it("shows_the_provider_error", async () => {
     vi.mocked(completeLogin).mockResolvedValue({ ok: false, message: "Denied" });
     render(<CallbackPage onNavigate={vi.fn()} />);

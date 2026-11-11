@@ -50,11 +50,11 @@ export function RequireOwner({ children, onNavigate }: GuardProps) {
   }
   if (me.isError) {
     return (
-      <div className="auth-screen">
-        <div className="auth-card">
+      <div className="sf-status-screen">
+        <div className="sf-status-card">
           <h2>Could not load your account</h2>
           <p>Check your connection and try again.</p>
-          <button className="primary-button auth-submit" onClick={() => void me.refetch()}>Try again</button>
+          <button className="sf-button sf-button-primary" onClick={() => void me.refetch()}>Try again</button>
         </div>
       </div>
     );

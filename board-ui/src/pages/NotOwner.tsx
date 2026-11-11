@@ -13,11 +13,11 @@ export function NotOwnerPage({ onNavigate }: { onNavigate: (path: string) => voi
   }
 
   return (
-    <div className="auth-screen">
-      <div className="auth-card">
+    <div className="sf-status-screen">
+      <div className="sf-status-card">
         <h2>Not a factory owner</h2>
         <p>{NOT_OWNER_MESSAGE}</p>
-        <button className="primary-button auth-submit" onClick={handleSignOut}>Sign out</button>
+        <button className="sf-button sf-button-primary" onClick={handleSignOut}>Sign out</button>
       </div>
     </div>
   );

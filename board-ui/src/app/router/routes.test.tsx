@@ -153,6 +153,7 @@ describe("the owner check", () => {
     me.mockRejectedValue(new Error("blocks: unavailable"));
     renderAt("/");
     expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
+    expect(document.querySelector(".sf-status-card")).not.toBeNull();
     expect(screen.queryByText("This account doesn't have the factory-owner role.")).not.toBeInTheDocument();
     expect(screen.queryByText("Board")).not.toBeInTheDocument();
   });

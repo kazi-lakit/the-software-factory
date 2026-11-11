@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -121,5 +121,19 @@ describe("landing styles", () => {
     expect(card.border).toBe("1px solid var(--sf-border)");
     expect(card["border-radius"]).toBe("var(--sf-radius)");
     expect(card).not.toHaveProperty("box-shadow");
+  });
+});
+
+describe("the old sign-in card is gone", () => {
+  it("styles_css_has_no_auth_or_brand_mark_rules", () => {
+    expect(read("styles.css")).not.toMatch(/\.(auth-screen|auth-card|auth-brand|auth-submit|brand-mark)\b/);
+  });
+
+  it("no_source_uses_auth_classes", () => {
+    const srcRoot = join(here, "..");
+    const files = (readdirSync(srcRoot, { recursive: true }) as string[]).filter((f) => /\.tsx$/.test(f) && !/\.test\.tsx$/.test(f));
+    expect(files.length).toBeGreaterThan(0);
+    const bad = files.filter((f) => /className="[^"]*\bauth-/.test(readFileSync(join(srcRoot, f), "utf8")));
+    expect(bad).toEqual([]);
   });
 });

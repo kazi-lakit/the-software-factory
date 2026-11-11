@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../app/providers/AuthProvider";
 import { completeLogin } from "../lib/blocks/auth";
 import { useT } from "../lib/i18n/LocalizationProvider";
-import { Alert } from "../shared/ui/Alert";
 import { LoadingScreen } from "../shared/ui/LoadingScreen";
 
 export function CallbackPage({ onNavigate }: { onNavigate: (path: string) => void }) {
@@ -36,11 +35,11 @@ export function CallbackPage({ onNavigate }: { onNavigate: (path: string) => voi
 
   if (error) {
     return (
-      <div className="auth-screen">
-        <div className="auth-card">
+      <div className="sf-status-screen">
+        <div className="sf-status-card">
           <h2>{t("auth.failed")}</h2>
-          <Alert tone="error">{error}</Alert>
-          <button className="primary-button auth-submit" onClick={() => onNavigate("/login")}>{t("auth.back")}</button>
+          <p className="sf-problem" role="alert">{error}</p>
+          <button className="sf-button sf-button-primary" onClick={() => onNavigate("/login")}>{t("auth.back")}</button>
         </div>
       </div>
     );
