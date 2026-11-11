@@ -1139,3 +1139,36 @@ describe("board_css_table_without_bare_rules", () => {
     expect(tokens(css, ".sf-checks-diff pre")).toMatchObject({ background: "var(--sf-surface-sunk)", color: "var(--sf-text)" });
   });
 });
+
+describe("board_css_new_task_page", () => {
+  const css = read("board.css");
+
+  it("new_task_body_is_two_columns", () => {
+    expect(tokens(css, ".sf-new-task-body")).toMatchObject({
+      "align-items": "start",
+      display: "grid",
+      gap: "16px",
+      "grid-template-columns": "minmax(0, 2fr) minmax(0, 1fr)"
+    });
+    expect(tokens(css, ".sf-new-task-body > *")["min-width"]).toBe("0");
+  });
+
+  it("new_task_body_stacks_below_1100px", () => {
+    const start = css.indexOf("@media (max-width: 1099px)");
+    const end = css.indexOf("@media (max-width: 639px)");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(css.slice(start, end)).toMatch(/\.sf-new-task-body\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  });
+
+  it("new_task_rules_have_no_shadow_or_raw_colour", () => {
+    const start = css.indexOf("/* New task page */");
+    const end = css.indexOf("/* End of New task page */");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = css.slice(start, end);
+    expect(block).not.toMatch(/box-shadow/);
+    expect(block).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(block).not.toMatch(/rgba?\(/);
+  });
+});
