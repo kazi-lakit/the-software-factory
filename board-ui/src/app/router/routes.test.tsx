@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { blocksClient } from "../../lib/blocks/client";
 import { completeLogin, fetchSessionClaims, onSessionExpired, renewSession } from "../../lib/blocks/auth";
@@ -109,7 +109,54 @@ describe("a New task link and an expiring session", () => {
     await waitFor(() => expect(window.location.search).toBe(""));
     act(() => expire());
     await waitFor(() => expect(window.location.pathname).toBe("/login"));
-    expect(window.location.search).toBe(`?returnTo=${encodeURIComponent("/")}`);
+    expect(window.location.search).toBe(`?returnTo=${encodeURIComponent("/tasks/new")}`);
+  });
+});
+
+describe("the new task route", () => {
+  const signIn = () => {
+    claims.mockResolvedValue({ sub: "me" });
+    me.mockResolvedValue({ data: { roles: ["factory-owner"] } } as never);
+  };
+
+  it("renders_the_new_task_page_not_a_task", async () => {
+    signIn();
+    const { boardStore } = await import("../../lib/board");
+    renderAt("/tasks/new");
+    expect(await screen.findByRole("heading", { level: 1, name: "New task" })).toBeInTheDocument();
+    expect(await screen.findByRole("form", { name: "New task" })).toBeInTheDocument();
+    expect(boardStore.getTask).not.toHaveBeenCalled();
+    const views = screen.getByRole("navigation", { name: "Views" });
+    expect(within(views).getByRole("link", { name: "Board" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("returns_to_tasks_new_with_its_query_after_sign_in", async () => {
+    claims.mockResolvedValue(undefined);
+    renderAt("/tasks/new?new=1&title=T");
+    await waitFor(() => expect(window.location.pathname).toBe("/login"));
+    expect(window.location.search).toBe(`?returnTo=${encodeURIComponent("/tasks/new?new=1&title=T")}`);
+  });
+
+  it("forwards_the_board_link_to_tasks_new_prefilled", async () => {
+    signIn();
+    renderAt("/?new=1&title=Draft&repo=iam");
+    const form = await screen.findByRole("form", { name: "New task" });
+    expect(within(form).getByLabelText("Title")).toHaveValue("Draft");
+    expect(within(form).getByLabelText("Repo")).toHaveValue("iam");
+    await waitFor(() => expect(window.location.search).toBe(""));
+    expect(window.location.pathname).toBe("/tasks/new");
+  });
+
+  it("the_board_new_task_link_opens_the_page_without_reload", async () => {
+    signIn();
+    renderAt("/");
+    fireEvent.click(await screen.findByRole("link", { name: "New task" }));
+    expect(window.location.pathname).toBe("/tasks/new");
+    expect(await screen.findByRole("heading", { level: 1, name: "New task" })).toBeInTheDocument();
+    const form = await screen.findByRole("form", { name: "New task" });
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+    expect(window.location.pathname).toBe("/");
+    expect(await screen.findByRole("heading", { level: 1, name: "Board" })).toBeInTheDocument();
   });
 });
 
@@ -140,6 +187,7 @@ describe("the owner check", () => {
     renderAt("/");
     expect(await screen.findByText("This account doesn't have the factory-owner role.")).toBeInTheDocument();
     expect(screen.queryByText("Board")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Not a factory owner" }).closest(".sf-screen-panel")).not.toBeNull();
   });
 
   it("does_not_claim_a_missing_role_when_the_profile_cannot_be_read", async () => {
@@ -149,6 +197,12 @@ describe("the owner check", () => {
     expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.queryByText("This account doesn't have the factory-owner role.")).not.toBeInTheDocument();
     expect(screen.queryByText("Board")).not.toBeInTheDocument();
+    const h1 = screen.getByRole("heading", { level: 1, name: "Could not load your account" });
+    expect(h1).toHaveClass("sf-page-title");
+    const retry = screen.getByRole("button", { name: "Try again" });
+    expect(retry).toHaveClass("sf-button", "sf-button-primary");
+    expect(h1.closest(".sf-screen-panel")).not.toBeNull();
+    expect(retry.closest(".sf-screen-panel")).toBe(h1.closest(".sf-screen-panel"));
   });
 });
 
@@ -178,6 +232,67 @@ describe("the task route", () => {
     renderAt("/tasks/T-12");
     await waitFor(() => expect(window.location.pathname).toBe("/login"));
     expect(window.location.search).toBe(`?returnTo=${encodeURIComponent("/tasks/T-12")}`);
+  });
+});
+
+describe("the 404 page", () => {
+  it("shows_page_not_found_with_a_link_to_the_board", async () => {
+    renderAt("/nope");
+    const h1 = await screen.findByRole("heading", { level: 1, name: "Page not found" });
+    expect(h1).toHaveClass("sf-page-title");
+    expect(h1.closest(".sf-screen-panel")).not.toBeNull();
+    expect(screen.getByRole("link", { name: "Back to the Board" })).toHaveAttribute("href", "/");
+  });
+
+  it("the_link_navigates_to_the_board", async () => {
+    claims.mockResolvedValue({ sub: "me" });
+    me.mockResolvedValue({ data: { roles: ["factory-owner"] } } as never);
+    renderAt("/nope");
+    fireEvent.click(await screen.findByRole("link", { name: "Back to the Board" }));
+    expect(window.location.pathname).toBe("/");
+    expect(await screen.findByRole("heading", { name: "Board" })).toBeInTheDocument();
+  });
+});
+
+describe("the profile page", () => {
+  it("shows_every_profile_detail_in_the_shared_panel", async () => {
+    claims.mockResolvedValue({ sub: "me", iat: 1700000000, exp: 1700003600 });
+    me.mockResolvedValue({
+      data: { firstName: "Kazi", lastName: "Rahman", email: "kazi@example.test", itemId: "u-1", roles: ["factory-owner"], permissions: ["p.read"] }
+    } as never);
+    renderAt("/profile");
+    const h1 = await screen.findByRole("heading", { level: 1, name: "Profile" });
+    expect(h1).toHaveClass("sf-page-title");
+    const panel = h1.closest(".sf-screen-panel") as HTMLElement;
+    expect(panel).not.toBeNull();
+    const inPanel = within(panel);
+    expect(inPanel.getByText("Kazi Rahman")).toBeInTheDocument();
+    expect(inPanel.getByText("kazi@example.test")).toBeInTheDocument();
+    expect(inPanel.getByText("Authenticated")).toBeInTheDocument();
+    expect(inPanel.getByText("u-1")).toBeInTheDocument();
+    expect(inPanel.getByText("Tenant id (x-blocks-key)")).toBeInTheDocument();
+    expect(inPanel.getByText("Session expires")).toBeInTheDocument();
+    const role = inPanel.getByText("factory-owner");
+    expect(role.tagName).toBe("LI");
+    expect(role).toHaveClass("sf-chip");
+    expect(inPanel.getByText("Permissions (1)")).toBeInTheDocument();
+    expect(inPanel.getByText("p.read")).toBeInTheDocument();
+    expect(inPanel.getByText(/^Signed in /)).toHaveClass("sf-chip");
+    expect(inPanel.getByText(/^Expires /)).toHaveClass("sf-chip");
+    const summary = inPanel.getByText("View raw response");
+    expect(summary.tagName).toBe("SUMMARY");
+    expect(summary.closest("details")!.querySelector("pre")).toHaveClass("sf-json");
+    expect(inPanel.getByRole("button", { name: "Refresh profile" })).toHaveClass("sf-button");
+  });
+
+  it("shows_the_fallback_when_the_profile_cannot_be_read", async () => {
+    claims.mockResolvedValue({ sub: "me" });
+    me.mockResolvedValueOnce({ data: { roles: ["factory-owner"] } } as never).mockRejectedValue(new Error("blocks: unavailable"));
+    renderAt("/profile");
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh profile" }));
+    const panel = screen.getByRole("heading", { level: 1, name: "Profile" }).closest(".sf-screen-panel") as HTMLElement;
+    expect(await within(panel).findAllByText("Session unavailable")).not.toHaveLength(0);
+    expect(within(panel).getAllByText("Not available").length).toBeGreaterThan(0);
   });
 });
 

@@ -1,4 +1,4 @@
-import { useCallback, useId, useRef } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   DEFAULT_SETTINGS,
@@ -19,6 +19,7 @@ import { useTopBarLead } from "../../app/topBarLead";
 import { followInApp } from "../board/TaskCard";
 import { useBoard } from "../board/useBoard";
 import { useFactories } from "../factories/useFactories";
+import { clearReadyProblem, peekReadyProblem } from "../newTask/createdNotice";
 import { useSettings } from "../settings/useSettings";
 import { AnswerPanel } from "./AnswerPanel";
 import { DocVersions } from "./DocVersions";
@@ -29,6 +30,7 @@ import { Stepper } from "./Stepper";
 import { TaskActions } from "./TaskActions";
 import { attemptsLabel, costLabel, runLines } from "./taskDetails";
 import { currentOf, useTask } from "./useTask";
+import { WriteProblemNotice } from "./writeOutcome";
 
 const DOC_SECTIONS = [["spec", "Spec"], ["plan", "Plan"], ["verify", "Verify report"], ["review", "Review report"]] as const;
 
@@ -70,7 +72,8 @@ function Section({ children, className = "sf-task-section", title }: { children:
   );
 }
 
-function BackToBoard({ label, onNavigate }: { label: string; onNavigate: (path: string) => void }) {
+/** The in-page link back to the Board, shared by the task and New task breadcrumbs. */
+export function BackToBoard({ label, onNavigate }: { label: string; onNavigate: (path: string) => void }) {
   return <a href="/" className="sf-back" onClick={(event) => followInApp(event, "/", onNavigate)}>{label}</a>;
 }
 
@@ -85,6 +88,9 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
   useTopBarLead({ label: "Back", onClick: () => onNavigate("/") });
   // Reload after a conflict: resolves with the latest task so open forms can rebase on its version.
   const reload = useCallback(async () => (await refetch()).data?.task, [refetch]);
+  // Set by New task when this task was created but not marked ready: shown once, then forgotten.
+  const [readyProblem] = useState(() => peekReadyProblem(taskId));
+  useEffect(() => clearReadyProblem(taskId), [taskId]);
 
   if (!query.data) {
     if (query.isError) {
@@ -117,6 +123,12 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
         <span aria-hidden="true">/</span>
         <span className="sf-mono" aria-current="page">{task.taskId}</span>
       </nav>
+      {readyProblem ? (
+        <>
+          <WriteProblemNotice problem={readyProblem} />
+          <p className="sf-problem" role="alert">The task was created but not marked ready.</p>
+        </>
+      ) : null}
       {query.isError ? <p className="sf-problem" role="alert">Could not refresh this task; showing what was loaded last.</p> : null}
       <TaskHeader task={task} gate={gate} docs={docs} onReload={reload} />
 

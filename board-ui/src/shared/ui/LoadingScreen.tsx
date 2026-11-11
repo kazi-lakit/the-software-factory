@@ -1,7 +1,9 @@
+import { ScreenPanel } from "./ScreenPanel";
+
 export function LoadingScreen() {
   return (
-    <div className="loading-screen">
-      <span className="spinner" />
-    </div>
+    <ScreenPanel>
+      <p className="sf-label sf-muted" role="status">Loading…</p>
+    </ScreenPanel>
   );
 }

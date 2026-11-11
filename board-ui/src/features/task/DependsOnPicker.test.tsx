@@ -14,7 +14,8 @@ function task(taskId: string, patch: Partial<Task> = {}): Task {
 
 afterEach(cleanup);
 
-const labels = () => screen.getAllByRole("checkbox").map((el) => (el as HTMLInputElement).value);
+const optionValues = (select: HTMLElement) =>
+  [...(select as HTMLSelectElement).options].map((o) => o.value).filter((v) => v !== "");
 
 describe("DependsOnPicker", () => {
   it("lists_open_same_factory_tasks_without_self_and_keeps_selected_finished_ones", () => {
@@ -23,29 +24,48 @@ describe("DependsOnPicker", () => {
       task("T-5"), task("T-6", { status: "done" })
     ];
     render(<DependsOnPicker id="x" factoryId="blocks" selfId="T-5" tasks={tasks} value={["T-6"]} onChange={vi.fn()} />);
-    expect(screen.getByRole("group", { name: "Depends on" })).toBeInTheDocument();
-    expect(labels().sort()).toEqual(["T-1", "T-6"]);
-    expect(screen.getByRole("checkbox", { name: /T-6/ })).toBeChecked();
+    const select = screen.getByLabelText("Depends on");
+    expect(select.tagName).toBe("SELECT");
+    expect(select).toHaveClass("sf-select");
+    expect(optionValues(select)).toEqual(["T-1"]);
+    const chip = screen.getByText("T-6 · Title T-6").closest(".sf-chip");
+    expect(chip).not.toBeNull();
+    const remove = screen.getByRole("button", { name: "Remove T-6" });
+    expect(remove).toHaveClass("sf-chip-remove");
+    expect(chip).toContainElement(remove);
   });
 
-  it("reports_every_checked_id", () => {
+  it("picking_an_option_adds_it_and_remove_drops_it", () => {
     const onChange = vi.fn();
     function Host() {
       const [value, setValue] = useState<string[]>([]);
       return <DependsOnPicker id="x" factoryId="blocks" tasks={[task("T-1"), task("T-2")]} value={value} onChange={(ids) => { onChange(ids); setValue(ids); }} />;
     }
     render(<Host />);
-    fireEvent.click(screen.getByRole("checkbox", { name: /T-1/ }));
-    fireEvent.click(screen.getByRole("checkbox", { name: /T-2/ }));
+    const select = screen.getByLabelText("Depends on");
+    fireEvent.change(select, { target: { value: "T-1" } });
+    fireEvent.change(select, { target: { value: "T-2" } });
     expect(onChange).toHaveBeenLastCalledWith(["T-1", "T-2"]);
+    expect(optionValues(screen.getByLabelText("Depends on"))).not.toContain("T-1");
+    fireEvent.click(screen.getByRole("button", { name: "Remove T-1" }));
+    expect(onChange).toHaveBeenLastCalledWith(["T-2"]);
   });
 
-  it("shows_a_selected_id_that_no_longer_exists_so_it_can_be_unticked", () => {
+  it("shows_a_selected_id_that_no_longer_exists_as_a_removable_chip", () => {
     const onChange = vi.fn();
     render(<DependsOnPicker id="x" factoryId="blocks" tasks={[task("T-1")]} value={["T-1", "T-9"]} onChange={onChange} />);
-    const missing = screen.getByRole("checkbox", { name: "T-9 (missing)" });
-    expect(missing).toBeChecked();
-    fireEvent.click(missing);
+    expect(screen.getByText("T-9 (missing)")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Remove T-9" }));
     expect(onChange).toHaveBeenCalledWith(["T-1"]);
+  });
+
+  it("uses_the_label_prop", () => {
+    render(<DependsOnPicker id="x" label="Waits for" factoryId="blocks" tasks={[task("T-1")]} value={[]} onChange={vi.fn()} />);
+    expect(screen.getByLabelText("Waits for").tagName).toBe("SELECT");
+  });
+
+  it("renders_nothing_without_options_or_missing", () => {
+    const { container } = render(<DependsOnPicker id="x" factoryId="blocks" tasks={[]} value={[]} onChange={vi.fn()} />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

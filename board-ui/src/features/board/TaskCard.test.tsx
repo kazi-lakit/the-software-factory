@@ -1,8 +1,14 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import type { Task } from "@factory/core";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ForbiddenError, type Task } from "@factory/core";
+import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
 import { TaskCard } from "./TaskCard";
 import { STATUS_LABEL } from "./status";
+import { BOARD_KEY } from "./useBoard";
+
+vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
+
+const render = renderWithClient;
 
 function task(patch: Partial<Task> = {}): Task {
   return {
@@ -12,7 +18,14 @@ function task(patch: Partial<Task> = {}): Task {
   };
 }
 
-afterEach(cleanup);
+beforeEach(() => {
+  resetFakeBoard();
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const ALL = ["inbox", "ready", "spec", "spec_review", "plan", "plan_review", "build", "verify", "review", "pr_open", "done", "blocked", "cancelled"] as const;
 const states = () => Array.from(document.querySelectorAll(".sf-step")).map((el) => el.getAttribute("data-state"));
@@ -34,10 +47,60 @@ describe("TaskCard", () => {
     expect(document.querySelector(".sf-card-status")).toHaveTextContent(STATUS_LABEL[status]);
   });
 
+  it("lanes_chip_says_question_for_a_blocked_task_with_a_question", () => {
+    render(<TaskCard task={task({ question: "Which branch?", status: "blocked" })} view="lanes" onNavigate={vi.fn()} />);
+    const chip = document.querySelector(".sf-card-status");
+    expect(chip).toHaveTextContent(/^Question$/);
+    expect(chip).toHaveClass("sf-card-status-waiting");
+  });
+
+  it("lanes_chip_says_blocked_when_the_question_is_blank", () => {
+    render(<TaskCard task={task({ question: "  ", status: "blocked" })} view="lanes" onNavigate={vi.fn()} />);
+    expect(document.querySelector(".sf-card-status")).toHaveTextContent(/^Blocked$/);
+  });
+
+  it("default_view_is_lanes", () => {
+    render(<TaskCard task={task({ question: "Which branch?", stage: "build", status: "blocked" })} onNavigate={vi.fn()} />);
+    expect(document.querySelector(".sf-card-status")).toHaveTextContent(/^Question$/);
+    expect(document.querySelector(".sf-steps")).not.toBeNull();
+  });
+
+  it.each(["spec_review", "plan_review", "pr_open", "blocked"] as const)("stages_chip_says_waiting_for_you_on_%s", (status) => {
+    render(<TaskCard task={task({ question: "Which branch?", status })} view="stages" onNavigate={vi.fn()} />);
+    const chips = document.querySelectorAll(".sf-card-status");
+    expect(chips).toHaveLength(1);
+    expect(chips[0]).toHaveTextContent(/^Waiting for you$/);
+    expect(chips[0]).toHaveClass("sf-card-status-waiting");
+  });
+
+  it.each(["inbox", "ready", "spec", "plan", "build", "verify", "review", "done", "cancelled"] as const)("stages_cards_that_do_not_wait_have_no_chip_%s", (status) => {
+    render(<TaskCard task={task({ status })} view="stages" onNavigate={vi.fn()} />);
+    expect(document.querySelector(".sf-card-status")).toBeNull();
+    expect(document.querySelector(".sf-card-top")).toHaveTextContent("T-7");
+  });
+
+  it("step_bar_shows_in_lanes_for_a_task_with_a_stage", () => {
+    render(<TaskCard task={task({ stage: "build", status: "build" })} view="lanes" onNavigate={vi.fn()} />);
+    expect(document.querySelectorAll(".sf-steps")).toHaveLength(1);
+  });
+
+  it("no_step_bar_in_lanes_when_the_stage_is_null", () => {
+    render(<TaskCard task={task({ stage: null, status: "inbox" })} view="lanes" onNavigate={vi.fn()} />);
+    expect(document.querySelector(".sf-steps")).toBeNull();
+    expect(screen.getByText("data")).toBeInTheDocument();
+  });
+
+  it("no_step_bar_in_all_stages", () => {
+    render(<TaskCard task={task({ stage: "build", status: "build" })} view="stages" onNavigate={vi.fn()} />);
+    expect(document.querySelector(".sf-steps")).toBeNull();
+    expect(screen.getByText("data")).toBeInTheDocument();
+  });
+
   it("shows_the_repo_and_no_age_or_stage_text", () => {
-    render(<TaskCard task={task({ stage: "build", status: "build" })} onNavigate={vi.fn()} />);
+    render(<TaskCard task={task({ costUsd: 1.5, stage: "build", status: "build" })} onNavigate={vi.fn()} />);
     expect(screen.getByText("data")).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/ago|\d+\s?[mhd]\b|Stage:|Waiting for you/);
+    expect(document.querySelector(".sf-card-meta")?.textContent).not.toMatch(/\$|ago|\d+\s?[mhd]\b/);
   });
 
   it("title_is_a_link_to_the_task_path", () => {
@@ -71,26 +134,26 @@ describe("TaskCard", () => {
     expect(states()).toEqual(["done", "done", "current", "todo", "todo", "todo"]);
   });
 
-  it.each([["spec_review", 0], ["plan_review", 1], ["pr_open", 5]] as const)("%s_draws_its_step_in_the_accent", (status, index) => {
-    render(<TaskCard task={task({ status })} onNavigate={vi.fn()} />);
+  it.each([["spec_review", "spec", 0], ["plan_review", "plan", 1], ["pr_open", "ship", 5]] as const)("%s_draws_its_step_in_the_accent", (status, stage, index) => {
+    render(<TaskCard task={task({ stage, status })} onNavigate={vi.fn()} />);
     expect(states()[index]).toBe("waiting");
   });
 
-  it("inbox_and_ready_draw_no_finished_current_or_accent_segment", () => {
+  it("inbox_and_ready_with_a_null_stage_draw_no_step_bar", () => {
     for (const status of ["inbox", "ready"] as const) {
-      render(<TaskCard task={task({ status })} onNavigate={vi.fn()} />);
-      expect(states()).toEqual(Array(6).fill("todo"));
+      render(<TaskCard task={task({ stage: null, status })} onNavigate={vi.fn()} />);
+      expect(document.querySelector(".sf-steps")).toBeNull();
       cleanup();
     }
   });
 
-  it("blocked_with_a_null_stage_draws_no_accent_segment", () => {
+  it("blocked_with_a_null_stage_draws_no_step_bar", () => {
     render(<TaskCard task={task({ stage: null, status: "blocked" })} onNavigate={vi.fn()} />);
-    expect(states()).not.toContain("waiting");
+    expect(document.querySelector(".sf-steps")).toBeNull();
   });
 
   it("done_draws_all_six_finished", () => {
-    render(<TaskCard task={task({ status: "done" })} onNavigate={vi.fn()} />);
+    render(<TaskCard task={task({ stage: "ship", status: "done" })} onNavigate={vi.fn()} />);
     expect(states()).toEqual(Array(6).fill("done"));
   });
 
@@ -119,9 +182,21 @@ describe("TaskCard", () => {
   ] as const)("shows_the_cta_for_%s_%s", (status, question, label) => {
     render(<TaskCard task={task({ question, status })} onNavigate={vi.fn()} />);
     expect(screen.getByRole("link", { name: label })).toHaveAttribute("href", "/tasks/T-7");
-    expect(screen.getByRole("link", { name: label })).toHaveClass("sf-card-cta");
+    expect(screen.getByRole("link", { name: label })).toHaveClass("sf-button", "sf-button-small", "sf-card-cta");
     expect(document.querySelectorAll(".sf-card-cta")).toHaveLength(1);
     expect(screen.getByRole("article")).toHaveClass("sf-card-needs-you");
+  });
+
+  it.each([2, 3, 4])("answer_label_counts_lettered_options_%i", (n) => {
+    const options = Array.from({ length: n }, (_, i) => `${String.fromCharCode(65 + i)}. opt: why`);
+    const question = ["Which base?", ...options, "Reply with an option letter, or answer in your own words."].join("\n");
+    render(<TaskCard task={task({ question, status: "blocked" })} onNavigate={vi.fn()} />);
+    expect(screen.getByRole("link", { name: `Answer (${n} options)` })).toHaveAttribute("href", "/tasks/T-7");
+  });
+
+  it("a_single_or_malformed_option_list_keeps_answer_the_question", () => {
+    render(<TaskCard task={task({ question: "Q?\nA. only one", status: "blocked" })} onNavigate={vi.fn()} />);
+    expect(screen.getByRole("link", { name: "Answer the question" })).toBeInTheDocument();
   });
 
   it("non_waiting_cards_have_no_cta_and_the_standard_border", () => {
@@ -168,11 +243,75 @@ describe("TaskCard factory tag", () => {
 
   it("shows_what_a_task_is_waiting_on", () => {
     render(<TaskCard task={task({ status: "ready" })} waitingOn={["T-3", "T-4"]} onNavigate={vi.fn()} />);
-    expect(screen.getByText("Waiting on T-3, T-4")).toBeInTheDocument();
+    expect(document.querySelector(".sf-card-waiting")).toHaveTextContent(/^Waiting on T-3, T-4$/);
+  });
+
+  it("waiting_on_ids_are_links_to_the_tasks", () => {
+    render(<TaskCard task={task({ status: "ready" })} waitingOn={["T-3", "T-4"]} onNavigate={vi.fn()} />);
+    expect(screen.getByRole("link", { name: "T-3" })).toHaveAttribute("href", "/tasks/T-3");
+    expect(screen.getByRole("link", { name: "T-4" })).toHaveAttribute("href", "/tasks/T-4");
+  });
+
+  it("a_waiting_on_link_navigates_in_app", () => {
+    const onNavigate = vi.fn();
+    render(<TaskCard task={task({ status: "ready" })} waitingOn={["T-3"]} onNavigate={onNavigate} />);
+    const link = screen.getByRole("link", { name: "T-3" });
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+    expect(onNavigate).toHaveBeenCalledWith("/tasks/T-3");
+    fireEvent.click(link, { ctrlKey: true });
+    expect(onNavigate).toHaveBeenCalledTimes(1);
   });
 
   it("shows_no_waiting_badge_without_dependencies", () => {
     render(<TaskCard task={task({ status: "ready" })} onNavigate={vi.fn()} />);
     expect(screen.queryByText(/Waiting on/)).not.toBeInTheDocument();
+  });
+});
+
+describe("TaskCard Mark ready", () => {
+  it("inbox_card_has_a_small_mark_ready_button", async () => {
+    const seeded = await seedTask();
+    render(<TaskCard task={seeded} onNavigate={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Mark ready" })).toHaveClass("sf-button", "sf-button-small", "sf-card-ready");
+  });
+
+  it("only_inbox_cards_have_mark_ready", () => {
+    for (const status of ALL.filter((s) => s !== "inbox")) {
+      render(<TaskCard task={task({ status })} onNavigate={vi.fn()} />);
+      expect(screen.queryByRole("button", { name: "Mark ready" }), status).toBeNull();
+      cleanup();
+    }
+  });
+
+  it("mark_ready_calls_markReady_and_refreshes_the_board", async () => {
+    const seeded = await seedTask();
+    const { client } = render(<TaskCard task={seeded} onNavigate={vi.fn()} />);
+    const invalidate = vi.spyOn(client, "invalidateQueries");
+    fireEvent.click(screen.getByRole("button", { name: "Mark ready" }));
+    await waitFor(async () => expect((await fakeBoard().owner.getTask(seeded.taskId)).status).toBe("ready"));
+    await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: BOARD_KEY }));
+  });
+
+  it("mark_ready_failure_shows_the_write_error_inline", async () => {
+    const seeded = await seedTask();
+    vi.spyOn(fakeBoard().owner, "updateTask").mockRejectedValueOnce(new ForbiddenError("refused"));
+    render(<TaskCard task={seeded} onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Mark ready" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Blocks refused this change for your account.");
+    expect(alert).toHaveClass("sf-card-error");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mark ready" })).not.toBeDisabled());
+  });
+
+  it("a_new_attempt_clears_the_error", async () => {
+    const seeded = await seedTask();
+    vi.spyOn(fakeBoard().owner, "updateTask").mockRejectedValueOnce(new ForbiddenError("refused"));
+    render(<TaskCard task={seeded} onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Mark ready" }));
+    await screen.findByRole("alert");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mark ready" })).not.toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Mark ready" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
 });

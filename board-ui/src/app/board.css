@@ -142,6 +142,9 @@ body {
   gap: 4px 20px;
   min-height: var(--sf-bar-height);
   padding: 0 16px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
 }
 
 .sf-project {
@@ -341,6 +344,15 @@ body {
   opacity: 0.6;
 }
 
+/* The shared small outline button: neutral, label type, for in-row actions. */
+.sf-button-small {
+  border-color: var(--sf-border);
+  color: var(--sf-text);
+  display: inline-block;
+  padding: 2px 8px;
+  text-decoration: none;
+}
+
 .sf-main {
   flex: 1;
   padding: 16px;
@@ -519,6 +531,7 @@ textarea.sf-input {
 }
 
 .sf-field > span,
+.sf-field > label,
 .sf-inline-field > span,
 .sf-doc-controls label {
   color: var(--sf-muted);
@@ -604,6 +617,101 @@ textarea.sf-input {
   padding: 6px 10px;
 }
 
+/* One centred panel on the page field for the screens outside the Board:
+   not-owner, sign-in errors, loading, 404, error and profile. */
+.sf-screen {
+  align-items: center;
+  display: flex;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px 16px;
+}
+
+.sf-main .sf-screen {
+  align-items: flex-start;
+  min-height: 0;
+  padding: 24px 0;
+}
+
+.sf-screen-panel {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 380px;
+  overflow-wrap: anywhere;
+  padding: 26px;
+  width: 100%;
+}
+
+.sf-screen-panel p {
+  margin: 0;
+}
+
+/* A link styled as a button (404, error page) sizes like a real button. */
+.sf-screen-panel > .sf-button {
+  align-self: flex-start;
+}
+
+.sf-screen-text {
+  color: var(--sf-muted);
+}
+
+.sf-screen-who {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.sf-screen-who .sf-avatar {
+  height: 40px;
+  width: 40px;
+}
+
+.sf-screen-name {
+  font-weight: 600;
+}
+
+.sf-screen-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+}
+
+.sf-screen-facts dt {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
+.sf-screen-facts dd {
+  margin: 0;
+}
+
+.sf-screen-raw summary {
+  color: var(--sf-muted);
+  cursor: pointer;
+}
+
+.sf-json {
+  background: var(--sf-surface-sunk);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
+  font-family: var(--sf-mono);
+  font-size: 13px;
+  margin: 8px 0 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-wrap: normal;
+  padding: 10px 12px;
+  white-space: pre;
+}
+
 /* Board */
 .sf-toolbar {
   align-items: center;
@@ -639,7 +747,7 @@ textarea.sf-input {
 }
 
 .sf-column-needs-you {
-  background: var(--sf-needs-tint);
+  background: linear-gradient(to bottom, var(--sf-needs-tint), transparent 70%);
   border-color: var(--sf-accent);
 }
 
@@ -647,14 +755,16 @@ textarea.sf-input {
   flex-basis: 140px;
 }
 
+/* One row: what the view is on the left, the scroll hint on the right; the parts wrap on narrow screens. */
 .sf-columns-hint {
   color: var(--sf-muted);
+  display: flex;
+  flex-wrap: wrap;
   font-size: var(--sf-size-small);
+  gap: 4px 16px;
+  justify-content: space-between;
   margin: 0 0 8px;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .sf-column-head {
@@ -673,16 +783,21 @@ textarea.sf-input {
   color: var(--sf-muted);
 }
 
-.sf-column-toggle {
-  background: none;
-  border: 0;
-  color: inherit;
-  font: inherit;
-  padding: 0;
-  text-align: left;
+/* The small Show/Hide button of a collapsible lane or column (Stopped, Done, Cancelled). */
+.sf-show-toggle {
+  background: transparent;
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-muted);
+  cursor: pointer;
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  padding: 0 6px;
 }
 
-.sf-column-muted .sf-column-toggle {
+.sf-column-muted .sf-lane-name {
   color: var(--sf-done);
 }
 
@@ -690,8 +805,8 @@ textarea.sf-input {
 .sf-lanes {
   align-items: start;
   display: grid;
-  gap: 10px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+  grid-template-columns: minmax(260px, 1.25fr) repeat(3, minmax(220px, 1fr)) minmax(150px, .55fr);
   width: 100%;
 }
 
@@ -704,26 +819,50 @@ textarea.sf-input {
 }
 
 .sf-lane-needs-you {
-  background: linear-gradient(to bottom, var(--sf-needs-tint), transparent 40%), var(--sf-needs-tint);
+  background: linear-gradient(to bottom, var(--sf-needs-tint), transparent 70%);
   border-color: var(--sf-accent);
 }
 
 .sf-lane-head {
   align-items: baseline;
   display: flex;
+  gap: 8px;
   justify-content: space-between;
+  padding: 2px 2px 4px;
 }
 
 .sf-lane-name {
   margin: 0;
 }
 
+.sf-lane-needs-you .sf-lane-name {
+  color: var(--sf-accent-text);
+}
+
+.sf-lane-stopped .sf-lane-name {
+  color: var(--sf-done);
+}
+
 .sf-lane-hint {
   color: var(--sf-muted);
   margin: 0 0 8px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.sf-lane .sf-card-list {
+  gap: 8px;
+}
+
+.sf-lane-more {
+  display: inline-block;
+  font-size: var(--sf-size-small);
+  margin-top: 8px;
+}
+
+/* Search tasks by title or id: 220 to 360px wide. */
+.sf-board-search {
+  flex: 1 1 220px;
+  max-width: 360px;
+  min-width: 220px;
 }
 
 /* One segmented switch for the theme and the Board view: a framed group, the pressed one filled. */
@@ -778,7 +917,7 @@ textarea.sf-input {
   border-radius: var(--sf-radius);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
   padding: 8px;
   position: relative;
 }
@@ -914,9 +1053,9 @@ textarea.sf-input {
   border: 1px dashed var(--sf-border);
   border-radius: var(--sf-radius);
   font-size: var(--sf-size-small);
-  margin: 2px 0 0;
+  margin: 0;
   overflow: hidden;
-  padding: 2px 6px;
+  padding: 6px 8px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -924,29 +1063,37 @@ textarea.sf-input {
 .sf-card-waiting {
   color: var(--sf-muted);
   font-family: var(--sf-mono);
-  font-size: var(--sf-size-small);
-  margin: 2px 0 0;
-}
-
-.sf-card-cta {
-  align-self: flex-start;
-  background: transparent;
-  border: 1px solid var(--sf-accent);
-  border-radius: var(--sf-radius);
-  color: var(--sf-accent-text);
-  font-family: var(--sf-mono);
   font-size: var(--sf-label-size);
   letter-spacing: var(--sf-label-tracking);
   line-height: var(--sf-label-line);
-  margin-top: 4px;
-  padding: 2px 8px;
+  margin: 0;
+}
+
+.sf-card-waiting a {
+  color: inherit;
   position: relative;
-  text-decoration: none;
   z-index: 1;
 }
 
-.sf-card-cta:hover {
-  text-decoration: underline;
+/* The CTA is a shared small button; this only lifts it above the stretched title link. */
+.sf-card-cta {
+  align-self: flex-start;
+  position: relative;
+  z-index: 1;
+}
+
+.sf-card-ready {
+  align-self: flex-start;
+  position: relative;
+  z-index: 1;
+}
+
+.sf-card-error {
+  color: var(--sf-removed);
+  font-size: var(--sf-size-small);
+  margin: 0;
+  position: relative;
+  z-index: 1;
 }
 
 /* Task */
@@ -1154,6 +1301,48 @@ textarea.sf-input {
   padding-top: 12px;
 }
 
+/* New task page */
+/* The form left, What happens next right; one column below 1100px (see the media block), the aside after the form. */
+.sf-new-task-body {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.sf-new-task-body > * {
+  min-width: 0;
+}
+
+.sf-new-task-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sf-new-task-aside h2 {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  font-weight: 400;
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  margin: 0;
+}
+
+.sf-new-task-aside ol {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.sf-new-task-aside .sf-hint {
+  margin: 0;
+}
+/* End of New task page */
+
 .sf-doc {
   display: flex;
   flex-direction: column;
@@ -1235,6 +1424,13 @@ textarea.sf-input {
   border-collapse: collapse;
   font-size: 13px;
   min-width: 0;
+  width: 100%;
+}
+
+.sf-table th,
+.sf-table td {
+  text-align: left;
+  vertical-align: middle;
 }
 
 .sf-table td {
@@ -1255,6 +1451,7 @@ textarea.sf-input {
 
 .sf-table tbody tr {
   border-bottom: 1px solid var(--sf-chrome-border);
+  transition: background-color 150ms ease;
 }
 
 .sf-table tbody tr:last-child {
@@ -1564,6 +1761,10 @@ textarea.sf-input {
   .sf-task-body {
     grid-template-columns: minmax(0, 1fr);
   }
+
+  .sf-new-task-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 /* Lane pills show on phones only (see the phone block at the end). */
@@ -1573,36 +1774,6 @@ textarea.sf-input {
 
 .sf-lane-empty {
   display: none;
-}
-
-/* Waiting for you */
-.sf-strip {
-  background: var(--sf-accent-soft);
-  border: 1px solid var(--sf-accent);
-  border-radius: var(--sf-radius);
-  margin-bottom: 12px;
-  padding: 8px 12px;
-}
-
-.sf-strip-list {
-  display: grid;
-  gap: 4px;
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.sf-strip-item {
-  align-items: baseline;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-}
-
-.sf-strip-id,
-.sf-strip-status {
-  color: var(--sf-muted);
-  font-size: var(--sf-size-small);
 }
 
 /* Settings tabs and the Factories tab */
@@ -1688,7 +1859,11 @@ textarea.sf-input {
 }
 
 .sf-checks-diff pre {
+  background: var(--sf-surface-sunk);
+  border-radius: var(--sf-radius);
+  color: var(--sf-text);
   margin: 0;
+  padding: 10px 12px;
   overflow-x: auto;
   white-space: pre-wrap;
 }

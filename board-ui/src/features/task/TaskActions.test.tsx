@@ -209,7 +209,7 @@ describe("TaskActions dependencies", () => {
     const task = await seedTask({ title: "Child" });
     renderActions(task);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    fireEvent.click(await screen.findByRole("checkbox", { name: new RegExp(dep.taskId) }));
+    fireEvent.change(await screen.findByLabelText("Depends on"), { target: { value: dep.taskId } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(async () => expect((await stored(task)).dependsOn).toEqual([dep.taskId]));
   });
@@ -219,12 +219,12 @@ describe("TaskActions dependencies", () => {
     const spec = await seedTask({}, "spec", { stage: "spec" });
     const { unmount } = renderActions(spec);
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("group", { name: "Depends on" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Depends on")).not.toBeInTheDocument();
     unmount();
     const ready = await seedTask({}, "ready");
     renderActions(ready);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    expect(await screen.findByRole("group", { name: "Depends on" })).toBeInTheDocument();
+    expect(await screen.findByLabelText("Depends on")).toBeInTheDocument();
   });
 
   it("sends_no_dependsOn_when_only_the_title_changed", async () => {
@@ -233,7 +233,7 @@ describe("TaskActions dependencies", () => {
     const edit = vi.spyOn(fakeBoard().owner, "updateTask");
     renderActions(task);
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-    await screen.findByRole("checkbox", { name: new RegExp(dep.taskId) });
+    await screen.findByLabelText("Depends on");
     fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Renamed" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     await waitFor(() => expect(edit).toHaveBeenCalled());

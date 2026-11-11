@@ -18,9 +18,9 @@ export const defaultDictionary = {
   "common.error": "Something went wrong",
   "profile.title": "Profile",
   "profile.subtitle": "Signed-in user details from Blocks IAM.",
-  "notFound.title": "404",
+  "notFound.title": "Page not found",
   "notFound.message": "This page does not exist.",
-  "notFound.home": "Back home"
+  "notFound.home": "Back to the Board"
 } as const;
 
 export type TranslationKey = keyof typeof defaultDictionary;

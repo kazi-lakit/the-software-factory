@@ -86,10 +86,9 @@ describe("the stylesheets", () => {
     expect(cssClashes(read("styles.css"))).toEqual([]);
   });
 
-  it("styles_css_dark_block_does_not_use_prefers_color_scheme", () => {
+  it("styles_css_does_not_use_prefers_color_scheme", () => {
     const css = read("styles.css");
     expect(css).not.toContain("prefers-color-scheme");
-    expect(css).toContain(':root:not([data-theme="light"])');
   });
 });
 
@@ -265,6 +264,15 @@ describe("board_css_buttons", () => {
     expect(tokens(css, ".sf-button:hover")).toEqual({});
   });
 
+  it("small_button_is_a_neutral_outline_with_2_8_padding", () => {
+    const css = read("board.css");
+    expect(tokens(css, ".sf-button-small")).toMatchObject({
+      padding: "2px 8px", "border-color": "var(--sf-border)", color: "var(--sf-text)", "text-decoration": "none"
+    });
+    expect(css.indexOf(".sf-button-small {")).toBeGreaterThan(css.indexOf(".sf-button {"));
+    expect(css.indexOf(".sf-button-small {")).toBeLessThan(css.indexOf(".sf-button-primary {"));
+  });
+
   it("primary_is_the_only_filled_variant", () => {
     const css = read("board.css");
     const p = tokens(css, ".sf-button-primary");
@@ -398,7 +406,7 @@ describe("board_css_select", () => {
 
   it("labels_beside_selects_are_label_type_muted", () => {
     const css = read("board.css");
-    for (const s of [".sf-field > span,\n.sf-inline-field > span,\n.sf-doc-controls label", ".sf-fieldset legend"]) {
+    for (const s of [".sf-field > span,\n.sf-field > label,\n.sf-inline-field > span,\n.sf-doc-controls label", ".sf-fieldset legend"]) {
       const t = tokens(css, s);
       expect(t.color, s).toBe("var(--sf-muted)");
       expect(t, s).toMatchObject(labelType);
@@ -463,11 +471,6 @@ describe("board_css_topbar", () => {
     expect(t).toMatchObject(labelLine);
     expect(t).not.toHaveProperty("font-weight");
     expect(t.color).toBe("var(--sf-text)");
-  });
-
-  it("topbar_is_not_sticky", () => {
-    const t = tokens(read("board.css"), ".sf-topbar");
-    for (const k of ["position", "top", "z-index"]) expect(t).not.toHaveProperty(k);
   });
 
   it("nav_link_padding_is_0_14_and_nav_gap_is_16", () => {
@@ -626,23 +629,39 @@ describe("board_css_task_card", () => {
 
   it("question_is_one_line_with_a_dashed_outline", () => {
     expect(t(".sf-card-question")).toMatchObject({
-      border: "1px dashed var(--sf-border)", "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis"
+      border: "1px dashed var(--sf-border)", "white-space": "nowrap", overflow: "hidden", "text-overflow": "ellipsis", padding: "6px 8px"
     });
   });
 
-  it("cta_is_a_small_outlined_accent_link_above_the_stretched_link", () => {
-    expect(t(".sf-card-cta")).toMatchObject({
-      ...labelType,
-      background: "transparent",
-      border: "1px solid var(--sf-accent)",
-      color: "var(--sf-accent-text)",
-      position: "relative",
-      "z-index": "1",
-      "align-self": "flex-start",
-      padding: "2px 8px"
-    });
-    expect(t(".sf-card-cta").outline).toBeUndefined();
-    expect(t(".sf-card-cta:hover")["text-decoration"]).toBe("underline");
+  it("card_rows_are_6px_apart_with_no_extra_top_margins", () => {
+    expect(t(".sf-card").gap).toBe("6px");
+    for (const selector of [".sf-card-question", ".sf-card-waiting", ".sf-card-cta"]) {
+      expect([undefined, "0"], selector).toContain(t(selector).margin);
+      expect([undefined, "0"], selector).toContain(t(selector)["margin-top"]);
+    }
+  });
+
+  it("meta_and_question_are_size_small", () => {
+    expect(t(".sf-card-meta")["font-size"]).toBe("var(--sf-size-small)");
+    expect(t(".sf-card-question")["font-size"]).toBe("var(--sf-size-small)");
+  });
+
+  it("waiting_line_is_muted_label_type", () => {
+    expect(t(".sf-card-waiting")).toMatchObject({ ...labelType, "line-height": "var(--sf-label-line)", color: "var(--sf-muted)" });
+    expect(t(".sf-card-waiting a")).toMatchObject({ position: "relative", "z-index": "1" });
+  });
+
+  it("mark_ready_and_error_sit_above_the_stretched_link", () => {
+    expect(t(".sf-card-ready")).toMatchObject({ "align-self": "flex-start", position: "relative", "z-index": "1" });
+    expect(t(".sf-card-error")).toMatchObject({ margin: "0", position: "relative", "z-index": "1", "font-size": "var(--sf-size-small)" });
+  });
+
+  it("cta_is_layout_only_above_the_stretched_link", () => {
+    const cta = t(".sf-card-cta");
+    expect(cta).toMatchObject({ position: "relative", "z-index": "1", "align-self": "flex-start" });
+    for (const key of ["border", "border-color", "color", "padding", "margin-top", "margin"]) expect(cta[key], key).toBeUndefined();
+    expect(JSON.stringify(cta)).not.toContain("--sf-accent");
+    expect(t(".sf-card-cta:hover")).toEqual({});
   });
 
   it("waiting_card_border_is_accent_on_all_sides", () => {
@@ -663,11 +682,11 @@ describe("board_css_task_card", () => {
 
 describe("board_css_lanes", () => {
   const css = () => read("board.css");
-  it("lanes_grid_is_five_equal_columns_full_width", () => {
+  it("lanes_grid_matches_the_design", () => {
     const t = tokens(css(), ".sf-lanes");
     expect(t["display"]).toBe("grid");
-    expect(t["grid-template-columns"]).toBe("repeat(5, minmax(0, 1fr))");
-    expect(t["gap"]).toBe("10px");
+    expect(compact(t["grid-template-columns"])).toBe("minmax(260px,1.25fr)repeat(3,minmax(220px,1fr))minmax(150px,.55fr)");
+    expect(t["gap"]).toBe("14px");
     expect(t["align-items"]).toBe("start");
   });
   it("lane_frame_is_1px_chrome_border_transparent_8px_3px", () => {
@@ -679,20 +698,44 @@ describe("board_css_lanes", () => {
     expect(t["min-width"]).toBe("0");
     expect(t["box-shadow"]).toBeUndefined();
   });
-  it("needs_you_lane_has_accent_border_and_a_stronger_top_wash", () => {
+  it("needs_you_wash_fades_over_70_percent", () => {
     const t = tokens(css(), ".sf-lane-needs-you");
     expect(t["border-color"]).toBe("var(--sf-accent)");
-    expect(t["background"]).toContain("linear-gradient(to bottom");
-    expect((t["background"]?.match(/var\(--sf-needs-tint\)/g) ?? []).length).toBeGreaterThanOrEqual(2);
+    expect(t["background"]).toContain("linear-gradient(to bottom, var(--sf-needs-tint), transparent 70%)");
     expect(t["background"]).not.toMatch(/#|rgb/);
   });
-  it("lane_name_hint_count_styles", () => {
+  it("lane_name_hint_head_and_spacing", () => {
     const hint = tokens(css(), ".sf-lane-hint");
     expect(hint["color"]).toBe("var(--sf-muted)");
-    expect(hint["white-space"]).toBe("nowrap");
-    expect(hint["overflow"]).toBe("hidden");
-    expect(hint["text-overflow"]).toBe("ellipsis");
+    expect(hint["white-space"]).toBeUndefined();
+    expect(hint["overflow"]).toBeUndefined();
+    expect(hint["text-overflow"]).toBeUndefined();
     expect(tokens(css(), ".sf-lane-name")["margin"]).toBe("0");
+    expect(tokens(css(), ".sf-lane-head")["padding"]).toBe("2px 2px 4px");
+    expect(tokens(css(), ".sf-lane .sf-card-list")["gap"]).toBe("8px");
+    expect(tokens(css(), ".sf-lane-needs-you .sf-lane-name")["color"]).toBe("var(--sf-accent-text)");
+    expect(tokens(css(), ".sf-lane-stopped .sf-lane-name")["color"]).toBe("var(--sf-done)");
+  });
+  it("show_toggle_and_search_styles", () => {
+    const toggle = tokens(css(), ".sf-show-toggle");
+    expect(toggle["border"]).toBe("1px solid var(--sf-border)");
+    expect(toggle["font-size"]).toBe("var(--sf-label-size)");
+    expect(tokens(css(), ".sf-column-muted .sf-lane-name")["color"]).toBe("var(--sf-done)");
+    const search = tokens(css(), ".sf-board-search");
+    expect(search["min-width"]).toBe("220px");
+    expect(search["max-width"]).toBe("360px");
+    expect(tokens(css(), ".sf-strip")).toEqual({});
+    expect(css()).not.toContain(".sf-strip");
+    const changed = [
+      ".sf-lanes", ".sf-lane-needs-you", ".sf-lane-head", ".sf-lane .sf-card-list", ".sf-lane-needs-you .sf-lane-name",
+      ".sf-lane-stopped .sf-lane-name", ".sf-column-needs-you", ".sf-columns-hint", ".sf-show-toggle",
+      ".sf-column-muted .sf-lane-name", ".sf-board-search", ".sf-lane-more"
+    ];
+    for (const selector of changed) {
+      const rule = tokens(css(), selector);
+      expect(Object.keys(rule).length, selector).toBeGreaterThan(0);
+      for (const [key, value] of Object.entries(rule)) expect(`${key}: ${value}`, selector).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|box-shadow/i);
+    }
   });
   it("segmented_switch_styles", () => {
     expect(tokens(css(), ".sf-segmented")).toMatchObject({
@@ -745,19 +788,20 @@ describe("board_css_lanes", () => {
   it("all_stages_needs_you_columns", () => {
     const t = tokens(css(), ".sf-column-needs-you");
     expect(t["border-color"]).toBe("var(--sf-accent)");
-    expect(t["background"]).toContain("var(--sf-needs-tint)");
+    expect(t["background"]).toBe(tokens(css(), ".sf-lane-needs-you")["background"]);
     expect(JSON.stringify(tokens(css(), ".sf-column"))).not.toContain("--sf-accent");
   });
   it("all_stages_collapsed_width", () => {
     expect(tokens(css(), ".sf-column-collapsed")["flex-basis"]).toBe("140px");
   });
-  it("all_stages_hint_is_one_clipped_line", () => {
+  it("all_stages_hint_is_one_two_part_row", () => {
     const t = tokens(css(), ".sf-columns-hint");
+    expect(t["display"]).toBe("flex");
+    expect(t["justify-content"]).toBe("space-between");
+    expect(t["flex-wrap"]).toBe("wrap");
     expect(t["color"]).toBe("var(--sf-muted)");
     expect(t["font-size"]).toBe("var(--sf-size-small)");
-    expect(t["white-space"]).toBe("nowrap");
-    expect(t["overflow"]).toBe("hidden");
-    expect(t["text-overflow"]).toBe("ellipsis");
+    expect(t["white-space"]).toBeUndefined();
   });
   it("all_stages_rules_have_no_shadow_or_raw_colour", () => {
     const raw = css();
@@ -1064,11 +1108,101 @@ describe("board_css_all_stages_window_fit", () => {
     const css = read("board.css");
     expect(tokens(css, ".sf-column").flex).toBe("0 0 216px");
     expect(tokens(css, ".sf-column-collapsed")["flex-basis"]).toBe("140px");
-    expect(tokens(css, ".sf-columns-hint")["white-space"]).toBe("nowrap");
     for (const list of selectorLists(block())) {
       for (const selector of list.split(",").map((s) => s.trim())) {
         expect(selector).not.toMatch(/\.sf-column$|\.sf-column-collapsed$|\.sf-columns-hint$/);
       }
     }
+  });
+});
+
+describe("board_css_screen_panel", () => {
+  const css = read("board.css");
+
+  it("screen_panel_is_a_centred_surface_panel", () => {
+    expect(tokens(css, ".sf-screen-panel")).toMatchObject({
+      background: "var(--sf-surface)",
+      border: "1px solid var(--sf-border)",
+      "border-radius": "var(--sf-radius)",
+      padding: "26px",
+      "max-width": "380px",
+      width: "100%",
+      "overflow-wrap": "anywhere"
+    });
+  });
+
+  it("screen_wrapper_centres_on_the_page_field", () => {
+    const t = tokens(css, ".sf-screen");
+    expect(t).toMatchObject({ display: "flex", "align-items": "center", "justify-content": "center", "min-height": "100vh" });
+    expect(t).not.toHaveProperty("background");
+    expect(t).not.toHaveProperty("background-color");
+  });
+
+  it("screen_in_the_shell_is_not_viewport_tall", () => {
+    expect(tokens(css, ".sf-main .sf-screen")["min-height"]).toBe("0");
+  });
+
+  it("screen_rules_use_only_sf_tokens", () => {
+    const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    let seen = 0;
+    for (const m of clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if (!(m[1] ?? "").trim().startsWith(".sf-screen")) continue;
+      seen++;
+      expect(m[2] ?? "").not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+    }
+    expect(seen).toBeGreaterThan(0);
+  });
+});
+
+describe("board_css_table_without_bare_rules", () => {
+  const css = read("board.css");
+
+  it("sf_table_is_full_width", () => {
+    expect(tokens(css, ".sf-table").width).toBe("100%");
+  });
+
+  it("sf_table_cells_align_left_and_middle", () => {
+    expect(tokens(css, ".sf-table th,\n.sf-table td")).toMatchObject({ "text-align": "left", "vertical-align": "middle" });
+  });
+
+  it("sf_table_rows_fade_their_hover", () => {
+    expect(tokens(css, ".sf-table tbody tr").transition).toBe("background-color 150ms ease");
+  });
+
+  it("checks_diff_pre_uses_sf_tokens", () => {
+    expect(tokens(css, ".sf-checks-diff pre")).toMatchObject({ background: "var(--sf-surface-sunk)", color: "var(--sf-text)" });
+  });
+});
+
+describe("board_css_new_task_page", () => {
+  const css = read("board.css");
+
+  it("new_task_body_is_two_columns", () => {
+    expect(tokens(css, ".sf-new-task-body")).toMatchObject({
+      "align-items": "start",
+      display: "grid",
+      gap: "16px",
+      "grid-template-columns": "minmax(0, 2fr) minmax(0, 1fr)"
+    });
+    expect(tokens(css, ".sf-new-task-body > *")["min-width"]).toBe("0");
+  });
+
+  it("new_task_body_stacks_below_1100px", () => {
+    const start = css.indexOf("@media (max-width: 1099px)");
+    const end = css.indexOf("@media (max-width: 639px)");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    expect(css.slice(start, end)).toMatch(/\.sf-new-task-body\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+  });
+
+  it("new_task_rules_have_no_shadow_or_raw_colour", () => {
+    const start = css.indexOf("/* New task page */");
+    const end = css.indexOf("/* End of New task page */");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const block = css.slice(start, end);
+    expect(block).not.toMatch(/box-shadow/);
+    expect(block).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+    expect(block).not.toMatch(/rgba?\(/);
   });
 });
