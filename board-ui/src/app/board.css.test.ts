@@ -1198,6 +1198,49 @@ describe("board_css_all_stages_window_fit", () => {
   });
 });
 
+describe("board_css_settings_page", () => {
+  const css = read("board.css");
+  const t = (selector: string) => tokens(css, selector);
+  const settingsSelectors = [
+    ".sf-settings-layout", ".sf-settings-sections", ".sf-settings-nav", ".sf-settings-nav ul", ".sf-settings-nav a",
+    ".sf-settings-nav a:hover", '.sf-settings-nav a[aria-current="location"]', ".sf-settings-nav a:focus-visible",
+    ".sf-settings-subsection,\n.sf-factory-row", ".sf-repo-edit-row td", ".sf-repo-overrides"
+  ];
+
+  it("settings_layout_is_nav_plus_sections_grid", () => {
+    expect(t(".sf-settings-layout")).toMatchObject({ display: "grid", "grid-template-columns": "200px minmax(0, 1fr)" });
+  });
+
+  it("settings_nav_is_sticky", () => {
+    const nav = t(".sf-settings-nav");
+    expect(nav).toMatchObject({ position: "sticky", "align-self": "start" });
+    expect(nav.top).toBeDefined();
+  });
+
+  it("settings_nav_and_section_targets_clear_the_sticky_top_bar", () => {
+    expect(t(".sf-settings-nav").top).toBe("calc(var(--sf-bar-height) + 16px)");
+    expect(t(".sf-settings-section")["scroll-margin-top"]).toBe("calc(var(--sf-bar-height) + 16px)");
+  });
+
+  it("current_settings_link_is_underlined", () => {
+    expect(t('.sf-settings-nav a[aria-current="location"]')).toMatchObject({ "text-decoration": "underline", color: "var(--sf-text)" });
+  });
+
+  it("settings_stacks_to_one_column_below_1100px", () => {
+    const narrow = atBlock(css, "@media (max-width: 1099px)");
+    expect(narrow).toMatch(/\.sf-settings-layout\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+    expect(narrow).toMatch(/\.sf-settings-nav\s*\{[^}]*position:\s*static/);
+  });
+
+  it("settings_rules_use_no_hardcoded_colours", () => {
+    for (const selector of settingsSelectors) {
+      const rule = t(selector);
+      expect(Object.keys(rule).length, selector).toBeGreaterThan(0);
+      expect(Object.values(rule).join(";"), selector).not.toMatch(/#[0-9a-f]{3,8}\b|rgba?\(|hsla?\(/i);
+    }
+  });
+});
+
 describe("history_pills", () => {
   it("history_pills_show_at_every_width", () => {
     const css = read("board.css");

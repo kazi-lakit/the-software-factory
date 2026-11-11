@@ -17,16 +17,18 @@ type Editing =
 
 /** The gh login as `factory status` last found it (gh auth status); a factory the core has not checked is `unknown`. */
 function GhStatus({ health }: { health: FactoryHealth | undefined }) {
-  if (!health) return <span className="sf-gh sf-gh-unknown">unknown</span>;
+  if (!health) return <span className="sf-chip sf-gh sf-gh-unknown" title="Not checked yet">gh unknown</span>;
+  const state = health.ghLoggedIn ? "signed-in" : "signed-out";
   return (
-    <span className={`sf-gh ${health.ghLoggedIn ? "sf-gh-logged-in" : "sf-gh-logged-out"}`}>
-      {health.ghLoggedIn ? "logged in" : "not logged in"} <span className="sf-muted">(checked <time dateTime={health.checkedAt}>{formatTime(health.checkedAt)}</time>)</span>
-    </span>
+    <>
+      <span className={`sf-chip sf-gh sf-gh-${state}`}>{health.ghLoggedIn ? "gh signed in" : "gh signed out"}</span>
+      <span className="sf-muted">checked <time dateTime={health.checkedAt}>{formatTime(health.checkedAt)}</time></span>
+    </>
   );
 }
 
 /** Factories and their repos: list, add, edit, import, and the definitions the Board cannot use. */
-export function FactoriesTab() {
+export function FactoriesSection() {
   const client = useQueryClient();
   const factories = useFactories();
   const health = useFactoryHealth();
@@ -49,15 +51,9 @@ export function FactoriesTab() {
     await Promise.all([client.invalidateQueries({ queryKey: FACTORIES_KEY }), client.invalidateQueries({ queryKey: HISTORY_KEY })]);
   }
 
-  if (factories.loading) return <p className="sf-empty" role="status">Loading factories…</p>;
-  if (factories.error && entries.length === 0) {
-    return (
-      <div className="sf-problem" role="alert">
-        <span>Could not load the factories.</span>
-        <button type="button" className="sf-button" onClick={() => void factories.refetch()}>Retry</button>
-      </div>
-    );
-  }
+  // The page shows the loading and load-error messages once, above the sections; a failed load leaves a short note here.
+  if (factories.loading) return null;
+  if (factories.error && entries.length === 0) return <p className="sf-empty">Settings are not available.</p>;
 
   const form = (() => {
     if (!editing) return null;
@@ -142,18 +138,20 @@ function FactorySection({ editing, entry, form, health, onEdit }: {
   const { def, repos } = entry;
   const here = editing && "factoryId" in editing && editing.factoryId === def.factoryId ? editing : undefined;
   return (
-    <section className="sf-panel sf-factory" aria-label={`Factory ${def.factoryId}`}>
+    <section className="sf-factory-row" aria-label={`Factory ${def.factoryId}`}>
       <div className="sf-actions">
         <h3>{def.name}</h3>
-        <span className="sf-mono sf-muted">{def.factoryId}</span>
-        <span className={def.active ? "sf-status-on" : "sf-muted"}>{def.active ? "Active" : "Inactive"}</span>
+        <span className="sf-mono">{`GitHub login ${def.ghUser}`}</span>
+        <GhStatus health={health} />
         <button type="button" className="sf-button" aria-label={`Edit factory ${def.factoryId}`} onClick={() => onEdit({ factoryId: def.factoryId, kind: "edit-factory" })}>Edit</button>
       </div>
       <dl className="sf-facts">
+        <dt>Id</dt>
+        <dd className="sf-mono">{def.factoryId}</dd>
+        <dt>State</dt>
+        <dd className={def.active ? "sf-status-on" : "sf-muted"}>{def.active ? "Active" : "Inactive"}</dd>
         <dt>Protected branches</dt>
         <dd className="sf-mono">{def.protectedBranches.join(", ")}</dd>
-        <dt>GitHub login</dt>
-        <dd><span className="sf-mono">{def.ghUser}</span> <GhStatus health={health} /></dd>
       </dl>
       {here?.kind === "edit-factory" ? form : null}
       <h4>Repos</h4>

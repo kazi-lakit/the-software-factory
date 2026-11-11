@@ -1,16 +1,16 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useId, useState } from "react";
-import type { FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import type { FormEvent, ReactNode } from "react";
 import {
   DEFAULT_SETTINGS, resetRemovedRepoSettings, saveSettings, SETTING_RANGES, VersionConflictError,
   type FactoryRepo, type Gate, type RepoSettings, type RepoSettingsPatch, type Settings, type StoredSettings
 } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { FactoryPicker } from "../board/FactoryPicker";
-import { useFactories, useSelectedFactory } from "../factories/useFactories";
+import { useFactories, useSelectedFactory, type FactoryEntry } from "../factories/useFactories";
 import { HISTORY_KEY } from "../history/useHistory";
 import { describeWriteError, now, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
-import { FactoriesTab } from "./FactoriesTab";
+import { FactoriesSection } from "./FactoriesTab";
 import { SETTINGS_KEY, useSettings } from "./useSettings";
 
 /** The PR gate's note for one factory's protected branches, or for every factory when no list is given (All). */
@@ -20,7 +20,7 @@ export function prGateNote(protectedBranches?: readonly string[]): string {
     : protectedBranches.length === 1
       ? protectedBranches[0]
       : `${protectedBranches.slice(0, -1).join(", ")} or ${protectedBranches.at(-1)}`;
-  return `Turning this off lets the factory merge into other branches. A PR into ${into} always waits for you.`;
+  return `A PR into ${into} always waits for you, whatever this says.`;
 }
 export const SETTINGS_CONFLICT = "Settings changed elsewhere. Reload to see the latest.";
 
@@ -29,7 +29,7 @@ const GATE_LABEL: Readonly<Record<Gate, string>> = { plan: "Plan", pr: "PR", spe
 type LimitKey = keyof typeof SETTING_RANGES;
 const rangeText = (key: LimitKey) => {
   const r = SETTING_RANGES[key];
-  return `${r.min} to ${r.max}${r.integer ? ", whole number" : ""}`;
+  return `${r.min} to ${r.max}`;
 };
 
 /** A settings save failure; a conflict gets the settings wording, the rest are shared with task writes. */
@@ -89,99 +89,199 @@ function useScopeDraft<K extends string>(keys: readonly K[], stored: Record<K, s
   return { changed, set: (key: K, text: string) => setValues((v) => ({ ...v, [key]: text })), settle, value: (key: K): string => values[key] };
 }
 
-type SettingsTab = "factories" | "settings";
-const TABS: readonly { id: SettingsTab; label: string }[] = [
-  { id: "settings", label: "Factory settings" },
-  { id: "factories", label: "Factories" }
-];
+const SECTIONS = [
+  { id: "settings-factory", title: "Factory" },
+  { id: "settings-gates-and-limits", title: "Gates and limits" },
+  { id: "settings-repos", title: "Repos" },
+  { id: "settings-factories", title: "Factories" }
+] as const;
+const SECTION_IDS: readonly string[] = SECTIONS.map((s) => s.id);
+const [FACTORY_SECTION, GATES_SECTION, REPOS_SECTION, FACTORIES_SECTION] = SECTIONS;
+const PICK_A_FACTORY = "Pick a factory to see its settings.";
 
-/** Two tabs: the selected factory's gates, limits and repo overrides, and the factory and repo definitions. */
-export function SettingsView() {
-  const [tab, setTab] = useState<SettingsTab>("settings");
-  const ids = useId();
+/** Input that means the user scrolls on their own, which ends the hold a clicked link puts on the nav. */
+const USER_SCROLL_EVENTS = ["wheel", "touchstart", "keydown", "mousedown"] as const;
+
+/** How far below the top bar a section's top may sit and still be the one being read; a nav jump leaves 16px. */
+const READING_SLACK = 24;
+
+/** The bottom edge of the app's sticky top bar, which covers the top of the viewport; 0 when there is none. */
+function topBarBottom(): number {
+  const bar = document.querySelector(".sf-topbar");
+  return bar ? Math.max(0, Math.round(bar.getBoundingClientRect().bottom)) : 0;
+}
+
+/**
+ * The nav's current section: the first one, a clicked one, or, while scrolling, the last visible section whose top
+ * has reached the reading line just below the sticky top bar. When none has, the visible section nearest that line.
+ * Positions are read live, at most once a frame while scrolling, never kept from an earlier update. A clicked link
+ * stays current until the user scrolls, since the anchor jump cannot always bring its section to the top.
+ */
+function useCurrentSection(ids: readonly string[]): [string, (id: string) => void] {
+  const [current, setCurrent] = useState<string>(ids[0] ?? "");
+  const held = useRef(false);
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const visible = new Set<Element>();
+    const bar = topBarBottom();
+    const update = () => {
+      if (held.current) return;
+      const line = bar + READING_SLACK;
+      let reached: string | undefined;
+      let nearest: string | undefined;
+      let nearestDistance = Number.POSITIVE_INFINITY;
+      for (const id of ids) {
+        const element = document.getElementById(id);
+        if (!element || !visible.has(element)) continue;
+        const top = element.getBoundingClientRect().top;
+        if (top <= line) reached = id;
+        const distance = Math.abs(top - line);
+        if (distance < nearestDistance) {
+          nearest = id;
+          nearestDistance = distance;
+        }
+      }
+      const best = reached ?? nearest;
+      if (best) setCurrent(best);
+    };
+    let frame: number | undefined;
+    const onScroll = () => {
+      if (frame !== undefined) return;
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        update();
+      });
+    };
+    const release = () => { held.current = false; };
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) visible.add(entry.target);
+        else visible.delete(entry.target);
+      }
+      update();
+    }, { rootMargin: `-${bar}px 0px -60% 0px` });
+    for (const id of ids) {
+      const element = document.getElementById(id);
+      if (element) observer.observe(element);
+    }
+    window.addEventListener("scroll", onScroll, { passive: true });
+    for (const type of USER_SCROLL_EVENTS) window.addEventListener(type, release, { capture: true, passive: true });
+    return () => {
+      observer.disconnect();
+      if (frame !== undefined) cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", onScroll);
+      for (const type of USER_SCROLL_EVENTS) window.removeEventListener(type, release, { capture: true });
+    };
+  }, [ids]);
+  const select = useCallback((id: string) => {
+    held.current = true;
+    setCurrent(id);
+  }, []);
+  return [current, select];
+}
+
+/** One settings section: a surface panel named by its h2, the target of a nav link. */
+function SettingsSection({ children, section: { id, title } }: { children: ReactNode; section: (typeof SECTIONS)[number] }) {
   return (
-    <div className="sf-view sf-settings">
-      <div className="sf-toolbar"><h2 className="sf-page-title">Settings</h2></div>
-      <div className="sf-tabs" role="tablist" aria-label="Settings sections">
-        {TABS.map(({ id, label }) => (
-          <button
-            key={id}
-            id={`${ids}-${id}-tab`}
-            type="button"
-            role="tab"
-            className="sf-tab"
-            aria-selected={tab === id}
-            aria-controls={`${ids}-panel`}
-            onClick={() => setTab(id)}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <div id={`${ids}-panel`} role="tabpanel" aria-labelledby={`${ids}-${tab}-tab`} className="sf-tab-panel">
-        {tab === "settings" ? <FactorySettingsTab /> : <FactoriesTab />}
-      </div>
-    </div>
+    <section id={id} className="sf-panel sf-settings-section" aria-labelledby={`${id}-title`}>
+      <h2 id={`${id}-title`}>{title}</h2>
+      {children}
+    </section>
   );
 }
 
-
-/** The selected factory's pause switch, defaults and repo overrides. Each scope saves on its own. */
-function FactorySettingsTab() {
+/**
+ * One scrolling page: the selected factory's pause switch, gates and limits and repos, then the factory and repo
+ * definitions. A sticky nav links to each section. Each scope saves on its own.
+ */
+export function SettingsView() {
   const settings = useSettings();
   const factories = useFactories();
   const [picked, setPicked] = useSelectedFactory();
   const [notice, setNotice] = useState("");
+  const [currentSection, setCurrentSection] = useCurrentSection(SECTION_IDS);
   const noteId = useId();
 
-  if (settings.isPending) return <p className="sf-empty" role="status">Loading settings…</p>;
-  if (!settings.data) {
-    return (
-      <div className="sf-problem" role="alert">
-        <span>Could not load the settings.</span>
-        <button type="button" className="sf-button" onClick={() => void settings.refetch()}>Retry</button>
-      </div>
-    );
-  }
-  const stored = settings.data;
+  // With one factory there is nothing to pick: its settings show whatever the stored pick says.
+  const only = factories.defs.length === 1 ? factories.defs[0] : undefined;
+  const entry = only ? factories.byId.get(only.factoryId) : factories.byId.get(picked);
+  const factoriesFailed = Boolean(factories.error) && factories.byId.size === 0;
   const reload = async () => { await settings.refetch(); };
-  const entry = factories.byId.get(picked);
-  const picker = <FactoryPicker defs={factories.defs} value={entry ? picked : "all"} onChange={setPicked} />;
 
-  if (!entry && factories.error && factories.byId.size === 0 && !factories.loading) {
-    return (
-      <div className="sf-problem" role="alert">
-        <span>Could not load the factories.</span>
-        <button type="button" className="sf-button" onClick={() => void factories.refetch()}>Retry</button>
-      </div>
-    );
-  }
-  if (!entry) {
-    return (
-      <>
-        <div className="sf-toolbar">{picker}</div>
-        {factories.loading ? <p className="sf-empty" role="status">Loading factories…</p> : <p className="sf-empty">Pick a factory to see its settings.</p>}
-      </>
-    );
-  }
-  const factoryId = entry.def.factoryId;
-  const current = stored.factories[factoryId] ?? { factory: DEFAULT_SETTINGS, repos: {} };
+  const scoped = (body: (factoryId: string, current: FactoryStored, def: FactoryEntry) => ReactNode): ReactNode => {
+    // While loading, the status above says so; once a load has failed, each scoped section says why it is empty.
+    if (settings.isPending || factories.loading) return null;
+    if (!settings.data || factoriesFailed) return <p className="sf-empty">Settings are not available.</p>;
+    if (!entry) return <p className="sf-empty">{PICK_A_FACTORY}</p>;
+    const factoryId = entry.def.factoryId;
+    return body(factoryId, settings.data.factories[factoryId] ?? { factory: DEFAULT_SETTINGS, repos: {} }, entry);
+  };
 
   return (
-    <>
-      <div className="sf-toolbar">{picker}</div>
+    <div className="sf-view sf-settings">
+      <div className="sf-toolbar">
+        <h2 className="sf-page-title">Settings</h2>
+        {factories.defs.length > 1 ? <FactoryPicker defs={factories.defs} value={entry ? picked : "all"} onChange={setPicked} /> : null}
+      </div>
       <p className="sf-visually-hidden" role="status">{notice}</p>
-      {settings.isError ? (
+      {settings.isPending ? <p className="sf-empty" role="status">Loading settings…</p> : null}
+      {!settings.isPending && !settings.data ? (
+        <div className="sf-problem" role="alert">
+          <span>Could not load the settings.</span>
+          <button type="button" className="sf-button" onClick={() => void settings.refetch()}>Retry</button>
+        </div>
+      ) : null}
+      {settings.data && settings.isError ? (
         <div className="sf-problem" role="alert">
           <span>Could not refresh the settings; showing what was loaded last.</span>
           <button type="button" className="sf-button" onClick={() => void reload()}>Retry</button>
         </div>
       ) : null}
-      <PauseControl key={`${factoryId}:pause`} factoryId={factoryId} paused={current.factory.paused} onNotice={setNotice} onReload={reload} />
-      <GlobalForm key={`${factoryId}:defaults`} factoryId={factoryId} global={current.factory} protectedBranches={entry.def.protectedBranches} noteId={noteId} onNotice={setNotice} onReload={reload} />
-      <RepoTable key={`${factoryId}:repos`} factoryId={factoryId} repos={entry.repos} stored={current} noteId={noteId} onNotice={setNotice} onReload={reload} />
-      <RemovedRepoSettings key={`${factoryId}:removed`} factoryId={factoryId} repos={entry.repos} existing={factories.storedRepos} stored={current} onNotice={setNotice} onReload={reload} />
-    </>
+      {factories.loading ? <p className="sf-empty" role="status">Loading factories…</p> : null}
+      {!factories.loading && factoriesFailed ? (
+        <div className="sf-problem" role="alert">
+          <span>Could not load the factories.</span>
+          <button type="button" className="sf-button" onClick={() => void factories.refetch()}>Retry</button>
+        </div>
+      ) : null}
+      <div className="sf-settings-layout">
+        <nav className="sf-settings-nav" aria-label="Settings sections">
+          <ul>
+            {SECTIONS.map(({ id, title }) => (
+              <li key={id}>
+                <a href={`#${id}`} aria-current={currentSection === id ? "location" : undefined} onClick={() => setCurrentSection(id)}>{title}</a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div className="sf-settings-sections">
+          <SettingsSection section={FACTORY_SECTION}>
+            {scoped((factoryId, current) => (
+              <PauseControl key={`${factoryId}:pause`} factoryId={factoryId} paused={current.factory.paused} onNotice={setNotice} onReload={reload} />
+            ))}
+          </SettingsSection>
+          <SettingsSection section={GATES_SECTION}>
+            {scoped((factoryId, current, { def }) => (
+              <>
+                <p className="sf-hint">These apply to every repo unless a repo overrides them below.</p>
+                <GlobalForm key={`${factoryId}:defaults`} factoryId={factoryId} global={current.factory} protectedBranches={def.protectedBranches} noteId={noteId} onNotice={setNotice} onReload={reload} />
+              </>
+            ))}
+          </SettingsSection>
+          <SettingsSection section={REPOS_SECTION}>
+            {scoped((factoryId, current, { repos }) => (
+              <>
+                <RepoTable key={`${factoryId}:repos`} factoryId={factoryId} repos={repos} stored={current} noteId={noteId} onNotice={setNotice} onReload={reload} />
+                <RemovedRepoSettings key={`${factoryId}:removed`} factoryId={factoryId} repos={repos} existing={factories.storedRepos} stored={current} onNotice={setNotice} onReload={reload} />
+              </>
+            ))}
+          </SettingsSection>
+          <SettingsSection section={FACTORIES_SECTION}>
+            <FactoriesSection />
+          </SettingsSection>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -209,24 +309,29 @@ function PauseControl({ factoryId, onNotice, onReload, paused }: ScopeProps & { 
   }
 
   return (
-    <section className="sf-panel sf-settings-section" aria-labelledby={`${ids}-title`}>
-      <h3 id={`${ids}-title`}>Factory</h3>
+    <>
       <label className="sf-switch">
         <input type="checkbox" role="switch" checked={paused} disabled={busy} onChange={() => void toggle()} aria-describedby={`${ids}-hint`} />
-        <span>Pause factory</span>
+        <span>Pause the factory</span>
       </label>
-      <p id={`${ids}-hint`} className="sf-hint">While paused, the factory starts no new work. This saves at once.</p>
+      <p id={`${ids}-hint`} className="sf-hint">While paused, the factory starts no new work. Steps already running finish. This saves at once.</p>
       <WriteProblemNotice problem={problem} onReload={() => { setProblem(undefined); void onReload(); }} />
-    </section>
+    </>
   );
 }
 
 const GLOBAL_KEYS = ["spec", "plan", "pr", "maxParallel", "maxTurnsPerStage", "maxCostPerTaskUsd"] as const;
 type GlobalKey = (typeof GLOBAL_KEYS)[number];
-const LIMITS: readonly { key: LimitKey; label: string; repoLabel: string }[] = [
-  { key: "maxParallel", label: "Max parallel tasks", repoLabel: "" },
-  { key: "maxTurnsPerStage", label: "Turn limit per stage", repoLabel: "turn limit" },
-  { key: "maxCostPerTaskUsd", label: "Cost limit per task (USD)", repoLabel: "cost limit" }
+const GATE_SWITCH_LABEL: Readonly<Record<Gate, string>> = {
+  plan: "Plan: you approve every plan",
+  pr: "PR: you merge every PR",
+  spec: "Spec: you approve every spec"
+};
+type Limit = { hint: string; key: LimitKey; label: string; repoLabel: string };
+const LIMITS: readonly Limit[] = [
+  { hint: rangeText("maxParallel"), key: "maxParallel", label: "Tasks at once", repoLabel: "" },
+  { hint: rangeText("maxTurnsPerStage"), key: "maxTurnsPerStage", label: "Turns per stage", repoLabel: "turn limit" },
+  { hint: "The runner stops a task above this", key: "maxCostPerTaskUsd", label: "Cost per task (USD)", repoLabel: "cost limit" }
 ];
 
 const globalDraft = (s: Settings): Record<GlobalKey, string> => ({
@@ -267,7 +372,7 @@ function GlobalForm({
       const stored = await saveSettings(boardStore, now, factoryId, patch);
       draft.settle(globalDraft(stored.factories[factoryId]?.factory ?? DEFAULT_SETTINGS));
       setDone(true);
-      await saved(stored, "Saved factory defaults.");
+      await saved(stored, "Saved gates and limits.");
     } catch (error) {
       setProblem(describeSettingsError(error));
     } finally {
@@ -276,10 +381,9 @@ function GlobalForm({
   }
 
   return (
-    <form className="sf-panel sf-settings-section sf-form" aria-label="Factory defaults" noValidate onSubmit={(event) => void save(event)}>
-      <h3>Defaults</h3>
+    <form className="sf-form" aria-label="Gates and limits" noValidate onSubmit={(event) => void save(event)}>
       <fieldset className="sf-fieldset">
-        <legend>Gates</legend>
+        <legend>Where the factory stops for you</legend>
         {GATES.map((gate) => (
           <div key={gate} className="sf-switch-row">
             <label className="sf-switch">
@@ -290,14 +394,14 @@ function GlobalForm({
                 onChange={(event) => edit(gate, String(event.target.checked))}
                 aria-describedby={gate === "pr" ? noteId : undefined}
               />
-              <span>{GATE_LABEL[gate]} gate</span>
+              <span>{GATE_SWITCH_LABEL[gate]}</span>
             </label>
-            {gate === "pr" ? <p id={noteId} className="sf-hint">{prGateNote(protectedBranches)}</p> : null}
           </div>
         ))}
+        <p id={noteId} className="sf-hint">{prGateNote(protectedBranches)}</p>
       </fieldset>
       <div className="sf-field-row">
-        {LIMITS.map(({ key, label }) => (
+        {LIMITS.map(({ hint, key, label }) => (
           <div key={key} className="sf-field sf-limit">
             <label className="sf-field-label" htmlFor={`${ids}-${key}`}>{label}</label>
             <input
@@ -308,13 +412,13 @@ function GlobalForm({
               onChange={(event) => edit(key, event.target.value)}
               aria-describedby={`${ids}-${key}-hint`}
             />
-            <span id={`${ids}-${key}-hint`} className="sf-hint">{rangeText(key)}</span>
+            <span id={`${ids}-${key}-hint`} className="sf-hint">{hint}</span>
           </div>
         ))}
       </div>
       <WriteProblemNotice problem={problem} onReload={() => { setProblem(undefined); void onReload(); }} />
       <div className="sf-actions">
-        <button type="submit" className="sf-button sf-button-primary" disabled={busy}>Save factory defaults</button>
+        <button type="submit" className="sf-button sf-button-primary" disabled={busy}>Save gates and limits</button>
         {done && draft.changed.length === 0 ? <span className="sf-muted">Saved.</span> : null}
       </div>
     </form>
@@ -324,7 +428,7 @@ function GlobalForm({
 const REPO_KEYS = ["spec", "plan", "pr", "maxTurnsPerStage", "maxCostPerTaskUsd"] as const;
 type RepoKey = (typeof REPO_KEYS)[number];
 type RepoLimit = Exclude<RepoKey, Gate>;
-const REPO_LIMITS = LIMITS.filter((l): l is { key: RepoLimit; label: string; repoLabel: string } => l.key !== "maxParallel");
+const REPO_LIMITS = LIMITS.filter((l): l is Limit & { key: RepoLimit } => l.key !== "maxParallel");
 const gateText = (on: boolean | undefined): string => (on === undefined ? "inherit" : on ? "on" : "off");
 
 const repoDraft = (r: RepoSettings | undefined): Record<RepoKey, string> => ({
@@ -337,41 +441,100 @@ const repoDraft = (r: RepoSettings | undefined): Record<RepoKey, string> => ({
 
 type FactoryStored = StoredSettings["factories"][string];
 
+/** What a repo overrides of the factory's gates, in spec, plan, PR order; "Same as factory" when nothing. */
+export function gatesSummary(r: RepoSettings | undefined): string {
+  const parts: string[] = [];
+  for (const gate of GATES) {
+    const on = r?.gates?.[gate];
+    if (on !== undefined) parts.push(`${GATE_LABEL[gate]} gate ${on ? "on" : "off"}`);
+  }
+  return parts.length === 0 ? "Same as factory" : parts.join(", ");
+}
+
+/** A repo's check commands in the order they run. */
+export function checksSummary(c: FactoryRepo["checks"]): string {
+  return [c.server.build, c.server.test, c.client.install, c.client.typecheck, c.client.lint, c.client.test].join(" · ");
+}
+
 function RepoTable({ factoryId, noteId, onNotice, onReload, repos, stored }: ScopeProps & { noteId: string; repos: readonly FactoryRepo[]; stored: FactoryStored }) {
-  const titleId = useId();
+  const [open, setOpen] = useState<string>();
+  // Every form opened once stays mounted (hidden while closed), so closing it or opening another keeps its draft.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
+  const toggle = (repoId: string) => {
+    setOpened((was) => (was.has(repoId) ? was : new Set(was).add(repoId)));
+    setOpen((was) => (was === repoId ? undefined : repoId));
+  };
   return (
-    <section className="sf-panel sf-settings-section" aria-labelledby={titleId}>
-      <h3 id={titleId}>Repo overrides</h3>
+    <>
       <p className="sf-hint">Inherit uses the factory default. An empty limit inherits too.</p>
       <div className="sf-table-wrap">
-        <table className="sf-table sf-repo-table" aria-label="Repo overrides">
+        <table className="sf-table sf-repo-table" aria-label="Repos">
           <thead>
             <tr>
               <th scope="col">Repo</th>
-              <th scope="col">Spec gate</th>
-              <th scope="col">Plan gate</th>
-              <th scope="col">PR gate</th>
-              <th scope="col">Turn limit</th>
-              <th scope="col">Cost limit (USD)</th>
-              <th scope="col"><span className="sf-visually-hidden">Save</span></th>
+              <th scope="col">Base</th>
+              <th scope="col">Gates</th>
+              <th scope="col">Checks</th>
+              <th scope="col"><span className="sf-visually-hidden">Actions</span></th>
             </tr>
           </thead>
           <tbody>
-            {repos.map(({ repoId }) => (
-              <RepoRow key={repoId} factoryId={factoryId} repo={repoId} global={stored.factory} stored={stored.repos[repoId]} noteId={noteId} onNotice={onNotice} onReload={onReload} />
+            {repos.map((repo) => (
+              <RepoRow
+                key={repo.repoId}
+                factoryId={factoryId}
+                repo={repo}
+                global={stored.factory}
+                stored={stored.repos[repo.repoId]}
+                noteId={noteId}
+                open={open === repo.repoId}
+                mounted={opened.has(repo.repoId)}
+                onToggle={() => toggle(repo.repoId)}
+                onNotice={onNotice}
+                onReload={onReload}
+              />
             ))}
           </tbody>
         </table>
       </div>
-    </section>
+    </>
   );
 }
 
-function RepoRow({ factoryId, global, noteId, onNotice, onReload, repo, stored }: ScopeProps & {
-  global: Settings; noteId: string; repo: string; stored: RepoSettings | undefined;
-}) {
-  const formId = useId();
+type RepoRowProps = ScopeProps & { global: Settings; noteId: string; stored: RepoSettings | undefined };
+
+function RepoRow({ mounted, open, onToggle, repo, ...rest }: RepoRowProps & { mounted: boolean; onToggle: () => void; open: boolean; repo: FactoryRepo }) {
+  const { repoId } = repo;
+  // A closed form keeps its draft, so the row says so; the Gates column shows only what is saved.
+  const [unsaved, setUnsaved] = useState(false);
+  return (
+    <>
+      <tr aria-label={repoId}>
+        <th scope="row" className="sf-mono">{repoId}</th>
+        <td className="sf-mono">{repo.baseBranch}</td>
+        <td>{gatesSummary(rest.stored)}</td>
+        <td className="sf-mono">{checksSummary(repo.checks)}</td>
+        <td>
+          <button type="button" className="sf-button" aria-label={`Edit overrides for ${repoId}`} aria-expanded={open} onClick={onToggle}>Edit</button>
+          {!open && unsaved ? <span className="sf-muted"> Unsaved changes</span> : null}
+        </td>
+      </tr>
+      {mounted ? (
+        <tr className="sf-repo-edit-row" hidden={!open}>
+          <td colSpan={5}>
+            <RepoOverrideForm {...rest} repo={repoId} onClose={onToggle} onUnsavedChange={setUnsaved} />
+          </td>
+        </tr>
+      ) : null}
+    </>
+  );
+}
+
+/** One repo's gate and limit overrides; Inherit and an empty limit save as null. */
+function RepoOverrideForm({ factoryId, global, noteId, onClose, onNotice, onReload, onUnsavedChange, repo, stored }: RepoRowProps & { onClose: () => void; onUnsavedChange: (unsaved: boolean) => void; repo: string }) {
   const draft = useScopeDraft(REPO_KEYS, repoDraft(stored));
+  const unsaved = draft.changed.length > 0;
+  useEffect(() => { onUnsavedChange(unsaved); }, [onUnsavedChange, unsaved]);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<WriteProblem>();
   const [done, setDone] = useState(false);
@@ -407,13 +570,12 @@ function RepoRow({ factoryId, global, noteId, onNotice, onReload, repo, stored }
   }
 
   return (
-    <>
-      <tr aria-label={repo}>
-        <th scope="row" className="sf-mono">{repo}</th>
+    <form className="sf-form sf-repo-overrides" aria-label={`${repo} overrides`} noValidate onSubmit={(event) => void save(event)}>
+      <div className="sf-field-row">
         {GATES.map((gate) => (
-          <td key={gate}>
+          <label key={gate} className="sf-field">
+            <span className="sf-field-label">{GATE_LABEL[gate]} gate</span>
             <select
-              form={formId}
               className="sf-select"
               aria-label={`${repo} ${gate === "pr" ? "PR" : gate} gate`}
               aria-describedby={gate === "pr" ? noteId : undefined}
@@ -424,12 +586,12 @@ function RepoRow({ factoryId, global, noteId, onNotice, onReload, repo, stored }
               <option value="on">On</option>
               <option value="off">Off</option>
             </select>
-          </td>
+          </label>
         ))}
-        {REPO_LIMITS.map(({ key, repoLabel }) => (
-          <td key={key}>
+        {REPO_LIMITS.map(({ key, label, repoLabel }) => (
+          <label key={key} className="sf-field">
+            <span className="sf-field-label">{label}</span>
             <input
-              form={formId}
               className="sf-input sf-mono sf-limit-input"
               inputMode={SETTING_RANGES[key].integer ? "numeric" : "decimal"}
               aria-label={`${repo} ${repoLabel}`}
@@ -437,23 +599,16 @@ function RepoRow({ factoryId, global, noteId, onNotice, onReload, repo, stored }
               value={draft.value(key)}
               onChange={(event) => edit(key, event.target.value)}
             />
-          </td>
+          </label>
         ))}
-        <td>
-          <form id={formId} className="sf-row-save" aria-label={`${repo} overrides`} noValidate onSubmit={(event) => void save(event)}>
-            <button type="submit" className="sf-button" aria-label={`Save ${repo}`} disabled={busy}>Save</button>
-            {done && draft.changed.length === 0 ? <span className="sf-muted">Saved.</span> : null}
-          </form>
-        </td>
-      </tr>
-      {problem ? (
-        <tr className="sf-row-problem">
-          <td colSpan={7}>
-            <WriteProblemNotice problem={problem} onReload={() => { setProblem(undefined); void onReload(); }} />
-          </td>
-        </tr>
-      ) : null}
-    </>
+      </div>
+      <WriteProblemNotice problem={problem} onReload={() => { setProblem(undefined); void onReload(); }} />
+      <div className="sf-actions">
+        <button type="submit" className="sf-button" aria-label={`Save ${repo}`} disabled={busy}>Save</button>
+        <button type="button" className="sf-button" onClick={onClose}>Close</button>
+        {done && draft.changed.length === 0 ? <span className="sf-muted">Saved.</span> : null}
+      </div>
+    </form>
   );
 }
 
@@ -495,7 +650,7 @@ function RemovedRepoSettings({ existing, factoryId, onNotice, onReload, repos, s
   return (
     <>
       {orphans.length > 0 ? (
-        <section className="sf-panel sf-settings-section" aria-labelledby={titleId}>
+        <section className="sf-settings-subsection" aria-labelledby={titleId}>
           <h3 id={titleId}>Settings for removed repos</h3>
           <p className="sf-hint">These repos are no longer in the factory. Reset drops their overrides.</p>
           <ul className="sf-plain-list">
@@ -511,9 +666,9 @@ function RemovedRepoSettings({ existing, factoryId, onNotice, onReload, repos, s
         </section>
       ) : null}
       {invalid.length > 0 ? (
-        <section className="sf-panel sf-settings-section" aria-label="Settings for invalid repos">
+        <section className="sf-settings-subsection" aria-label="Settings for invalid repos">
           <h3>Settings for invalid repos</h3>
-          <p className="sf-hint">These repos exist but fail validation, so they are not listed above. Fix them on the Factories tab.</p>
+          <p className="sf-hint">These repos exist but fail validation, so they are not listed above. Fix them in the Factories section.</p>
           <ul className="sf-plain-list">
             {invalid.map((repo) => (
               <li key={repo} className="sf-actions"><span className="sf-mono">{repo}</span><span className="sf-muted">{settingText(stored.repos[repo]!)}</span></li>

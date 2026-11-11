@@ -7,9 +7,8 @@ import { SettingsView } from "./SettingsView";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
 
-async function openFactoriesTab() {
+async function openFactoriesSection() {
   const view = renderWithClient(<SettingsView />);
-  fireEvent.click(screen.getByRole("tab", { name: "Factories" }));
   await screen.findByRole("button", { name: "Add factory" });
   return view;
 }
@@ -29,7 +28,7 @@ afterEach(() => {
 
 describe("Factories tab", () => {
   it("lists_each_factory_with_its_id_active_flag_protected_branches_and_repos", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     const delta = await screen.findByRole("region", { name: "Factory delta" });
     expect(within(delta).getByRole("heading", { name: "Delta" })).toBeInTheDocument();
     expect(within(delta).getByText("Active")).toBeInTheDocument();
@@ -41,21 +40,38 @@ describe("Factories tab", () => {
   it("renders_the_gh_login_with_its_state_from_a_health_row_and_unknown_without_one", async () => {
     await fakeBoard().core.setFactoryHealth({ checkedAt: "2026-11-10T08:00:00.000Z", factoryId: "delta", ghLoggedIn: false });
     await fakeBoard().core.setFactoryHealth({ checkedAt: "2026-11-10T08:00:00.000Z", factoryId: "blocks", ghLoggedIn: true });
-    await openFactoriesTab();
+    await openFactoriesSection();
     const delta = await screen.findByRole("region", { name: "Factory delta" });
-    await waitFor(() => expect(within(delta).getByText("not logged in")).toBeInTheDocument());
-    expect(within(delta).getByText("GitHub login")).toBeInTheDocument();
-    expect(within(delta).getByText("gh-delta")).toBeInTheDocument();
+    await waitFor(() => expect(within(delta).getByText("gh signed out")).toHaveClass("sf-chip"));
+    expect(within(delta).getByText("GitHub login gh-delta")).toBeInTheDocument();
     expect(within(delta).getByText(/checked/)).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Factory blocks" })).getByText("logged in")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Factory blocks" })).getByText("gh signed in")).toHaveClass("sf-chip");
     cleanup();
     resetFakeBoard(factory("alpha", ["api"]));
-    await openFactoriesTab();
-    expect(within(await screen.findByRole("region", { name: "Factory alpha" })).getByText("unknown")).toBeInTheDocument();
+    await openFactoriesSection();
+    expect(within(await screen.findByRole("region", { name: "Factory alpha" })).getByText("gh unknown")).toHaveClass("sf-chip");
+  });
+
+  it("lists_each_factory_with_name_login_chip_and_edit", async () => {
+    await openFactoriesSection();
+    const section = screen.getByRole("region", { name: "Factories" });
+    expect(within(section).getByRole("region", { name: "Factory blocks" })).toBeInTheDocument();
+    const delta = within(section).getByRole("region", { name: "Factory delta" });
+    expect(within(delta).getByRole("heading", { name: "Delta" })).toBeInTheDocument();
+    expect(within(delta).getByText("GitHub login gh-delta")).toBeInTheDocument();
+    expect(within(delta).getByRole("button", { name: "Edit factory delta" })).toBeInTheDocument();
+    expect(delta.querySelectorAll(".sf-chip")).toHaveLength(1);
+  });
+
+  it("add_factory_opens_the_add_form_inside_the_factories_section", async () => {
+    await openFactoriesSection();
+    const section = screen.getByRole("region", { name: "Factories" });
+    fireEvent.click(within(section).getByRole("button", { name: "Add factory" }));
+    expect(await within(section).findByRole("form", { name: "Add factory" })).toBeInTheDocument();
   });
 
   it("creates_a_factory_whose_protected_branches_always_include_main", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
     const form = await screen.findByRole("form", { name: "Add factory" });
     changeField("Factory id", "echo");
@@ -74,7 +90,7 @@ describe("Factories tab", () => {
   });
 
   it("labels_the_github_login_with_its_hint_and_saves_the_login_given", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
     const form = await screen.findByRole("form", { name: "Add factory" });
     expect(within(form).getByLabelText("GitHub login")).toHaveAccessibleDescription(
@@ -90,7 +106,7 @@ describe("Factories tab", () => {
 
   it("refuses_a_github_login_that_is_not_one_and_saves_nothing", async () => {
     const save = vi.spyOn(owner(), "saveFactoryDef");
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
     const form = await screen.findByRole("form", { name: "Add factory" });
     changeField("Factory id", "echo");
@@ -102,7 +118,7 @@ describe("Factories tab", () => {
   });
 
   it("offers_no_way_to_remove_main", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
     const form = await screen.findByRole("form", { name: "Add factory" });
     expect(within(form).getByText("main")).toBeInTheDocument();
@@ -112,7 +128,7 @@ describe("Factories tab", () => {
 
   it("shows_the_validation_message_for_an_invalid_id_and_saves_nothing", async () => {
     const save = vi.spyOn(owner(), "saveFactoryDef");
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
     const form = await screen.findByRole("form", { name: "Add factory" });
     changeField("Factory id", "Bad_ID");
@@ -123,7 +139,7 @@ describe("Factories tab", () => {
   });
 
   it("keeps_the_id_read_only_once_the_factory_exists", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Edit factory delta" }));
     const form = await screen.findByRole("form", { name: "Edit factory delta" });
     expect(within(form).getByLabelText("Factory id")).toHaveAttribute("readonly");
@@ -135,7 +151,7 @@ describe("Factories tab", () => {
   });
 
   it("shows_one_model_picker_per_stage_with_same_as_session_by_default", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
     const form = await screen.findByRole("form", { name: "Add factory" });
     for (const label of ["Spec model", "Plan model", "Build model", "Verify model", "Review model"]) {
@@ -147,7 +163,7 @@ describe("Factories tab", () => {
   });
 
   it("saves_a_chosen_model_under_its_stage_and_leaves_same_as_session_out", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
     const form = await screen.findByRole("form", { name: "Add factory" });
     changeField("Factory id", "echo");
@@ -170,7 +186,7 @@ describe("Factories tab", () => {
   });
 
   it("a_factory_with_no_stage_entries_saves_no_agentModels", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
     const form = await screen.findByRole("form", { name: "Add factory" });
     changeField("Factory id", "echo");
@@ -182,7 +198,7 @@ describe("Factories tab", () => {
   });
 
   it("shows_the_changed_message_with_reload_on_a_conflict_and_reloads_the_latest", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Edit factory delta" }));
     const form = await screen.findByRole("form", { name: "Edit factory delta" });
     changeField("Name", "Mine");
@@ -197,7 +213,7 @@ describe("Factories tab", () => {
   });
 
   it("adds_a_repo_to_a_factory_with_repo_id_fixed_afterwards", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Add repo to delta" }));
     const form = await screen.findByRole("form", { name: "Add repo to delta" });
     changeField("Repo id", "web");
@@ -212,7 +228,7 @@ describe("Factories tab", () => {
 
   it("refuses_a_repo_with_a_base_of_main_or_checks_that_are_not_json", async () => {
     const save = vi.spyOn(owner(), "saveFactoryRepo");
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Add repo to delta" }));
     const form = await screen.findByRole("form", { name: "Add repo to delta" });
     changeField("Repo id", "web");
@@ -230,7 +246,7 @@ describe("Factories tab", () => {
 
   it("saves_a_checks_change_only_after_confirm_change_and_records_a_history_event", async () => {
     const save = vi.spyOn(owner(), "saveFactoryRepo");
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/api" }));
     const form = await screen.findByRole("form", { name: "Edit repo api" });
     const checks = JSON.parse((within(form).getByLabelText("Checks (JSON)") as HTMLTextAreaElement).value) as typeof checksFixtureForTests;
@@ -252,7 +268,7 @@ describe("Factories tab", () => {
   });
 
   it("saves_a_base_branch_change_without_a_checks_review", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/api" }));
     const form = await screen.findByRole("form", { name: "Edit repo api" });
     changeField("Base branch", "stg");
@@ -263,7 +279,7 @@ describe("Factories tab", () => {
 
   it("lists_skipped_definitions_with_the_reason_and_never_a_gate_id", async () => {
     resetFakeBoard(merge(blocksFactories(), factory("Bad_One", []), factory("GATE-gate", ["x"])));
-    await openFactoriesTab();
+    await openFactoriesSection();
     const summary = await screen.findByText("Skipped definitions (1)");
     const details = summary.closest("details")!;
     expect(details).not.toHaveAttribute("open");
@@ -272,13 +288,13 @@ describe("Factories tab", () => {
   });
 
   it("shows_no_skipped_list_when_every_definition_is_valid", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     await screen.findByRole("region", { name: "Factory delta" });
     expect(screen.queryByText(/Skipped definitions/)).not.toBeInTheDocument();
   });
 
   it("says_an_added_factory_id_already_exists_instead_of_a_reload_conflict_and_keeps_the_draft", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
     const form = await screen.findByRole("form", { name: "Add factory" });
     changeField("Factory id", "delta");
@@ -290,7 +306,7 @@ describe("Factories tab", () => {
   });
 
   it("says_an_added_repo_id_already_exists_and_keeps_the_draft", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Add repo to delta" }));
     const form = await screen.findByRole("form", { name: "Add repo to delta" });
     changeField("Repo id", "api");
@@ -305,7 +321,7 @@ describe("Factories tab", () => {
 
 describe("Factories tab restyle", () => {
   it("form_labels_and_inputs_follow_the_design", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(screen.getByRole("button", { name: "Add factory" }));
     const form = await screen.findByRole("form", { name: "Add factory" });
     const labels = Array.from(form.querySelectorAll("label.sf-field-label"));
@@ -320,7 +336,7 @@ describe("Factories tab restyle", () => {
   });
 
   it("repo_form_inputs_are_outlined_and_actions_split", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Add repo to delta" }));
     const form = await screen.findByRole("form", { name: "Add repo to delta" });
     for (const name of ["Repo id", "Remote", "Base branch", "Checks (JSON)"]) expect(within(form).getByLabelText(name), name).toHaveClass("sf-input");
@@ -329,7 +345,7 @@ describe("Factories tab restyle", () => {
   });
 
   it("edit_save_is_primary", async () => {
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Edit factory delta" }));
     const form = await screen.findByRole("form", { name: /Edit factory/ });
     expect(within(form).getByRole("button", { name: "Save factory" })).toHaveClass("sf-button-primary");
@@ -337,7 +353,7 @@ describe("Factories tab restyle", () => {
 
   it("checks_change_stops_at_review_and_only_confirm_and_save_are_primary", async () => {
     const save = vi.spyOn(owner(), "saveFactoryRepo");
-    await openFactoriesTab();
+    await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/api" }));
     const form = await screen.findByRole("form", { name: "Edit repo api" });
     const checks = JSON.parse((within(form).getByLabelText("Checks (JSON)") as HTMLTextAreaElement).value) as typeof checksFixtureForTests;
