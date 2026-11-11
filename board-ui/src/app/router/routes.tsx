@@ -10,7 +10,7 @@ import { SettingsView } from "../../features/settings/SettingsView";
 import { TaskView } from "../../features/task/TaskView";
 import { ProfilePage } from "../../features/profile/ProfilePage";
 import { CallbackPage } from "../../pages/Callback";
-import { LoginPage } from "../../pages/Login";
+import { LandingPage } from "../../pages/Landing";
 
 type PageProps = { onNavigate: (path: string) => void };
 
@@ -51,7 +51,7 @@ export function AppRouter() {
     const returnTo = new URLSearchParams(search).get("returnTo") || undefined;
     return (
       <RedirectIfAuthenticated onNavigate={navigate}>
-        <LoginPage returnTo={returnTo} />
+        <LandingPage returnTo={returnTo} />
       </RedirectIfAuthenticated>
     );
   }
