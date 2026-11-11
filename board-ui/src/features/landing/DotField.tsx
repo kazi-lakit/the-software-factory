@@ -35,13 +35,31 @@ export function DotField() {
       setOn(false);
       return;
     }
-    try {
-      field.current = startField(canvas, gl, { theme: themeRef.current });
-    } catch {
-      setOn(false);
-      return;
-    }
+    const start = (context: WebGL2RenderingContext): boolean => {
+      try {
+        field.current = startField(canvas, context, { theme: themeRef.current });
+        return true;
+      } catch {
+        field.current = null;
+        setOn(false);
+        return false;
+      }
+    };
+    if (!start(gl)) return;
+    // A GPU reset loses the context: stop the loop, and ask for it back (preventDefault) to rebuild the field.
+    const onLost = (event: Event) => {
+      event.preventDefault();
+      field.current?.stop();
+      field.current = null;
+    };
+    const onRestored = () => {
+      start(gl);
+    };
+    canvas.addEventListener("webglcontextlost", onLost);
+    canvas.addEventListener("webglcontextrestored", onRestored);
     return () => {
+      canvas.removeEventListener("webglcontextlost", onLost);
+      canvas.removeEventListener("webglcontextrestored", onRestored);
       field.current?.stop();
       field.current = null;
       pendingLoss.current = setTimeout(() => {

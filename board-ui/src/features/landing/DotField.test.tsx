@@ -212,12 +212,51 @@ describe("DotField", () => {
     expect(bufferData.mock.calls.length).toBe(uploads + 1);
   });
 
+  it("pauses_on_context_loss_and_rebuilds_on_restore", () => {
+    const { gl } = withGl();
+    const { container } = render(<DotField />);
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    const programs = (gl.createProgram as ReturnType<typeof vi.fn>).mock.calls.length;
+    const lostEvent = new Event("webglcontextlost", { cancelable: true });
+    act(() => {
+      canvas.dispatchEvent(lostEvent);
+    });
+    // preventDefault tells the browser the page wants the context back.
+    expect(lostEvent.defaultPrevented).toBe(true);
+    expect(frames.size).toBe(0);
+    const before = raf.mock.calls.length;
+    act(() => {
+      canvas.dispatchEvent(new Event("webglcontextrestored"));
+    });
+    expect((gl.createProgram as ReturnType<typeof vi.fn>).mock.calls.length).toBe(programs + 1);
+    expect(raf.mock.calls.length).toBeGreaterThan(before);
+    expect(container.querySelector("canvas.sf-landing-field")).not.toBeNull();
+  });
+
+  it("hides_the_canvas_when_a_restored_context_cannot_be_rebuilt", () => {
+    const { gl } = withGl();
+    const { container } = render(<DotField />);
+    const canvas = container.querySelector("canvas") as HTMLCanvasElement;
+    act(() => {
+      canvas.dispatchEvent(new Event("webglcontextlost", { cancelable: true }));
+    });
+    (gl.getShaderParameter as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    act(() => {
+      canvas.dispatchEvent(new Event("webglcontextrestored"));
+    });
+    expect(container.querySelector("canvas")).toBeNull();
+  });
+
   it("cleans_up_on_unmount", async () => {
     const { loseContext } = withGl();
     const removeWindow = vi.spyOn(window, "removeEventListener");
     const removeDocument = vi.spyOn(document, "removeEventListener");
+    const removeCanvas = vi.spyOn(HTMLCanvasElement.prototype, "removeEventListener");
     const { unmount } = render(<DotField />);
     unmount();
+    const canvasEvents = removeCanvas.mock.calls.map((c) => c[0]);
+    expect(canvasEvents).toContain("webglcontextlost");
+    expect(canvasEvents).toContain("webglcontextrestored");
     await waitFor(() => expect(loseContext).toHaveBeenCalled());
     expect(caf).toHaveBeenCalled();
     const windowEvents = removeWindow.mock.calls.map((c) => c[0]);
