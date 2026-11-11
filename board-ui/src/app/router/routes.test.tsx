@@ -109,7 +109,54 @@ describe("a New task link and an expiring session", () => {
     await waitFor(() => expect(window.location.search).toBe(""));
     act(() => expire());
     await waitFor(() => expect(window.location.pathname).toBe("/login"));
-    expect(window.location.search).toBe(`?returnTo=${encodeURIComponent("/")}`);
+    expect(window.location.search).toBe(`?returnTo=${encodeURIComponent("/tasks/new")}`);
+  });
+});
+
+describe("the new task route", () => {
+  const signIn = () => {
+    claims.mockResolvedValue({ sub: "me" });
+    me.mockResolvedValue({ data: { roles: ["factory-owner"] } } as never);
+  };
+
+  it("renders_the_new_task_page_not_a_task", async () => {
+    signIn();
+    const { boardStore } = await import("../../lib/board");
+    renderAt("/tasks/new");
+    expect(await screen.findByRole("heading", { level: 1, name: "New task" })).toBeInTheDocument();
+    expect(await screen.findByRole("form", { name: "New task" })).toBeInTheDocument();
+    expect(boardStore.getTask).not.toHaveBeenCalled();
+    const views = screen.getByRole("navigation", { name: "Views" });
+    expect(within(views).getByRole("link", { name: "Board" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("returns_to_tasks_new_with_its_query_after_sign_in", async () => {
+    claims.mockResolvedValue(undefined);
+    renderAt("/tasks/new?new=1&title=T");
+    await waitFor(() => expect(window.location.pathname).toBe("/login"));
+    expect(window.location.search).toBe(`?returnTo=${encodeURIComponent("/tasks/new?new=1&title=T")}`);
+  });
+
+  it("forwards_the_board_link_to_tasks_new_prefilled", async () => {
+    signIn();
+    renderAt("/?new=1&title=Draft&repo=iam");
+    const form = await screen.findByRole("form", { name: "New task" });
+    expect(within(form).getByLabelText("Title")).toHaveValue("Draft");
+    expect(within(form).getByLabelText("Repo")).toHaveValue("iam");
+    await waitFor(() => expect(window.location.search).toBe(""));
+    expect(window.location.pathname).toBe("/tasks/new");
+  });
+
+  it("the_board_new_task_link_opens_the_page_without_reload", async () => {
+    signIn();
+    renderAt("/");
+    fireEvent.click(await screen.findByRole("link", { name: "New task" }));
+    expect(window.location.pathname).toBe("/tasks/new");
+    expect(await screen.findByRole("heading", { level: 1, name: "New task" })).toBeInTheDocument();
+    const form = await screen.findByRole("form", { name: "New task" });
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+    expect(window.location.pathname).toBe("/");
+    expect(await screen.findByRole("heading", { level: 1, name: "Board" })).toBeInTheDocument();
   });
 });
 
