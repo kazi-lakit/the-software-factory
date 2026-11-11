@@ -2749,6 +2749,13 @@ textarea.sf-input {
   .sf-panel-decision {
     display: flex;
     flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Flex items keep both vertical margins, so gap does the spacing instead. */
+  .sf-view .sf-panel-decision > * {
+    margin-bottom: 0;
+    margin-top: 0;
   }
 
   .sf-panel-decision > .sf-doc {

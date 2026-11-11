@@ -274,6 +274,15 @@ describe("phone design gaps (T-33)", () => {
     expect(base).not.toHaveProperty("display");
   });
 
+  it("decision_panel_keeps_its_spacing_as_a_flex_column", () => {
+    // Flex items do not collapse margins, so the panel spaces its children with gap and zeroes their vertical margins.
+    expect(phone(".sf-panel-decision").gap).toBe("12px");
+    const children = phone(".sf-view .sf-panel-decision > *");
+    expect(children).toMatchObject({ "margin-bottom": "0", "margin-top": "0" });
+    // It must out-rank the base `.sf-view h3` margin.
+    expect(cmpSpec(specificity(".sf-view .sf-panel-decision > *"), specificity(".sf-view h3"))).toBeGreaterThan(0);
+  });
+
   it("request_changes_comes_first", () => {
     expect(phone(".sf-action-bar .sf-gate-changes").order).toBe("-1");
     const base = baseRules(css).filter((r) => r.selector.includes("sf-gate-changes") && "order" in r.decls);
