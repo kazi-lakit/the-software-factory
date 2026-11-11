@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Run } from "@factory/core";
-import { attemptsLabel, costLabel, runLines } from "./taskDetails";
+import { attemptsLabel, costLabel, runRows } from "./taskDetails";
 
 const run = (runId: string, step: Run["step"], startedAt: string, rest: Partial<Run> = {}): Run => ({
   agent: `${step}-agent`,
@@ -41,32 +41,30 @@ describe("taskDetails", () => {
     expect(costLabel(1.5, 5)).toBe("$1.50 of $5.00");
   });
 
-  it("run_lines_number_each_step_and_keep_start_order", () => {
+  it("run_rows_number_each_step_and_keep_start_order", () => {
     const runs = [
       run("R-1", "spec", t(1), { costUsd: 0.12, turns: 14 }),
       run("R-2", "plan", t(2), { costUsd: 0.05, turns: 3 }),
       run("R-3", "spec", t(3), { costUsd: null, endedAt: null, result: null, turns: null })
     ];
-    expect(runLines(runs).map((l) => l.text)).toEqual([
-      "Spec v1 · done · 14 turns · $0.12",
-      "Plan v1 · done · 3 turns · $0.05",
-      "Spec v2 · running"
-    ]);
-    expect(runLines(runs).map((l) => l.runId)).toEqual(["R-1", "R-2", "R-3"]);
+    const rows = runRows(runs);
+    expect(rows.map((r) => r.step)).toEqual(["Spec v1", "Plan v1", "Spec v2"]);
+    expect(rows.map((r) => r.status)).toEqual(["done", "done", "running"]);
+    expect(rows.map((r) => r.turns)).toEqual(["14", "3", "—"]);
+    expect(rows.map((r) => r.cost)).toEqual(["$0.12", "$0.05", "—"]);
+    expect(rows.map((r) => r.runId)).toEqual(["R-1", "R-2", "R-3"]);
+    expect(rows.map((r) => r.agent)).toEqual(["spec-agent", "plan-agent", "spec-agent"]);
+    expect(rows.map((r) => r.mode)).toEqual(["sdk", "sdk", "sdk"]);
+    expect(rows.map((r) => r.startedAt)).toEqual([t(1), t(2), t(3)]);
   });
 
-  it("run_lines_sort_by_start_time", () => {
+  it("run_rows_sort_by_start_time", () => {
     const runs = [run("R-3", "build", t(3)), run("R-1", "spec", t(1)), run("R-2", "build", t(2))];
-    expect(runLines(runs).map((l) => l.text)).toEqual(["Spec v1 · done", "Build v1 · done", "Build v2 · done"]);
+    expect(runRows(runs).map((r) => r.step)).toEqual(["Spec v1", "Build v1", "Build v2"]);
     expect(runs.map((r) => r.runId)).toEqual(["R-3", "R-1", "R-2"]);
   });
 
-  it("run_lines_leave_out_null_turns_or_cost", () => {
-    const runs = [run("R-1", "build", t(1), { turns: 5 }), run("R-2", "build", t(2), { costUsd: 0.3 })];
-    expect(runLines(runs).map((l) => l.text)).toEqual(["Build v1 · done · 5 turns", "Build v2 · done · $0.30"]);
-  });
-
-  it("run_lines_show_a_dash_for_an_ended_run_without_result", () => {
-    expect(runLines([run("R-1", "verify", t(1), { result: null })]).map((l) => l.text)).toEqual(["Verify v1 · —"]);
+  it("run_rows_show_a_dash_for_an_ended_run_without_result", () => {
+    expect(runRows([run("R-1", "verify", t(1), { result: null })]).map((r) => r.status)).toEqual(["—"]);
   });
 });
