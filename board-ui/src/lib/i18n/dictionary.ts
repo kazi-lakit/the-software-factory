@@ -1,10 +1,7 @@
 export const defaultDictionary = {
-  "app.name": "Blocks App",
   "nav.board": "Board",
   "nav.profile": "Profile",
   "nav.logout": "Log out",
-  "auth.welcome": "Welcome back",
-  "auth.subtitle": "Sign in with your Blocks account to continue.",
   "auth.continue": "Continue with Blocks",
   "auth.redirecting": "Redirecting...",
   "auth.notConfigured": "Login is not configured yet. Register a public OIDC client and set VITE_BLOCKS_OIDC_CLIENT_ID in .env.",
@@ -18,9 +15,9 @@ export const defaultDictionary = {
   "common.error": "Something went wrong",
   "profile.title": "Profile",
   "profile.subtitle": "Signed-in user details from Blocks IAM.",
-  "notFound.title": "404",
+  "notFound.title": "Page not found",
   "notFound.message": "This page does not exist.",
-  "notFound.home": "Back home"
+  "notFound.home": "Back to the Board"
 } as const;
 
 export type TranslationKey = keyof typeof defaultDictionary;

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { Status } from "@factory/core";
-import { laneOf, LANES, type LaneId } from "./lanes";
+import type { Status, Task } from "@factory/core";
+import { byAge, laneOf, LANES, type LaneId } from "./lanes";
 import { COLUMNS, NEEDS_YOU } from "./status";
 
 const EXPECTED: Record<string, LaneId> = {
@@ -29,11 +29,16 @@ describe("lanes", () => {
   it("an_unknown_status_falls_back_to_working", () => {
     expect(laneOf("weird" as Status)).toBe("working");
   });
-  it("every_lane_has_a_one_line_hint", () => {
-    expect(LANES[0]?.hint).toBe("Waiting for your review or answer");
-    for (const l of LANES) {
-      expect(l.hint.length).toBeGreaterThan(0);
-      expect(l.hint).not.toMatch(/\n/);
-    }
+  it("lane_hints_match_the_design", () => {
+    const hint = (id: LaneId) => LANES.find((l) => l.id === id)?.hint;
+    expect(hint("needs-you")).toBe("Oldest first. Each card says what the factory waits for.");
+    expect(hint("queued")).toBe("Inbox needs Mark ready; ready tasks start when a slot frees.");
+    expect(hint("working")).toBeUndefined();
+    expect(hint("done")).toBe("Finished and merged");
+    expect(hint("stopped")).toBe("Cancelled tasks. Kept for history.");
+  });
+  it("byAge_sorts_oldest_first_by_number_then_id", () => {
+    const tasks = ["T-10", "T-2", "T-9"].map((taskId) => ({ taskId }) as Task);
+    expect([...tasks].sort(byAge).map((t) => t.taskId)).toEqual(["T-2", "T-9", "T-10"]);
   });
 });
