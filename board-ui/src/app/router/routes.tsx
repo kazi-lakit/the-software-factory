@@ -7,6 +7,7 @@ import { NotFoundPage } from "../../features/auth/NotFoundPage";
 import { BoardView } from "../../features/board/BoardView";
 import { HistoryView } from "../../features/history/HistoryView";
 import { NewTaskPage } from "../../features/newTask/NewTaskPage";
+import { NewFactoryPage } from "../../features/settings/NewFactoryPage";
 import { SettingsView } from "../../features/settings/SettingsView";
 import { TaskView } from "../../features/task/TaskView";
 import { ProfilePage } from "../../features/profile/ProfilePage";
@@ -20,7 +21,8 @@ const protectedRoutes: Record<string, ComponentType<PageProps>> = {
   "/error": ErrorPage,
   "/history": HistoryView,
   "/profile": ProfilePage,
-  "/settings": SettingsView
+  "/settings": SettingsView,
+  "/settings/factories/new": NewFactoryPage
 };
 
 export function AppRouter() {

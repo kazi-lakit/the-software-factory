@@ -1329,6 +1329,36 @@ textarea.sf-input {
 }
 /* End of New task page */
 
+/* New factory page */
+/* The form left, the Summary right; one column below 1100px (see the media block), the Summary after the form. */
+.sf-new-factory-body {
+  align-items: start;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.sf-new-factory-body > * {
+  min-width: 0;
+}
+
+.sf-new-factory-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.sf-new-factory-section h2 {
+  font-size: var(--sf-label-size);
+  margin: 0;
+}
+
+.sf-new-factory-section .sf-hint,
+.sf-new-factory-aside .sf-hint {
+  margin: 0;
+}
+/* End of New factory page */
+
 .sf-doc {
   display: flex;
   flex-direction: column;
@@ -2066,6 +2096,10 @@ textarea.sf-input {
   }
 
   .sf-task-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sf-new-factory-body {
     grid-template-columns: minmax(0, 1fr);
   }
 

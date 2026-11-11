@@ -19,7 +19,7 @@ const views = [
 
 // A task page (/tasks/<id>) belongs to the Board view.
 const isCurrent = (href: string, activePath: string): boolean =>
-  href === "/" ? activePath === "/" || activePath.startsWith("/tasks/") : activePath === href;
+  href === "/" ? activePath === "/" || activePath.startsWith("/tasks/") : activePath === href || activePath.startsWith(`${href}/`);
 
 type ShellProps = { activePath: string; children: ReactNode; onNavigate: (path: string) => void };
 

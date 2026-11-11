@@ -223,6 +223,32 @@ describe("the owner views", () => {
   });
 });
 
+describe("the new factory route", () => {
+  const signIn = () => {
+    claims.mockResolvedValue({ sub: "me" });
+    me.mockResolvedValue({ data: { roles: ["factory-owner"] } } as never);
+  };
+
+  it("renders_the_new_factory_page_in_the_shell_with_settings_current", async () => {
+    signIn();
+    renderAt("/settings/factories/new");
+    expect(await screen.findByRole("heading", { level: 1, name: "New factory" })).toBeInTheDocument();
+    const views = screen.getByRole("navigation", { name: "Views" });
+    expect(within(views).getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  });
+
+  it("settings_add_factory_link_opens_the_page_in_app", async () => {
+    signIn();
+    renderAt("/settings");
+    fireEvent.click(await screen.findByRole("link", { name: "Add factory" }));
+    expect(window.location.pathname).toBe("/settings/factories/new");
+    expect(await screen.findByRole("heading", { level: 1, name: "New factory" })).toBeInTheDocument();
+    const form = screen.getByRole("form", { name: "New factory" });
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+    expect(window.location.pathname).toBe("/settings");
+  });
+});
+
 describe("the task route", () => {
   it("renders_a_task_in_the_shell_under_board", async () => {
     claims.mockResolvedValue({ sub: "me" });
