@@ -266,7 +266,11 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
               type="button"
               className="sf-pill"
               aria-pressed={selectedLane === lane.id}
-              onClick={() => setSelectedLane(lane.id)}
+              onClick={() => {
+                setSelectedLane(lane.id);
+                // Phones hide the lane head, so picking Stopped opens it: the cancelled cards stay reachable.
+                if (lane.id === "stopped") setStoppedOpen(true);
+              }}
             >
               {lane.name} <span className="sf-count sf-mono">{byLane.get(lane.id)?.length ?? 0}</span>
             </button>
@@ -275,26 +279,47 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
         <div className="sf-lanes">
           {LANES.map((lane) => {
             const tasks = byLane.get(lane.id) ?? [];
+            const stopped = lane.id === "stopped";
+            // Done shows the two most recent (highest id); Stopped lists its cards only while open.
+            const shown = lane.id === "done" ? [...tasks].sort((a, b) => byAge(b, a)).slice(0, 2) : stopped && !stoppedOpen ? [] : tasks;
+            const listId = stopped ? `${formId}-lane-stopped` : undefined;
+            const tone = lane.id === "needs-you" ? " sf-lane-needs-you" : stopped ? " sf-lane-stopped" : "";
             return (
               <section
                 key={lane.id}
-                className={`sf-lane${lane.id === "needs-you" ? " sf-lane-needs-you" : ""}`}
+                className={`sf-lane${tone}`}
                 aria-label={lane.name}
                 data-selected={selectedLane === lane.id ? "true" : "false"}
               >
                 <div className="sf-lane-head">
-                  <h3 className="sf-label sf-lane-name">{lane.name}</h3>
+                  <span className="sf-label sf-lane-name">{lane.name}</span>
                   <span className="sf-count sf-mono">{tasks.length}</span>
+                  {stopped ? (
+                    <button
+                      type="button"
+                      className="sf-show-toggle"
+                      aria-expanded={stoppedOpen}
+                      aria-controls={shown.length > 0 ? listId : undefined}
+                      onClick={() => setStoppedOpen(!stoppedOpen)}
+                    >
+                      {stoppedOpen ? "Hide" : "Show"}
+                    </button>
+                  ) : null}
                 </div>
-                <p className="sf-lane-hint">{lane.hint}</p>
-                {tasks.length > 0 ? (
-                  <ul className="sf-card-list">
-                    {tasks.map((task) => (
+                {lane.hint ? <p className="sf-lane-hint">{lane.hint}</p> : null}
+                {shown.length > 0 ? (
+                  <ul id={listId} className="sf-card-list">
+                    {shown.map((task) => (
                       <li key={task.taskId}><TaskCard task={task} showFactory={all} waitingOn={waitingOn(task)} onNavigate={onNavigate} /></li>
                     ))}
                   </ul>
-                ) : selectedLane === lane.id ? (
+                ) : tasks.length === 0 && selectedLane === lane.id ? (
                   <p className="sf-empty sf-lane-empty">Nothing in {lane.name}.</p>
+                ) : null}
+                {lane.id === "done" && tasks.length > 0 ? (
+                  <a className="sf-lane-more" href="/history" onClick={(event) => followInApp(event, "/history", onNavigate)}>
+                    Show all {tasks.length} in History
+                  </a>
                 ) : null}
               </section>
             );

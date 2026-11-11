@@ -603,6 +603,7 @@ describe("BoardView lanes", () => {
     for (const title of ["In inbox", "Is ready"]) expect(within(lane("Queued")).getByText(title)).toBeInTheDocument();
     expect(within(lane("Working")).getByText("Building")).toBeInTheDocument();
     expect(within(lane("Done")).getByText("Shipped")).toBeInTheDocument();
+    fireEvent.click(within(lane("Stopped")).getByRole("button", { name: "Show" }));
     expect(within(lane("Stopped")).getByText("Dropped")).toBeInTheDocument();
     expect(lane("Needs you").querySelector(".sf-count")).toHaveTextContent("3");
     expect(lane("Queued").querySelector(".sf-count")).toHaveTextContent("2");
@@ -622,11 +623,19 @@ describe("BoardView lanes", () => {
     renderBoard();
     await within(await screen.findByRole("region", { name: "Needs you" })).findByText("Stuck");
     const needs = lane("Needs you");
-    expect(within(needs).getByText("Waiting for your review or answer")).toBeInTheDocument();
-    const name = needs.querySelector("h3");
+    expect(within(needs).getByText("Oldest first. Each card says what the factory waits for.")).toBeInTheDocument();
+    const name = needs.querySelector(".sf-lane-name");
+    expect(name?.tagName).toBe("SPAN");
     expect(name).toHaveClass("sf-label");
     expect(name).toHaveTextContent("Needs you");
+    expect(needs.querySelector("h3")).toBeNull();
     expect(needs.querySelector(".sf-count")).toHaveTextContent("3");
+  });
+
+  it("working_lane_has_no_hint", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Working" });
+    expect(lane("Working").querySelector(".sf-lane-hint")).toBeNull();
   });
 
   it("an_empty_lane_still_shows_name_count_and_hint", async () => {
@@ -635,24 +644,58 @@ describe("BoardView lanes", () => {
     await screen.findByText("Only one");
     const stopped = lane("Stopped");
     expect(stopped.querySelector(".sf-count")).toHaveTextContent("0");
-    expect(within(stopped).getByText("Cancelled tasks")).toBeInTheDocument();
+    expect(within(stopped).getByText("Cancelled tasks. Kept for history.")).toBeInTheDocument();
     expect(stopped.querySelector("li")).toBeNull();
   });
 
-  it("done_lane_lists_every_done_task_newest_first_and_is_not_collapsible", async () => {
-    for (const title of ["D1", "D2", "D3"]) await seedTask({ title }, "done");
+  it("done_lane_shows_the_two_most_recent_and_a_history_link", async () => {
+    for (const title of ["D1", "D2", "D3", "D4"]) await seedTask({ title }, "done");
+    const { onNavigate } = renderBoard();
+    await screen.findByText("D4");
+    const done = lane("Done");
+    expect(within(done).getAllByRole("listitem").map((li) => D(li.textContent ?? ""))).toEqual(["D4", "D3"]);
+    expect(done.querySelector(".sf-count")).toHaveTextContent("4");
+    const more = within(done).getByRole("link", { name: "Show all 4 in History" });
+    expect(more).toHaveAttribute("href", "/history");
+    fireEvent.click(more);
+    expect(onNavigate).toHaveBeenCalledWith("/history");
+    expect(done.querySelector("[aria-expanded]")).toBeNull();
+  });
+
+  it("done_lane_with_no_tasks_has_no_history_link", async () => {
     renderBoard();
-    await screen.findByText("D1");
-    const titles = (region: HTMLElement) => within(region).getAllByRole("listitem").map((li) => li.textContent ?? "");
-    const inLanes = titles(lane("Done"));
-    expect(inLanes).toHaveLength(3);
-    expect(within(lane("Done")).queryByRole("button", { expanded: false })).toBeNull();
-    expect(lane("Done").querySelector("[aria-expanded]")).toBeNull();
-    expect(lane("Stopped").querySelector("[aria-expanded]")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "All stages" }));
-    fireEvent.click(screen.getByRole("button", { name: "Done (3)" }));
-    const inColumn = titles(column("Done"));
-    expect(inLanes.map((t) => D(t))).toEqual(inColumn.map((t) => D(t)));
+    await screen.findByRole("region", { name: "Done" });
+    expect(within(lane("Done")).queryByRole("link", { name: /in History/ })).toBeNull();
+  });
+
+  it("stopped_lane_starts_collapsed_and_show_lists_the_cards", async () => {
+    await seedTask({ title: "Dropped" }, "cancelled");
+    renderBoard();
+    await screen.findByRole("region", { name: "Stopped" });
+    await waitFor(() => expect(lane("Stopped").querySelector(".sf-count")).toHaveTextContent("1"));
+    const stopped = lane("Stopped");
+    expect(stopped.querySelector("li")).toBeNull();
+    expect(stopped.querySelector(".sf-lane-name")).toHaveTextContent("Stopped");
+    const toggle = within(stopped).getByRole("button", { name: "Show" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(toggle).not.toHaveAttribute("aria-controls");
+    fireEvent.click(toggle);
+    expect(within(stopped).getByText("Dropped")).toBeInTheDocument();
+    expect(toggle).toHaveTextContent("Hide");
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const target = toggle.getAttribute("aria-controls");
+    expect(target && document.getElementById(target)).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(within(stopped).queryByText("Dropped")).toBeNull();
+  });
+
+  it("selecting_the_Stopped_pill_lists_the_cancelled_cards", async () => {
+    await seedTask({ title: "Dropped" }, "cancelled");
+    renderBoard();
+    await screen.findByRole("region", { name: "Stopped" });
+    await waitFor(() => expect(lane("Stopped").querySelector(".sf-count")).toHaveTextContent("1"));
+    fireEvent.click(within(screen.getByRole("group", { name: "Lane" })).getByRole("button", { name: /^Stopped/ }));
+    expect(within(lane("Stopped")).getByText("Dropped")).toBeInTheDocument();
   });
 
   it("shows_a_task_with_an_unknown_status_in_working", async () => {
