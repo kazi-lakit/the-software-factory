@@ -140,6 +140,7 @@ describe("the owner check", () => {
     renderAt("/");
     expect(await screen.findByText("This account doesn't have the factory-owner role.")).toBeInTheDocument();
     expect(screen.queryByText("Board")).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Not a factory owner" }).closest(".sf-screen-panel")).not.toBeNull();
   });
 
   it("does_not_claim_a_missing_role_when_the_profile_cannot_be_read", async () => {
@@ -149,6 +150,12 @@ describe("the owner check", () => {
     expect(await screen.findByRole("button", { name: "Try again" })).toBeInTheDocument();
     expect(screen.queryByText("This account doesn't have the factory-owner role.")).not.toBeInTheDocument();
     expect(screen.queryByText("Board")).not.toBeInTheDocument();
+    const h1 = screen.getByRole("heading", { level: 1, name: "Could not load your account" });
+    expect(h1).toHaveClass("sf-page-title");
+    const retry = screen.getByRole("button", { name: "Try again" });
+    expect(retry).toHaveClass("sf-button", "sf-button-primary");
+    expect(h1.closest(".sf-screen-panel")).not.toBeNull();
+    expect(retry.closest(".sf-screen-panel")).toBe(h1.closest(".sf-screen-panel"));
   });
 });
 
