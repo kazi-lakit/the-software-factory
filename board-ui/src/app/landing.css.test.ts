@@ -30,6 +30,15 @@ function phone(selector: string): Record<string, string> {
 }
 
 describe("landing styles", () => {
+  it("not_configured_notice_is_a_framed_warning", () => {
+    const t = tokens(css, ".sf-landing-notice");
+    expect(t.border).toBe("1px solid var(--sf-border)");
+    expect(t["border-radius"]).toBe("var(--sf-radius)");
+    expect(t.background).toBe("var(--sf-primary-soft)");
+    expect(t.color).toBe("var(--sf-on-primary-soft)");
+    expect(t.padding).toBeTruthy();
+  });
+
   it("title_is_the_display_style", () => {
     const t = tokens(css, ".sf-landing-title");
     expect(t["font-family"]).toBe("var(--sf-font)");

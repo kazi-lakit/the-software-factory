@@ -163,10 +163,22 @@ describe("landing_selectors_use_only_text_tokens", () => {
     [".sf-landing-lead", "muted"],
     [".sf-landing-kicker", "muted"],
     [".sf-landing-cell-text", "muted"],
-    [".sf-landing-footer", "muted"],
-    [".sf-landing-notice", "muted"]
+    [".sf-landing-footer", "muted"]
   ];
   it.each(rules)("%s is %s", (selector, fg) => {
     expect(tokens(css, selector).color, `${selector} colour`).toBe(`var(--sf-${fg})`);
+  });
+});
+
+describe("landing_notice_is_a_readable_warning", () => {
+  it("uses the warning surface pair", () => {
+    const t = tokens(css, ".sf-landing-notice");
+    expect(t.color).toBe("var(--sf-on-primary-soft)");
+    expect(t.background).toBe("var(--sf-primary-soft)");
+  });
+  it.each(["dark", "light"])("%s: notice text meets 4.5:1 on its surface", (theme) => {
+    const t = themes[theme] as Record<string, string>;
+    const value = ratio(parse(t["--sf-on-primary-soft"] as string).rgb, parse(t["--sf-primary-soft"] as string).rgb);
+    expect(value, `${theme}: ${value.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
   });
 });

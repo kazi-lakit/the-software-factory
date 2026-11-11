@@ -1773,9 +1773,23 @@ textarea.sf-input {
   max-width: 60ch;
 }
 
+/* The not-configured warning: framed like the former warn alert, so it stands out next to the disabled buttons. */
 .sf-landing-notice {
-  color: var(--sf-muted);
+  background: var(--sf-primary-soft);
+  border: 1px solid var(--sf-border);
+  border-radius: var(--sf-radius);
+  color: var(--sf-on-primary-soft);
+  font-size: 13px;
+  line-height: 1.5;
   margin: 0;
+  padding: 12px 14px;
+}
+
+.sf-landing-notice code {
+  background: var(--sf-surface-sunk);
+  border-radius: var(--sf-radius);
+  font-family: var(--sf-mono);
+  padding: 1px 5px;
 }
 
 .sf-landing-actions {
