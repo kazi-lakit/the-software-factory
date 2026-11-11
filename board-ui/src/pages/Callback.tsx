@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../app/providers/AuthProvider";
 import { completeLogin } from "../lib/blocks/auth";
 import { useT } from "../lib/i18n/LocalizationProvider";
-import { Alert } from "../shared/ui/Alert";
 import { LoadingScreen } from "../shared/ui/LoadingScreen";
+import { ScreenPanel } from "../shared/ui/ScreenPanel";
 
 export function CallbackPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { refresh } = useAuth();
@@ -36,13 +36,10 @@ export function CallbackPage({ onNavigate }: { onNavigate: (path: string) => voi
 
   if (error) {
     return (
-      <div className="auth-screen">
-        <div className="auth-card">
-          <h2>{t("auth.failed")}</h2>
-          <Alert tone="error">{error}</Alert>
-          <button className="primary-button auth-submit" onClick={() => onNavigate("/login")}>{t("auth.back")}</button>
-        </div>
-      </div>
+      <ScreenPanel title={t("auth.failed")}>
+        <p className="sf-problem" role="alert">{error}</p>
+        <button type="button" className="sf-button sf-button-primary" onClick={() => onNavigate("/login")}>{t("auth.back")}</button>
+      </ScreenPanel>
     );
   }
 
