@@ -100,15 +100,22 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .description('claim the next piece of work and print its ticket')
     .option('--factory <id>', 'only this factory (repeat for several)', collect, undefined)
     .option('--json', 'print JSON')
-    .action(async (task: string | undefined, o: { json?: boolean; factory?: string[] }, cmd: Command) => {
+    .option('--peek', 'only check: print "work <task>" and exit 0 if there is work, else the reason and exit 1; claims nothing')
+    .action(async (task: string | undefined, o: { json?: boolean; peek?: boolean; factory?: string[] }, cmd: Command) => {
+      if (o.peek && o.json) throw new CliExit('--peek prints one line; leave out --json', 1);
       const { engine } = await open(cmd);
-      const outcome = await engine.next(task, factoryFilter(o.factory)).catch((e: unknown) => {
+      const outcome = await engine.next(task, factoryFilter(o.factory), { peek: o.peek === true }).catch((e: unknown) => {
         throw e instanceof UnknownFactoryError ? new CliExit(e.message, 1, true) : e;
       });
+      if (outcome.kind === 'work') return io.out(`work ${outcome.taskId}`);
       // Paused and inactive factories also return no ticket: say so, so a loop's owner is not left guessing.
       if (outcome.kind === 'none') {
-        if (outcome.reason === 'waiting') return io.out(`${outcome.taskId} is waiting on ${outcome.waitingOn.join(', ')}`);
-        return io.out(outcome.reason === 'no-factories' ? NO_FACTORIES : outcome.reason);
+        const line = outcome.reason === 'waiting' ? `${outcome.taskId} is waiting on ${outcome.waitingOn.join(', ')}`
+          : outcome.reason === 'no-factories' ? NO_FACTORIES : outcome.reason;
+        io.out(line);
+        // A peek's exit code is its answer: 1 means do not start a session. The line is already on stdout.
+        if (o.peek) throw new CliExit('', 1, true);
+        return;
       }
       const { ticket } = outcome;
       if (o.json) return printJson(ticket);
@@ -347,7 +354,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   } catch (e) {
     if (e instanceof CommanderError) return e.exitCode;
     if (e instanceof CliExit) {
-      io.err(e.code === 2 || e.plain ? e.message : `error: ${e.message}`);
+      if (e.message !== '') io.err(e.code === 2 || e.plain ? e.message : `error: ${e.message}`);
       return e.code;
     }
     io.err(`error: ${(e instanceof Error ? e.message : String(e)).split('\n')[0]}`);

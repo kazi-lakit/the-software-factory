@@ -1401,6 +1401,41 @@ describe('withRetry', () => {
   });
 });
 
+describe('next with peek', () => {
+  test('reports the task next would claim and claims nothing', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'a');
+    await putIn(store, 'a');
+    expect(await engine.next(undefined, undefined, { peek: true })).toEqual({ kind: 'work', taskId: 'T-1' });
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', claimBy: null });
+    expect(await nextTicket(engine)).toMatchObject({ taskId: 'T-1' });
+  });
+
+  test('says nothing to do when every ready task waits on a dependency', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'a', { status: 'inbox' });
+    await putIn(store, 'a', { status: 'ready', dependsOn: ['T-1'] });
+    expect(await engine.next(undefined, undefined, { peek: true })).toEqual({ kind: 'none', reason: 'nothing to do' });
+  });
+
+  test('a factory at maxParallel has no work to peek', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'a');
+    await putIn(store, 'a');
+    await putIn(store, 'a');
+    await nextTicket(engine);
+    await nextTicket(engine);
+    expect(await engine.next(undefined, undefined, { peek: true })).toEqual({ kind: 'none', reason: 'nothing to do' });
+  });
+
+  test('a named waiting task still reports what it waits on', async () => {
+    const { store, engine } = setup(TWO());
+    await putIn(store, 'a', { status: 'inbox' });
+    await putIn(store, 'a', { status: 'ready', dependsOn: ['T-1'] });
+    expect(await engine.next('T-2', undefined, { peek: true })).toEqual({ kind: 'none', reason: 'waiting', taskId: 'T-2', waitingOn: ['T-1'] });
+  });
+});
+
 describe('next with dependencies', () => {
   const dep = (ids: string[]): Partial<Task> => ({ status: 'ready', dependsOn: ids });
 
