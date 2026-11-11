@@ -27,7 +27,7 @@ function QaItem({ entry, nowMs }: { entry: QaEntry; nowMs: number }) {
     <li className={`sf-qa-entry${entry.open ? " sf-qa-entry-open" : ""}`}>
       {entry.open ? (
         <div className="sf-chips sf-qa-chips">
-          <span className="sf-chip sf-chip-waiting">Waiting for your answer</span>
+          {entry.answer === null ? <span className="sf-chip sf-chip-waiting">Waiting for your answer</span> : null}
           {entry.options.length > 0 ? <span className="sf-chip">{entry.options.length} options offered</span> : null}
         </div>
       ) : null}

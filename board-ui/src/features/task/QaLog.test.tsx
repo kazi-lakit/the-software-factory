@@ -20,7 +20,6 @@ const entry = (over: Partial<QaEntry>): QaEntry => ({
   answeredAt: localIso(11, 7, 58),
   resumedAt: null,
   open: false,
-  mark: "none",
   ...over
 });
 
@@ -53,6 +52,12 @@ describe("QaLog", () => {
     render(<QaLog nowMs={NOW} entries={[entry({ answer: null, answeredAt: null, open: true })]} />);
     expect(screen.getByText("Waiting for your answer")).toBeInTheDocument();
     expect(screen.queryByText(/options offered/)).toBeNull();
+  });
+
+  it("open_but_answered_entry_has_no_waiting_chip", () => {
+    render(<QaLog nowMs={NOW} entries={[entry({ answer: "B", open: true, options: OPTIONS })]} />);
+    expect(screen.queryByText("Waiting for your answer")).toBeNull();
+    expect(screen.getByText("Answered by you · today 07:58")).toBeInTheDocument();
   });
 
   it("entry_shows_label_line_question_and_options_with_marks", () => {
@@ -97,7 +102,7 @@ describe("QaLog", () => {
   });
 
   it("no_not_recommended_badge", () => {
-    render(<QaLog nowMs={NOW} entries={[entry({ answer: "B", mark: "not-recommended", options: OPTIONS })]} />);
+    render(<QaLog nowMs={NOW} entries={[entry({ answer: "B", options: OPTIONS })]} />);
     expect(screen.queryByText("Not recommended")).toBeNull();
   });
 });
