@@ -182,7 +182,7 @@ function TaskHeader({ events, onReload, task }: { events: readonly FactoryEvent[
           </>
         ) : null}
       </p>
-      <Stepper status={task.status} stage={task.stage} />
+      <Stepper status={task.status} stage={task.stage} baseBranch={task.baseBranch} />
       <dl className="sf-facts">
         <div><dt>Task</dt><dd className="sf-mono">{task.taskId}</dd></div>
         <div><dt>Factory</dt><dd>{factoryName}</dd></div>
