@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   DEFAULT_SETTINGS, resetRemovedRepoSettings, saveSettings, SETTING_RANGES, VersionConflictError,
@@ -98,35 +98,58 @@ const SECTIONS = [
 const SECTION_IDS: readonly string[] = SECTIONS.map((s) => s.id);
 const PICK_A_FACTORY = "Pick a factory to see its settings.";
 
-/** The nav's current section: the first one, a clicked one, or the visible one nearest the top while scrolling. */
+/** Input that means the user scrolls on their own, which ends the hold a clicked link puts on the nav. */
+const USER_SCROLL_EVENTS = ["wheel", "touchstart", "keydown", "mousedown"] as const;
+
+/**
+ * The nav's current section: the first one, a clicked one, or, while scrolling, the visible section whose top is
+ * nearest the top of the viewport. Positions are read live on every update, never kept from an earlier one. A clicked
+ * link stays current until the user scrolls, since the anchor jump cannot always bring its section to the top.
+ */
 function useCurrentSection(ids: readonly string[]): [string, (id: string) => void] {
   const [current, setCurrent] = useState<string>(ids[0] ?? "");
+  const held = useRef(false);
   useEffect(() => {
     if (typeof IntersectionObserver === "undefined") return;
-    const visible = new Map<string, number>();
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        const id = entry.target.id;
-        if (entry.isIntersecting) visible.set(id, entry.boundingClientRect.top);
-        else visible.delete(id);
-      }
+    const visible = new Set<Element>();
+    const update = () => {
+      if (held.current) return;
       let best: string | undefined;
-      let bestTop = Number.POSITIVE_INFINITY;
-      for (const [id, top] of visible) {
-        if (top < bestTop) {
-          best = id;
-          bestTop = top;
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const element of visible) {
+        const distance = Math.abs(element.getBoundingClientRect().top);
+        if (distance < bestDistance) {
+          best = element.id;
+          bestDistance = distance;
         }
       }
       if (best) setCurrent(best);
+    };
+    const release = () => { held.current = false; };
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) visible.add(entry.target);
+        else visible.delete(entry.target);
+      }
+      update();
     }, { rootMargin: "0px 0px -60% 0px" });
     for (const id of ids) {
       const element = document.getElementById(id);
       if (element) observer.observe(element);
     }
-    return () => observer.disconnect();
+    window.addEventListener("scroll", update, { passive: true });
+    for (const type of USER_SCROLL_EVENTS) window.addEventListener(type, release, { capture: true, passive: true });
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("scroll", update);
+      for (const type of USER_SCROLL_EVENTS) window.removeEventListener(type, release, { capture: true });
+    };
   }, [ids]);
-  return [current, setCurrent];
+  const select = useCallback((id: string) => {
+    held.current = true;
+    setCurrent(id);
+  }, []);
+  return [current, select];
 }
 
 /** One settings section: a surface panel named by its h2, the target of a nav link. */

@@ -488,6 +488,12 @@ describe("the pause switch", () => {
   });
 });
 
+const currentLinks = () =>
+  within(screen.getByRole("navigation", { name: "Settings sections" }))
+    .getAllByRole("link")
+    .filter((l) => l.getAttribute("aria-current") === "location")
+    .map((l) => l.textContent);
+
 class FakeIO {
   static last: FakeIO | undefined;
   readonly targets: Element[] = [];
@@ -563,6 +569,54 @@ describe("settings page layout", () => {
     const nav = screen.getByRole("navigation", { name: "Settings sections" });
     const current = within(nav).getAllByRole("link").filter((l) => l.getAttribute("aria-current") === "location").map((l) => l.textContent);
     expect(current).toEqual(["Gates and limits"]);
+  });
+
+  it("reads_live_positions_while_scrolling_not_the_ones_saved_when_a_section_entered", () => {
+    vi.stubGlobal("IntersectionObserver", FakeIO);
+    renderSettings();
+    const io = FakeIO.last!;
+    const tops: Record<string, number> = { "settings-factory": -50, "settings-gates-and-limits": 300 };
+    for (const id of Object.keys(tops)) {
+      vi.spyOn(document.getElementById(id)!, "getBoundingClientRect").mockImplementation(() => ({ top: tops[id] }) as DOMRect);
+    }
+    act(() => {
+      io.callback([
+        { boundingClientRect: { top: -50 }, isIntersecting: true, target: document.getElementById("settings-factory") },
+        { boundingClientRect: { top: 300 }, isIntersecting: true, target: document.getElementById("settings-gates-and-limits") }
+      ]);
+    });
+    expect(currentLinks()).toEqual(["Factory"]);
+    // Both stay visible, so the observer does not fire again; the page reads live positions on scroll.
+    tops["settings-factory"] = -500;
+    tops["settings-gates-and-limits"] = 20;
+    act(() => { fireEvent.scroll(window); });
+    expect(currentLinks()).toEqual(["Gates and limits"]);
+  });
+
+  it("a_clicked_link_stays_current_until_the_user_scrolls", () => {
+    vi.stubGlobal("IntersectionObserver", FakeIO);
+    renderSettings();
+    const io = FakeIO.last!;
+    const tops: Record<string, number> = { "settings-repos": -10, "settings-factories": 500 };
+    for (const id of Object.keys(tops)) {
+      vi.spyOn(document.getElementById(id)!, "getBoundingClientRect").mockImplementation(() => ({ top: tops[id] }) as DOMRect);
+    }
+    const nav = screen.getByRole("navigation", { name: "Settings sections" });
+    fireEvent.click(within(nav).getByRole("link", { name: "Factories" }));
+    // The anchor jump cannot bring the last section to the top, so Repos stays nearest; the click still wins.
+    act(() => {
+      io.callback([
+        { boundingClientRect: { top: -10 }, isIntersecting: true, target: document.getElementById("settings-repos") },
+        { boundingClientRect: { top: 500 }, isIntersecting: true, target: document.getElementById("settings-factories") }
+      ]);
+      fireEvent.scroll(window);
+    });
+    expect(currentLinks()).toEqual(["Factories"]);
+    act(() => {
+      fireEvent.wheel(window);
+      fireEvent.scroll(window);
+    });
+    expect(currentLinks()).toEqual(["Repos"]);
   });
 
   it("does_not_crash_without_intersection_observer", () => {
