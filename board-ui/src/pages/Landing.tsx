@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useAuth } from "../app/providers/AuthProvider";
-import { DotField } from "../features/landing/DotField";
 import { isLoginConfigured } from "../lib/blocks/config";
 import { useT } from "../lib/i18n/LocalizationProvider";
 import { ThemeSwitch } from "../shared/ui/ThemeSwitch";
@@ -57,7 +56,6 @@ export function LandingPage({ returnTo }: { returnTo?: string }) {
 
   return (
     <div className="sf-landing">
-      <DotField />
       <header className="sf-topbar">
         <span className="sf-label sf-landing-brand">the-software-factory</span>
         <div className="sf-topbar-end">

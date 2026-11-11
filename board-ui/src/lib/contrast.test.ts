@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { DOT_ALPHA_MAX, DOT_RGB } from "../features/landing/dotField";
 import { tokens } from "../test/cssTokens";
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../app/board.css"), "utf8");
@@ -128,24 +127,13 @@ describe("danger_button_meets_4_5_to_1", () => {
   });
 });
 
-// The landing page: its text sits on the page field, under the static 16px grid dot and a WebGL dot at its brightest.
+// Text remains readable over the combined CSS and shader grid at maximum opacity.
 describe("landing_text_meets_4_5_over_the_field", () => {
-  // The static grid dot, read from the body background in board.css so the check follows the CSS.
-  const gridDotOf = (selector: string) => {
-    const image = tokens(css, selector)["background-image"] ?? "";
-    const dot = image.match(/radial-gradient\(\s*(rgba\([^)]*\))/);
-    if (!dot) throw new Error(`no grid dot in ${selector} background-image`);
-    return parse(dot[1] as string);
-  };
-  const gridDot: Record<string, { rgb: Rgb; alpha: number }> = {
-    dark: gridDotOf("body"),
-    light: gridDotOf(':root[data-theme="light"] body')
-  };
   const cases = (["dark", "light"] as const).flatMap((theme) => ["text", "muted", "accent-text"].map((fg) => [theme, fg] as const));
   it.each(cases)("%s: %s over the field", (theme, fg) => {
     const t = themes[theme] as Record<string, string>;
     const bg = parse(t["--sf-bg"] as string).rgb;
-    const field = over({ rgb: DOT_RGB[theme], alpha: DOT_ALPHA_MAX[theme] }, over(gridDot[theme] as { rgb: Rgb; alpha: number }, bg));
+    const field = over({ rgb: [133, 148, 158], alpha: .06 }, over({ rgb: [150, 164, 174], alpha: .08 }, bg));
     const text = parse(t[`--sf-${fg}`] as string).rgb;
     const onField = ratio(text, field);
     expect(onField, `${theme}: ${fg} over the field is ${onField.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);

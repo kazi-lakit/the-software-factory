@@ -81,6 +81,10 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
 
   return (
     <div className={view === "stages" ? "sf-view sf-view-stages" : "sf-view"}>
+      <div className="sf-board-intro">
+        <div><p className="sf-label sf-intro-label">The software factory / Operations</p><h1>Work in motion.</h1></div>
+        <p className="sf-intro-copy">From the first idea to the final release.<br />A clear view of everything moving through your factory.</p>
+      </div>
       <div className="sf-toolbar">
         <h1 className="sf-page-title">Board</h1>
         <FactoryPicker

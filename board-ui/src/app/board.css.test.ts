@@ -93,59 +93,59 @@ describe("the stylesheets", () => {
 });
 
 const DARK: Record<string, string> = {
-  "--sf-bg": "#080c0d",
-  "--sf-surface": "#0b1112",
-  "--sf-surface-sunk": "#0a0f10",
-  "--sf-text": "#e7efee",
-  "--sf-muted": "#9db0af",
+  "--sf-bg": "#0c1114",
+  "--sf-surface": "#11191e",
+  "--sf-surface-sunk": "#0e1519",
+  "--sf-text": "#eef2f3",
+  "--sf-muted": "#c4cfd6",
   "--sf-border": "rgba(157,176,175,0.45)",
-  "--sf-accent": "#5cc8cd",
-  "--sf-accent-soft": "#0c2224",
-  "--sf-accent-text": "#5cc8cd",
-  "--sf-on-accent": "#080c0d",
-  "--sf-done": "#8a9b9a",
-  "--sf-done-soft": "#0a0f10",
-  "--sf-focus": "#5cc8cd",
+  "--sf-accent": "#4693c3",
+  "--sf-accent-soft": "#122735",
+  "--sf-accent-text": "#4693c3",
+  "--sf-on-accent": "#0c1114",
+  "--sf-done": "#a1b2bd",
+  "--sf-done-soft": "#0e1519",
+  "--sf-focus": "#4693c3",
   "--sf-added": "#7ee2a8",
   "--sf-added-soft": "#0d2216",
   "--sf-removed": "#f2a3a3",
   "--sf-removed-soft": "#2a1414",
-  "--sf-primary": "#9db0af",
-  "--sf-primary-hover": "#b4c4c3",
-  "--sf-on-primary": "#080c0d",
-  "--sf-primary-soft": "#16201f",
-  "--sf-on-primary-soft": "#e7efee",
-  "--sf-progress": "#9ea7ba",
+  "--sf-primary": "#eef2f3",
+  "--sf-primary-hover": "#ffffff",
+  "--sf-on-primary": "#0c1114",
+  "--sf-primary-soft": "#1b2b35",
+  "--sf-on-primary-soft": "#eef2f3",
+  "--sf-progress": "#a7b8c5",
   "--sf-chrome-border": "rgba(157,176,175,0.25)",
-  "--sf-needs-tint": "rgba(92,205,160,0.08)"
+  "--sf-needs-tint": "rgba(70,147,195,0.08)"
 };
 
 const LIGHT: Record<string, string> = {
-  "--sf-bg": "#e7efee",
-  "--sf-surface": "#f4f8f7",
-  "--sf-surface-sunk": "#dde7e6",
-  "--sf-text": "#0b1112",
-  "--sf-muted": "#3e5150",
+  "--sf-bg": "#eef2f3",
+  "--sf-surface": "#f7f9fa",
+  "--sf-surface-sunk": "#e1e7ea",
+  "--sf-text": "#11191e",
+  "--sf-muted": "#4b5c66",
   "--sf-border": "rgba(11,17,18,0.3)",
-  "--sf-accent": "#0e7c82",
-  "--sf-accent-soft": "#d2eef0",
-  "--sf-accent-text": "#0a6368",
+  "--sf-accent": "#276b98",
+  "--sf-accent-soft": "#dceaf3",
+  "--sf-accent-text": "#245f86",
   "--sf-on-accent": "#ffffff",
-  "--sf-primary": "#0b1112",
-  "--sf-primary-hover": "#22302f",
-  "--sf-on-primary": "#e7efee",
-  "--sf-primary-soft": "#d0dcdb",
-  "--sf-on-primary-soft": "#0b1112",
-  "--sf-progress": "#6b7488",
-  "--sf-done": "#4d5c5b",
-  "--sf-done-soft": "#e0e8e7",
-  "--sf-focus": "#0b1112",
+  "--sf-primary": "#11191e",
+  "--sf-primary-hover": "#263b48",
+  "--sf-on-primary": "#eef2f3",
+  "--sf-primary-soft": "#dce5eb",
+  "--sf-on-primary-soft": "#11191e",
+  "--sf-progress": "#526878",
+  "--sf-done": "#52636e",
+  "--sf-done-soft": "#e1e7ea",
+  "--sf-focus": "#11191e",
   "--sf-chrome-border": "rgba(11,17,18,0.2)",
   "--sf-added": "#166534",
   "--sf-added-soft": "#dcfce7",
   "--sf-removed": "#b91c1c",
   "--sf-removed-soft": "#fee2e2",
-  "--sf-needs-tint": "rgba(14,124,100,0.07)"
+  "--sf-needs-tint": "rgba(39,107,152,0.07)"
 };
 
 const compact = (v: string | undefined) => (v ?? "").replace(/\s+/g, "");
@@ -165,16 +165,16 @@ describe("board_css_theme_tokens", () => {
     expect(read("board.css")).not.toContain("prefers-color-scheme");
   });
 
-  it("radius_is_3px_and_type_tokens_set", () => {
+  it("breakwater_square_radius_and_type_tokens_set", () => {
     const css = read("board.css");
     const t = tokens(css, ":root");
-    expect(t["--sf-radius"]).toBe("3px");
-    expect(t["--sf-size"]).toBe("16px");
-    expect(t["--sf-label-size"]).toBe("12px");
+    expect(t["--sf-radius"]).toBe("0px");
+    expect(t["--sf-size"]).toBe("13.5px");
+    expect(t["--sf-label-size"]).toBe("11px");
     expect(t["--sf-label-line"]).toBe("16px");
-    expect(t["--sf-label-tracking"]).toBe("0.16em");
-    expect(t["--sf-mono"]).toMatch(/^SFMono-Regular/);
-    expect(tokens(css, "body")["line-height"]).toBe("24px");
+    expect(t["--sf-label-tracking"]).toBe("0.12em");
+    expect(t["--sf-mono"]).toContain("DM Mono");
+    expect(tokens(css, "body")["line-height"]).toBe("1.72");
   });
 
   it("label_class_uses_mono_label_tokens", () => {
@@ -185,19 +185,11 @@ describe("board_css_theme_tokens", () => {
     expect(l["letter-spacing"]).toBe("var(--sf-label-tracking)");
   });
 
-  it("body_background_is_dot_grid_over_glow_in_both_themes", () => {
-    const css = compact(read("board.css"));
-    for (const s of [
-      "rgba(157,176,175,0.045)",
-      "0.8px",
-      "16px16px",
-      "circleat63%42%,#0e1718,#0a0f10,#080c0d",
-      "rgba(11,17,18,0.035)",
-      "#e7efee",
-      "color-scheme:dark",
-      "color-scheme:light"
-    ])
-      expect(css, s).toContain(s);
+  it("harbour_field_has_a_perspective_grid_fallback", () => {
+    const css = read("board.css");
+    expect(css).toContain("perspective(380px) rotateX(60deg)");
+    expect(css).toContain(".sf-harbour-field canvas");
+    expect(tokens(css, "body").background).toBe("var(--sf-bg)");
   });
 
   it("badge_is_accent_text_and_paused_is_muted", () => {
@@ -206,8 +198,8 @@ describe("board_css_theme_tokens", () => {
     expect(tokens(css, ".sf-badge").color).toBe("var(--sf-accent-text)");
   });
 
-  it("size_small_is_14px", () => {
-    expect(tokens(read("board.css"), ":root")["--sf-size-small"]).toBe("14px");
+  it("size_small_is_12px", () => {
+    expect(tokens(read("board.css"), ":root")["--sf-size-small"]).toBe("12px");
   });
 
   it("chevron_token_is_a_10x6_svg_data_uri_in_both_themes", () => {
@@ -221,8 +213,8 @@ describe("board_css_theme_tokens", () => {
       expect(v).toContain("viewBox='0 0 10 6'");
       expect(v).not.toContain(";");
     }
-    expect(dark).toContain("%239db0af");
-    expect(light).toContain("%233e5150");
+    expect(dark).toContain("%23c4cfd6");
+    expect(light).toContain("%234b5c66");
   });
 
   it("focus_outlines_use_the_focus_token", () => {
@@ -415,13 +407,13 @@ describe("board_css_select", () => {
 });
 
 describe("board_css_motion", () => {
-  it("shared_controls_transition_colours_in_150ms", () => {
+  it("shared_controls_transition_colours_in_220ms", () => {
     const css = read("board.css");
     const sel = [".sf-button", ".sf-select", ".sf-input", ".sf-chip", ".sf-badge", ".sf-view-link", ".sf-tab", ".sf-account"];
     const list = selectorLists(css).find((l) => sel.every((s) => l.split(",").map((x) => x.trim()).includes(s)));
     expect(list).toBeDefined();
     expect(tokens(css, list ?? "").transition).toBe(
-      "background-color 150ms ease, border-color 150ms ease, color 150ms ease"
+      "background-color 220ms ease, border-color 220ms ease, color 220ms ease"
     );
   });
 
@@ -460,9 +452,9 @@ describe("board_css_topbar", () => {
     expect(t["z-index"]).toBe("10");
   });
 
-  it("topbar_height_token_is_52px", () => {
+  it("topbar_height_token_is_76px", () => {
     const css = read("board.css");
-    expect(tokens(css, ":root")["--sf-bar-height"]).toBe("52px");
+    expect(tokens(css, ":root")["--sf-bar-height"]).toBe("76px");
     expect(tokens(css, ".sf-topbar")["min-height"]).toBe("var(--sf-bar-height)");
   });
 

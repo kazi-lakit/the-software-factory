@@ -1,3 +1,4 @@
+import { HarbourField } from "./HarbourField";
 import { AppProviders } from "./providers/AppProviders";
 import { AuthProvider } from "./providers/AuthProvider";
 import { AppRouter } from "./router/routes";
@@ -5,6 +6,7 @@ import { AppRouter } from "./router/routes";
 export function App() {
   return (
     <AppProviders>
+      <HarbourField />
       <AuthProvider>
         <AppRouter />
       </AuthProvider>

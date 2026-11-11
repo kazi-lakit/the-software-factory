@@ -41,11 +41,11 @@ describe("landing styles", () => {
 
   it("title_is_the_display_style", () => {
     const t = tokens(css, ".sf-landing-title");
-    expect(t["font-family"]).toBe("var(--sf-font)");
-    expect(t["font-size"]).toBe("clamp(48px, 10vw, 128px)");
-    expect(t["font-weight"]).toBe("700");
-    expect(t["line-height"]).toBe("1");
-    expect(t["letter-spacing"]).toBe("-0.025em");
+    expect(t["font-family"]).toBe("var(--sf-display)");
+    expect(t["font-size"]).toBe("clamp(64px, 8.5vw, 122px)");
+    expect(t["font-weight"]).toBe("400");
+    expect(t["line-height"]).toBe(".9");
+    expect(t["letter-spacing"]).toBe("-0.018em");
     expect(t.color).toBe("var(--sf-text)");
   });
 
