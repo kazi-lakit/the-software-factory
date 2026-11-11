@@ -1,5 +1,8 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ForbiddenError } from "@factory/core";
+import { setReadyProblem } from "../newTask/createdNotice";
+import { describeWriteError } from "./writeOutcome";
 import { clearAllUnsent } from "../../lib/unsent";
 import { factory } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
@@ -343,5 +346,21 @@ describe("TaskView questions and answers", () => {
       unmount();
       expect(leads[leads.length - 1]).toBeNull();
     });
+  });
+});
+
+describe("TaskView after New task", () => {
+  it("shows_the_not_marked_ready_notice_once_after_create", async () => {
+    const task = await seedTask({ title: "Fresh" });
+    setReadyProblem(task.taskId, describeWriteError(new ForbiddenError("no")));
+    renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 2, name: "Fresh" });
+    const alerts = screen.getAllByRole("alert").map((a) => a.textContent ?? "");
+    expect(alerts.some((t) => t.includes("The task was created but not marked ready."))).toBe(true);
+    expect(alerts.some((t) => t.includes("Blocks refused this change for your account."))).toBe(true);
+    cleanup();
+    renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 2, name: "Fresh" });
+    expect(screen.queryByText("The task was created but not marked ready.")).not.toBeInTheDocument();
   });
 });
