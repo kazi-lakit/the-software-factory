@@ -29,7 +29,7 @@ describe("phone top bar and tab bar", () => {
   it("phone top bar is compact", () => {
     expect(phone(".sf-topbar")["min-height"]).toBe("48px");
     expect(phone(".sf-topbar").padding).toBe("0 12px");
-    expect(tokens(css, ".sf-topbar")["min-height"]).toBe("var(--sf-bar-height)");
+    expect(tokens(css, ".sf-topbar")["min-height"]).toBe("72px");
   });
 
   it("phone top bar keeps the base opaque background", () => {
@@ -85,7 +85,7 @@ describe("phone top bar and tab bar", () => {
 
   it("desktop values stay", () => {
     expect(tokens(css, ".sf-views").position).toBeUndefined();
-    expect(tokens(css, ".sf-main")).toEqual({ flex: "1", padding: "16px" });
+    expect(tokens(css, ".sf-main")).toMatchObject({ flex: "1", padding: "32px", "min-width": "0" });
   });
 
   it("the phone block is the last top-level item and the only 639px block", () => {
@@ -131,13 +131,13 @@ describe("phone pills and lanes", () => {
 
   it("empty lane text shows on phones and not at 640px and up", () => {
     expect(phone(".sf-view .sf-lane .sf-lane-empty").display).toBe("block");
-    expect(tokens(css, ".sf-lane-empty").display).toBe("none");
+    expect(tokens(css, ".sf-lane-empty").display).toBe("block");
   });
 
   it("desktop lanes are unchanged", () => {
     const base = css.slice(0, css.lastIndexOf("@media (max-width: 639px)"));
     expect(base).not.toContain("data-selected");
-    expect((tokens(css, ".sf-lanes")["grid-template-columns"] ?? "").replace(/\s+/g, "")).toBe("minmax(260px,1.25fr)repeat(3,minmax(220px,1fr))minmax(150px,.55fr)");
+    expect((tokens(css, ".sf-lanes")["grid-template-columns"] ?? "").replace(/\s+/g, "")).toBe("minmax(0,1.2fr)repeat(3,minmax(0,1fr))");
   });
 
   it("the pill gets the shared colour transition and no phone rule adds one", () => {
@@ -173,8 +173,8 @@ describe("phone action bar, inputs and buttons", () => {
   });
 
   it("desktop control sizes stay", () => {
-    expect(tokens(css, ".sf-select").height).toBe("34px");
-    expect(tokens(css, ".sf-input")["min-height"]).toBe("28px");
+    expect(tokens(css, ".sf-select").height).toBe("44px");
+    expect(tokens(css, ".sf-input")["min-height"]).toBe("44px");
     expect(tokens(css, ".sf-select")["font-size"]).not.toBe("16px");
     expect(tokens(css, ".sf-input")["font-size"]).toBeUndefined();
   });
@@ -247,7 +247,7 @@ function matchesStructure(selector: string, chain: string[]): boolean {
 describe("phone design gaps (T-33)", () => {
   it("base_hides_and_phone_shows_phone_only_markup", () => {
     const shown: Record<string, string> = {
-      ".sf-board-view-label": "inline", ".sf-task-repo": "block", ".sf-task-more": "block", ".sf-question-for-you": "block", ".sf-question-from": "block", ".sf-qa-earlier": "block"
+      ".sf-task-repo": "block", ".sf-task-more": "block", ".sf-question-for-you": "block", ".sf-question-from": "block", ".sf-qa-earlier": "block"
     };
     for (const [s, display] of Object.entries(shown)) {
       expect(tokens(css, s).display, s).toBe("none");
@@ -261,8 +261,8 @@ describe("phone design gaps (T-33)", () => {
     }
   });
 
-  it("view_switch_takes_its_own_row_last", () => {
-    expect(phone(".sf-board-view")).toMatchObject({ "flex-basis": "100%", order: "1" });
+  it("view_switch_shares_a_compact_row_with_the_filter_toggle", () => {
+    expect(phone(".sf-board-view")).toMatchObject({ "flex-basis": "auto", order: "0" });
     expect(tokens(css, ".sf-board-view")).toMatchObject({ display: "inline-flex" });
   });
 

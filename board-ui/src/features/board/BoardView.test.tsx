@@ -870,18 +870,50 @@ describe("BoardView empty lane text", () => {
     expect(text).toHaveClass("sf-empty", "sf-lane-empty");
   });
 
-  it("only_the_selected_lane_renders_the_empty_text", async () => {
+  it("empty_lanes_have_explanatory_text_on_desktop", async () => {
     renderBoard();
     await screen.findByRole("region", { name: "Needs you" });
-    expect(screen.getAllByText(/^Nothing in /).map((e) => e.textContent)).toEqual(["Nothing in Needs you."]);
+    expect(screen.getAllByText(/^Nothing in /)).toHaveLength(5);
     fireEvent.click(screen.getByRole("button", { name: /^Working/ }));
-    expect(screen.getAllByText(/^Nothing in /).map((e) => e.textContent)).toEqual(["Nothing in Working."]);
+    expect(screen.getByText("Nothing in Working.")).toHaveClass("sf-lane-empty-selected");
   });
 
   it("a_lane_with_tasks_renders_no_empty_text", async () => {
     await seedTask({ title: "Spec rev" }, "spec_review", { stage: "spec" });
     renderBoard();
     await screen.findAllByText("Spec rev");
-    expect(screen.queryByText(/^Nothing in /)).not.toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Needs you" })).queryByText(/^Nothing in /)).not.toBeInTheDocument();
+  });
+});
+
+describe("Board workspace redesign", () => {
+  it("summarises the filtered queue and resets a search with no matches", async () => {
+    await seedTask({ title: "Review invitations" }, "spec_review");
+    await seedTask({ title: "Build exports" }, "build");
+    renderBoard();
+    await screen.findByText("Review invitations");
+    const summary = screen.getByRole("group", { name: "Queue summary" });
+    expect(summary).toHaveTextContent("Needs you1");
+    expect(summary).toHaveTextContent("Working1");
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search tasks by title or id" }), { target: { value: "no-such-task" } });
+    expect(screen.getByText("No tasks match your filters.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(await screen.findByText("Review invitations")).toBeInTheDocument();
+  });
+});
+
+describe("Board mobile filters", () => {
+  it("exposes and collapses additional filters without clearing their values", async () => {
+    renderBoard();
+    await screen.findByRole("region", { name: "Needs you" });
+    const toggle = screen.getByRole("button", { name: "Filters" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+    const repo = screen.getByRole("combobox", { name: "Repo" });
+    fireEvent.change(repo, { target: { value: "blocks/data" } });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    expect(repo).toHaveValue("blocks/data");
   });
 });

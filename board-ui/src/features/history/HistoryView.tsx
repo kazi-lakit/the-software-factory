@@ -14,11 +14,6 @@ import { formatTime, formatWhen } from "../../lib/formatTime";
 type Navigate = (path: string) => void;
 
 const PAGE = 200;
-// A text part of a change longer than this is cut; the full change is in the cell's title.
-const MAX_VALUE = 48;
-
-const cut = (text: string): string => (text.length > MAX_VALUE ? `${text.slice(0, MAX_VALUE - 1)}…` : text);
-
 const WHO_LABEL: Readonly<Record<ActorFilter, string>> = {
   all: "Everyone",
   core: "Core",
@@ -67,9 +62,7 @@ export function HistoryView({ onNavigate }: { onNavigate: Navigate }) {
 
   return (
     <div className="sf-view">
-      <div className="sf-toolbar">
-        <h1 className="sf-page-title">History</h1>
-      </div>
+      <header className="sf-page-heading"><div><p className="sf-eyebrow">Workspace activity</p><h1 className="sf-page-title">History</h1><p className="sf-page-description">Every decision, change, and step forward. All in one place.</p></div></header>
       <div className="sf-toolbar sf-filters" role="group" aria-label="Filters">
         <input
           type="search"
@@ -129,7 +122,7 @@ export function HistoryView({ onNavigate }: { onNavigate: Navigate }) {
         events.length === 0 ? (
           <p className="sf-empty">No history yet.</p>
         ) : matching.length === 0 ? (
-          <p className="sf-empty">No events match these filters.</p>
+          <div className="sf-filter-empty"><h2>No events match these filters.</h2><p>Choose a wider date range or clear your filters.</p><button className="sf-button" type="button" onClick={() => { setFilters(NO_FILTERS); setLimit(PAGE); }}>Clear filters</button></div>
         ) : (
           <>
             <div className="sf-table-wrap">
@@ -178,9 +171,9 @@ function EventRow({ event, description, now, onNavigate }: { event: FactoryEvent
           <a className="sf-mono" href={href} onClick={(e) => followInApp(e, href, onNavigate)}>{event.taskId}</a>
         )}
       </td>
-      <td title={description.text}>
+      <td className="sf-history-change" title={description.text}>
         {description.parts.map((part, i) =>
-          typeof part === "string" ? cut(part) : <span key={i} className="sf-chip">{part.label}</span>
+          typeof part === "string" ? part : <span key={i} className="sf-chip">{part.label}</span>
         )}
       </td>
       <td className="sf-muted">{event.reason}</td>

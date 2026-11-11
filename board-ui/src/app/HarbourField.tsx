@@ -28,7 +28,8 @@ export function HarbourField() {
         float grid=1.-smoothstep(.012,.038,min(lines.x,lines.y));
         float fade=pow(1.-uv.y,2.)*.06;
         float pulse=.9+sin(time*.24)*.1;
-        gl_FragColor=vec4(vec3(.52,.58,.62),grid*fade*pulse);
+        float alpha=grid*fade*pulse;
+        gl_FragColor=vec4(vec3(.52,.58,.62)*alpha,alpha);
       }`);
     const program = gl.createProgram();
     const buffer = gl.createBuffer();

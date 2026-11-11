@@ -109,7 +109,7 @@ export function FactoriesSection({ onNavigate }: { onNavigate?: (path: string) =
         </a>
         <button type="button" className="sf-button" onClick={() => setEditing({ kind: "import" })}>Import factory</button>
       </div>
-      <p className="sf-muted" role="status">{notice}</p>
+      <p className={notice ? "sf-feedback" : "sf-visually-hidden"} role="status">{notice}</p>
       {health.isError ? <p className="sf-hint">Could not read the gh login checks; they show as unknown.</p> : null}
       {form && !(editing?.kind === "edit-factory" || editing?.kind === "edit-repo" || editing?.kind === "add-repo") ? form : null}
 

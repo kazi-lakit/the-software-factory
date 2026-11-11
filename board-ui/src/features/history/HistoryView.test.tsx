@@ -173,7 +173,7 @@ describe("HistoryView", () => {
     expect(onNavigate).toHaveBeenCalledWith("/tasks/T-7");
     const change = within(taskRow).getAllByRole("cell")[3]!;
     expect(change).toHaveAttribute("title", `branch: — → ${long}`);
-    expect(change.textContent!.length).toBeLessThan(120);
+    expect(change).toHaveTextContent(long);
   });
 
   it("change_cell_renders_status_chips", async () => {
@@ -302,6 +302,9 @@ describe("HistoryView", () => {
     fireEvent.change(screen.getByLabelText("Who"), { target: { value: "verifier" } });
     expect(screen.getByText("No events match these filters.")).toBeInTheDocument();
     expect(screen.queryByRole("table", { name: "History" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByRole("table", { name: "History" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Who")).toHaveValue("all");
   });
 
   it("hides_gate_test_tasks_until_show_test_tasks_is_ticked", async () => {

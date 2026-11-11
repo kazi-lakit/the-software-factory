@@ -60,7 +60,7 @@ describe("landing styles", () => {
     const t = tokens(css, ".sf-landing-hero");
     expect(t.display).toBe("grid");
     expect(t["grid-template-columns"]).toBe("repeat(12, minmax(0, 1fr))");
-    expect(t.border).toBe("1px solid var(--sf-chrome-border)");
+    expect(t.border).toBe("1px solid var(--sf-border)");
     expect(t["border-radius"]).toBe("var(--sf-radius)");
     expect(tokens(css, ".sf-landing-hero > *")["grid-column"]).toBe("1 / span 9");
   });
@@ -83,7 +83,7 @@ describe("landing styles", () => {
     const t = tokens(css, ".sf-landing-cell");
     expect(t.border).toBe("1px solid var(--sf-border)");
     expect(t["border-radius"]).toBe("var(--sf-radius)");
-    expect(t.background).toBe("transparent");
+    expect(t.background).toBe("var(--sf-surface)");
   });
 
   it("kicker_and_footer_are_label_type_muted", () => {

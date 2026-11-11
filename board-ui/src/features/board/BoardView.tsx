@@ -1,3 +1,4 @@
+import { Plus, Search, SlidersHorizontal } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useState } from "react";
 import { unfinishedDeps, type FactoryRepo, type Status, type Task } from "@factory/core";
 import { useFactories, useSelectedFactory } from "../factories/useFactories";
@@ -12,6 +13,12 @@ type Navigate = (path: string) => void;
 
 const NO_REPOS: readonly FactoryRepo[] = [];
 const NEW_TASK_PATH = "/tasks/new";
+const SUMMARY_COPY: Partial<Record<LaneId, string>> = {
+  "needs-you": "Awaiting your decision",
+  queued: "Ready for the next step",
+  working: "Moving through the factory",
+  done: "Completed and merged"
+};
 
 const repoKey = (repo: FactoryRepo) => `${repo.factoryId}/${repo.repoId}`;
 
@@ -28,6 +35,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const [repo, setRepo] = useState("");
   const [view, setView] = useBoardView();
   const [showTest, setShowTest] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // In memory only: a reload starts with an empty search.
   const [query, setQuery] = useState("");
   // The Stopped lane starts collapsed; in memory only.
@@ -81,12 +89,22 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
 
   return (
     <div className={view === "stages" ? "sf-view sf-view-stages" : "sf-view"}>
-      <div className="sf-board-intro">
-        <div><p className="sf-label sf-intro-label">The software factory / Operations</p><h1>Work in motion.</h1></div>
-        <p className="sf-intro-copy">From the first idea to the final release.<br />A clear view of everything moving through your factory.</p>
+      <header className="sf-page-heading">
+        <div><p className="sf-eyebrow">Workspace overview</p><h1 className="sf-page-title">Board</h1><p className="sf-page-description">Keep work moving. Make the decisions that matter.</p></div>
+        <a href={NEW_TASK_PATH} className="sf-button sf-button-primary" onClick={(event) => followInApp(event, NEW_TASK_PATH, onNavigate)}><Plus size={16} aria-hidden="true" />New task</a>
+      </header>
+      <div className="sf-queue-summary" role="group" aria-label="Queue summary">
+        {LANES.filter((lane) => lane.id !== "stopped").map((lane) => (
+          <div key={lane.id} className={`sf-queue-stat sf-queue-stat-${lane.id}`}>
+            <span>{lane.name}</span>
+            <strong>{!board.data ? "—" : byLane.get(lane.id)?.length ?? 0}</strong>
+            <span className="sf-queue-stat-caption">{SUMMARY_COPY[lane.id]}</span>
+          </div>
+        ))}
       </div>
-      <div className="sf-toolbar">
-        <h1 className="sf-page-title">Board</h1>
+      <div className="sf-board-controls">
+        <div className="sf-toolbar sf-board-filters">
+        <div id={`${filterId}-options`} className="sf-board-filter-fields" data-open={filtersOpen}>
         <FactoryPicker
           defs={factories.defs}
           value={factory}
@@ -109,6 +127,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
           <input type="checkbox" checked={showTest} onChange={(event) => setShowTest(event.target.checked)} />
           <span>Show test tasks</span>
         </label>
+        </div>
         <input
           type="search"
           className="sf-input sf-board-search"
@@ -124,14 +143,18 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             <button type="button" className="sf-segment" aria-pressed={view === "stages"} onClick={() => setView("stages")}>All stages</button>
           </div>
         </div>
-        <a
-          href={NEW_TASK_PATH}
-          className="sf-button sf-button-primary sf-toolbar-end"
-          onClick={(event) => followInApp(event, NEW_TASK_PATH, onNavigate)}
-        >
-          New task
-        </a>
+        <button type="button" className="sf-button sf-filter-toggle" aria-expanded={filtersOpen} aria-controls={`${filterId}-options`} onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={14} aria-hidden="true" />Filters</button>
+        </div>
+        <div className="sf-board-results"><span>{board.isPending ? "Loading your workspace…" : `${visible.length} ${visible.length === 1 ? "task" : "tasks"} in view`}</span><span>Changes refresh every 30 seconds</span></div>
       </div>
+      {board.data && visible.length === 0 && (query || repo) ? (
+        <div className="sf-filter-empty">
+          <Search size={24} aria-hidden="true" />
+          <h2>No tasks match your filters.</h2>
+          <p>Try another title, task id, or repository.</p>
+          <button type="button" className="sf-button" onClick={() => { setQuery(""); setRepo(""); }}>Clear filters</button>
+        </div>
+      ) : null}
 
       {board.isError ? (
         <div className="sf-problem" role="alert">
@@ -197,8 +220,8 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
                       <li key={task.taskId}><TaskCard task={task} showFactory={all} view="lanes" waitingOn={waitingOn(task)} onNavigate={onNavigate} /></li>
                     ))}
                   </ul>
-                ) : tasks.length === 0 && selectedLane === lane.id ? (
-                  <p className="sf-empty sf-lane-empty">Nothing in {lane.name}.</p>
+                ) : tasks.length === 0 ? (
+                  <p className={`sf-empty sf-lane-empty${selectedLane === lane.id ? " sf-lane-empty-selected" : ""}`}>Nothing in {lane.name}.</p>
                 ) : null}
                 {lane.id === "done" && tasks.length > 0 ? (
                   <a className="sf-lane-more" href="/history" onClick={(event) => followInApp(event, "/history", onNavigate)}>

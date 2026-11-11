@@ -4,12 +4,12 @@
 :root {
   color-scheme: dark;
   --sf-bg: #0c1114;
-  --sf-surface: #11191e;
-  --sf-surface-sunk: #0e1519;
+  --sf-surface: #141e24;
+  --sf-surface-sunk: #10181d;
   --sf-text: #eef2f3;
-  --sf-muted: #c4cfd6;
-  --sf-border: rgba(157, 176, 175, 0.45);
-  --sf-chrome-border: rgba(157, 176, 175, 0.25);
+  --sf-muted: #b1c1cb;
+  --sf-border: rgba(177, 193, 203, 0.32);
+  --sf-chrome-border: rgba(177, 193, 203, 0.18);
   --sf-accent: #4693c3;
   --sf-accent-soft: #122735;
   --sf-accent-text: #4693c3;
@@ -19,6 +19,8 @@
   --sf-on-primary: #0c1114;
   --sf-primary-soft: #1b2b35;
   --sf-on-primary-soft: #eef2f3;
+  --sf-progress-soft: #25213e;
+  --sf-progress-text: #c9c4ff;
   --sf-progress: #a7b8c5;
   --sf-needs-tint: rgba(70, 147, 195, 0.08);
   --sf-done: #a1b2bd;
@@ -29,7 +31,6 @@
   --sf-added-soft: #0d2216;
   --sf-removed: #f2a3a3;
   --sf-removed-soft: #2a1414;
-
   --sf-font: "DM Mono", ui-monospace, monospace;
   --sf-display: "Instrument Serif", Georgia, serif;
   --sf-mono: "DM Mono", ui-monospace, monospace;
@@ -37,7 +38,7 @@
   --sf-size-small: 12px;
   --sf-label-size: 11px;
   --sf-label-line: 16px;
-  --sf-label-tracking: 0.12em;
+  --sf-label-tracking: 0.08em;
   --sf-radius: 0px;
   --sf-bar-height: 76px;
   --sf-tabbar-height: 56px;
@@ -55,12 +56,12 @@
 :root[data-theme="light"] {
   color-scheme: light;
   --sf-bg: #eef2f3;
-  --sf-surface: #f7f9fa;
-  --sf-surface-sunk: #e1e7ea;
+  --sf-surface: #f8fafb;
+  --sf-surface-sunk: #e5ebef;
   --sf-text: #11191e;
-  --sf-muted: #4b5c66;
-  --sf-border: rgba(11, 17, 18, 0.3);
-  --sf-chrome-border: rgba(11, 17, 18, 0.2);
+  --sf-muted: #526571;
+  --sf-border: rgba(38, 63, 78, 0.24);
+  --sf-chrome-border: rgba(38, 63, 78, 0.14);
   --sf-accent: #276b98;
   --sf-accent-soft: #dceaf3;
   --sf-accent-text: #245f86;
@@ -68,8 +69,10 @@
   --sf-primary: #11191e;
   --sf-primary-hover: #263b48;
   --sf-on-primary: #eef2f3;
-  --sf-primary-soft: #dce5eb;
+  --sf-primary-soft: #e1eaf0;
   --sf-on-primary-soft: #11191e;
+  --sf-progress-soft: #e9e7fa;
+  --sf-progress-text: #5247cd;
   --sf-progress: #526878;
   --sf-needs-tint: rgba(39, 107, 152, 0.07);
   --sf-done: #52636e;
@@ -118,6 +121,7 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  padding-left: 208px;
 }
 
 .sf-topbar {
@@ -126,9 +130,9 @@ body {
   border-bottom: 1px solid var(--sf-chrome-border);
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 20px;
-  min-height: var(--sf-bar-height);
-  padding: 0 16px;
+  gap: 12px 24px;
+  min-height: 72px;
+  padding: 12px 32px;
   position: sticky;
   top: 0;
   z-index: 10;
@@ -142,6 +146,7 @@ body {
   line-height: var(--sf-label-line);
   text-decoration: none;
   white-space: nowrap;
+  display: none;
 }
 
 /* The project name links to the Board. */
@@ -165,22 +170,25 @@ body {
 
 .sf-views {
   align-items: stretch;
-  align-self: stretch;
+  align-self: auto;
   display: flex;
-  gap: 16px;
+  gap: 8px;
+  flex-direction: column;
 }
 
 .sf-view-link {
   align-items: center;
   border-bottom: 2px solid transparent;
-  color: var(--sf-muted);
+  color: #b1c1cb;
   display: flex;
   font-family: var(--sf-mono);
-  font-size: var(--sf-label-size);
-  letter-spacing: var(--sf-label-tracking);
+  font-size: 13px;
+  letter-spacing: .02em;
   line-height: var(--sf-label-line);
-  padding: 0 14px;
+  padding: 14px 16px;
   text-decoration: none;
+  gap: 12px;
+  border: 1px solid transparent;
 }
 
 .sf-view-link:hover {
@@ -190,7 +198,9 @@ body {
 /* The current view: text weight and a rule in the text colour, not the accent. */
 .sf-view-link[aria-current="page"] {
   border-bottom-color: var(--sf-text);
-  color: var(--sf-text);
+  color: #eef2f3;
+  background: #1c303d;
+  border-color: #30546b;
 }
 
 .sf-view-link:focus-visible {
@@ -221,18 +231,19 @@ body {
    exception to the single 3px radius: a pill and a circle are round by definition. */
 .sf-account {
   align-items: center;
-  background: transparent;
+  background: var(--sf-surface-sunk);
   border: 1px solid var(--sf-border);
-  border-radius: 999px;
+  border-radius: 0;
   color: var(--sf-text);
   display: inline-flex;
   font-family: var(--sf-mono);
   font-size: var(--sf-label-size);
   gap: 8px;
-  letter-spacing: var(--sf-label-tracking);
+  letter-spacing: .02em;
   line-height: var(--sf-label-line);
   padding: 4px 12px 4px 4px;
   white-space: nowrap;
+  min-height: 40px;
 }
 
 .sf-account:hover {
@@ -244,14 +255,14 @@ body {
 .sf-avatar {
   align-items: center;
   background: var(--sf-primary-soft);
-  border-radius: 999px;
+  border-radius: 0;
   color: var(--sf-on-primary-soft);
   display: inline-flex;
   flex: none;
   font-size: var(--sf-label-size);
-  height: 22px;
+  height: 30px;
   justify-content: center;
-  width: 22px;
+  width: 30px;
 }
 
 .sf-account-name {
@@ -309,15 +320,21 @@ body {
 }
 
 .sf-button {
-  background: transparent;
+  background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   color: var(--sf-text);
   font-family: var(--sf-mono);
   font-size: var(--sf-label-size);
-  letter-spacing: var(--sf-label-tracking);
-  line-height: var(--sf-label-line);
-  padding: 8px 14px;
+  letter-spacing: .06em;
+  line-height: 18px;
+  padding: 12px 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+  font-weight: 500;
 }
 
 .sf-button:hover:not(:disabled) {
@@ -335,14 +352,16 @@ body {
 .sf-button-small {
   border-color: var(--sf-border);
   color: var(--sf-text);
-  display: inline-block;
-  padding: 2px 8px;
+  display: inline-flex;
+  padding: 8px 12px;
   text-decoration: none;
+  min-height: 34px;
 }
 
 .sf-main {
   flex: 1;
-  padding: 16px;
+  padding: 32px;
+  min-width: 0;
 }
 
 /* The live region for the pause state stays in the page while the factory runs. */
@@ -361,40 +380,50 @@ body {
 
 /* Shared view parts */
 .sf-view h2 {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: 32px;
+  font-weight: 400;
   margin: 0;
+  font-family: var(--sf-display);
+  line-height: 1.2;
 }
 
-/* Page title: 28px bold. The .sf-view heading rules are more specific than the bare class, so they are matched here. */
+/* Display hierarchy shared by workspace and detail screens. */
 .sf-page-title {
   color: var(--sf-text);
-  font-size: 28px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
+  font-size: 56px;
+  font-weight: 400;
+  letter-spacing: -.018em;
   margin: 0;
+  font-family: var(--sf-display);
+  line-height: 1.05;
 }
 
 .sf-view h2.sf-page-title {
   color: var(--sf-text);
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 48px;
+  font-weight: 400;
   letter-spacing: -0.02em;
   margin: 0;
+  font-family: var(--sf-display);
+  line-height: 1.1;
 }
 
 .sf-view h3.sf-page-title {
   color: var(--sf-text);
-  font-size: 28px;
-  font-weight: 700;
+  font-size: 36px;
+  font-weight: 400;
   letter-spacing: -0.02em;
   margin: 0;
+  font-family: var(--sf-display);
+  line-height: 1.1;
 }
 
 .sf-view h3 {
-  font-size: var(--sf-size);
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   margin: 0 0 8px;
+  font-family: var(--sf-mono);
+  line-height: 1.5;
 }
 
 .sf-muted,
@@ -429,7 +458,7 @@ body {
   background: var(--sf-primary-hover);
   border-color: var(--sf-primary-hover);
   color: var(--sf-on-primary);
-  text-decoration: underline;
+  text-decoration: none;
 }
 
 .sf-button-accent {
@@ -442,7 +471,7 @@ body {
   background: var(--sf-accent);
   border-color: var(--sf-accent);
   color: var(--sf-on-accent);
-  text-decoration: underline;
+  text-decoration: none;
 }
 
 /* Danger: a red outline (Cancel task, Yes cancel it); it stays red over the hover fill. */
@@ -458,13 +487,16 @@ body {
 }
 
 .sf-input {
-  background: transparent;
+  background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   color: var(--sf-text);
   font: inherit;
-  min-height: 28px;
-  padding: 4px 8px;
+  min-height: 44px;
+  padding: 12px 14px;
+  line-height: 20px;
+  width: 100%;
+  min-width: 0;
 }
 
 .sf-input.sf-mono {
@@ -475,7 +507,7 @@ body {
 .sf-select {
   -webkit-appearance: none;
   appearance: none;
-  background-color: transparent;
+  background-color: var(--sf-surface);
   background-image: var(--sf-chevron);
   background-position: right 10px center;
   background-repeat: no-repeat;
@@ -484,12 +516,13 @@ body {
   border-radius: var(--sf-radius);
   color: var(--sf-text);
   font-family: var(--sf-mono);
-  font-size: var(--sf-label-size);
-  height: 34px;
-  letter-spacing: var(--sf-label-tracking);
+  font-size: 12px;
+  height: 44px;
+  letter-spacing: .02em;
   line-height: var(--sf-label-line);
-  min-height: 34px;
-  padding: 0 28px 0 10px;
+  min-height: 44px;
+  padding: 0 36px 0 14px;
+  max-width: 100%;
 }
 
 .sf-select:hover:not(:disabled) {
@@ -514,7 +547,8 @@ textarea.sf-input {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+  min-width: 0;
 }
 
 .sf-field > span,
@@ -553,13 +587,13 @@ textarea.sf-input {
 .sf-field-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 20px;
 }
 
 .sf-form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 24px;
 }
 
 .sf-actions {
@@ -572,7 +606,7 @@ textarea.sf-input {
   background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
-  padding: 12px;
+  padding: 24px;
 }
 
 /* A panel that waits for the owner (gate, answer) is the accent's other use. */
@@ -588,7 +622,7 @@ textarea.sf-input {
 .sf-panel-needs-you form {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 20px;
 }
 
 .sf-problem {
@@ -627,9 +661,9 @@ textarea.sf-input {
   display: flex;
   flex-direction: column;
   gap: 14px;
-  max-width: 380px;
+  max-width: 480px;
   overflow-wrap: anywhere;
-  padding: 26px;
+  padding: 32px;
   width: 100%;
 }
 
@@ -704,8 +738,8 @@ textarea.sf-input {
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 20px;
-  margin-bottom: 12px;
+  gap: 16px;
+  margin-bottom: 20px;
 }
 
 .sf-toolbar-end {
@@ -720,17 +754,17 @@ textarea.sf-input {
 .sf-columns {
   align-items: flex-start;
   display: flex;
-  gap: 10px;
+  gap: 16px;
   overflow-x: auto;
   padding-bottom: 8px;
 }
 
 .sf-column {
-  background: transparent;
+  background: var(--sf-surface-sunk);
   border: 1px solid var(--sf-chrome-border);
   border-radius: var(--sf-radius);
-  flex: 0 0 216px;
-  padding: 8px;
+  flex: 0 0 260px;
+  padding: 14px;
 }
 
 .sf-column-needs-you {
@@ -739,7 +773,7 @@ textarea.sf-input {
 }
 
 .sf-column-collapsed {
-  flex-basis: 140px;
+  flex-basis: 160px;
 }
 
 /* One row: what the view is on the left, the scroll hint on the right; the parts wrap on narrow screens. */
@@ -768,6 +802,15 @@ textarea.sf-input {
 
 .sf-count {
   color: var(--sf-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-chrome-border);
+  font-size: 11px;
 }
 
 /* The small Show/Hide button of a collapsible lane or column (Stopped, Done, Cancelled). */
@@ -792,21 +835,22 @@ textarea.sf-input {
 .sf-lanes {
   align-items: start;
   display: grid;
-  gap: 14px;
-  grid-template-columns: minmax(260px, 1.25fr) repeat(3, minmax(220px, 1fr)) minmax(150px, .55fr);
+  gap: 20px;
+  grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr));
   width: 100%;
 }
 
 .sf-lane {
-  background: transparent;
+  background: var(--sf-surface-sunk);
   border: 1px solid var(--sf-chrome-border);
   border-radius: var(--sf-radius);
   min-width: 0;
-  padding: 8px;
+  padding: 16px;
+  min-height: 260px;
 }
 
 .sf-lane-needs-you {
-  background: linear-gradient(to bottom, var(--sf-needs-tint), transparent 70%);
+  background: var(--sf-accent-soft);
   border-color: var(--sf-accent);
 }
 
@@ -816,10 +860,16 @@ textarea.sf-input {
   gap: 8px;
   justify-content: space-between;
   padding: 2px 2px 4px;
+  padding-bottom: 14px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--sf-chrome-border);
 }
 
 .sf-lane-name {
   margin: 0;
+  font-weight: 500;
+  letter-spacing: .08em;
+  font-size: 11px;
 }
 
 .sf-lane-needs-you .sf-lane-name {
@@ -832,7 +882,13 @@ textarea.sf-input {
 
 .sf-lane-hint {
   color: var(--sf-muted);
-  margin: 0 0 8px;
+  margin: 0 0 20px;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  font-size: 11px;
+  line-height: 1.6;
+  min-height: 36px;
 }
 
 .sf-lane .sf-card-list {
@@ -857,8 +913,9 @@ textarea.sf-input {
   border: 1px solid var(--sf-chrome-border);
   border-radius: var(--sf-radius);
   display: inline-flex;
-  gap: 0;
-  padding: 2px;
+  gap: 2px;
+  padding: 3px;
+  background: var(--sf-surface-sunk);
 }
 
 .sf-segment {
@@ -870,17 +927,18 @@ textarea.sf-input {
   display: inline-flex;
   font-family: var(--sf-mono);
   font-size: var(--sf-label-size);
-  height: 32px;
+  height: 34px;
   justify-content: center;
-  letter-spacing: var(--sf-label-tracking);
+  letter-spacing: .02em;
   line-height: var(--sf-label-line);
-  padding: 0 12px;
+  padding: 0 14px;
 }
 
 .sf-segment[aria-pressed="true"] {
-  background: var(--sf-primary-soft);
+  background: var(--sf-surface);
   color: var(--sf-on-primary-soft);
-  font-weight: 600;
+  font-weight: 500;
+  border: 1px solid var(--sf-border);
 }
 
 /* The sun and moon buttons stay square. */
@@ -892,7 +950,7 @@ textarea.sf-input {
 .sf-card-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 14px;
   list-style: none;
   margin: 0;
   padding: 0;
@@ -900,12 +958,12 @@ textarea.sf-input {
 
 .sf-card {
   background: var(--sf-surface);
-  border: 1px solid var(--sf-border);
+  border: 1px solid var(--sf-chrome-border);
   border-radius: var(--sf-radius);
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px;
+  gap: 12px;
+  padding: 18px 16px;
   position: relative;
 }
 
@@ -923,17 +981,20 @@ textarea.sf-input {
 }
 
 .sf-card-top {
-  align-items: center;
+  align-items: flex-start;
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .sf-card-id {
   color: var(--sf-muted);
   font-family: var(--sf-mono);
-  font-size: var(--sf-label-size);
-  letter-spacing: var(--sf-label-tracking);
+  font-size: 10px;
+  letter-spacing: .02em;
   line-height: var(--sf-label-line);
+  overflow-wrap: anywhere;
 }
 
 .sf-card-meta {
@@ -941,8 +1002,9 @@ textarea.sf-input {
   color: var(--sf-muted);
   display: flex;
   flex-wrap: wrap;
-  font-size: var(--sf-size-small);
-  gap: 2px 10px;
+  font-size: 11px;
+  gap: 8px 12px;
+  margin-top: auto;
 }
 
 .sf-card-muted .sf-card-id,
@@ -951,21 +1013,22 @@ textarea.sf-input {
 }
 
 .sf-card-status {
-  background: transparent;
-  border: 1px solid var(--sf-border);
+  background: var(--sf-primary-soft);
+  border: 1px solid transparent;
   border-radius: var(--sf-radius);
   color: var(--sf-muted);
   font-family: var(--sf-mono);
-  font-size: var(--sf-label-size);
-  letter-spacing: var(--sf-label-tracking);
-  line-height: var(--sf-label-line);
-  padding: 0 6px;
+  font-size: 9px;
+  letter-spacing: .02em;
+  line-height: 14px;
+  padding: 3px 6px;
   white-space: nowrap;
 }
 
 .sf-card-status-waiting {
   border: 1px solid var(--sf-accent);
   color: var(--sf-accent-text);
+  background: var(--sf-accent-soft);
 }
 
 .sf-card-muted .sf-card-status {
@@ -1012,6 +1075,8 @@ textarea.sf-input {
   font-weight: 500;
   overflow-wrap: anywhere;
   text-decoration: none;
+  font-size: 15px;
+  line-height: 1.5;
 }
 
 .sf-card-link:hover {
@@ -1080,6 +1145,17 @@ textarea.sf-input {
   align-self: flex-start;
   position: relative;
   z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  width: 100%;
+  min-height: 38px;
+  margin-top: 4px;
+  background: var(--sf-accent-soft);
+  border: 1px solid var(--sf-accent);
+  letter-spacing: .02em;
 }
 
 .sf-card-ready {
@@ -1100,8 +1176,8 @@ textarea.sf-input {
 .sf-task {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  max-width: 1100px;
+  gap: 24px;
+  max-width: none;
 }
 
 .sf-breadcrumb {
@@ -1229,8 +1305,8 @@ textarea.sf-input {
 
 .sf-task-body {
   display: grid;
-  gap: 16px;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 24px;
+  grid-template-columns: minmax(0, 2.5fr) minmax(260px, 1fr);
 }
 
 .sf-task-body > * {
@@ -1240,13 +1316,13 @@ textarea.sf-input {
 .sf-task-main {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
 }
 
 .sf-task-side {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
 }
 
 .sf-gate-hint {
@@ -1259,13 +1335,13 @@ textarea.sf-input {
   background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
-  padding: 12px;
+  padding: 24px;
 }
 
 .sf-details dl {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   margin: 0;
 }
 
@@ -1311,12 +1387,12 @@ textarea.sf-input {
 }
 
 .sf-side-summary h2 {
-  color: var(--sf-muted);
-  font-family: var(--sf-mono);
-  font-size: var(--sf-label-size);
+  color: var(--sf-text);
+  font-family: var(--sf-display);
+  font-size: 28px;
   font-weight: 400;
-  letter-spacing: var(--sf-label-tracking);
-  line-height: var(--sf-label-line);
+  letter-spacing: -.01em;
+  line-height: 1.2;
   margin: 0;
 }
 
@@ -1342,8 +1418,11 @@ textarea.sf-input {
 }
 
 .sf-new-factory-section h2 {
-  font-size: var(--sf-label-size);
-  margin: 0;
+  font-family: var(--sf-display);
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1.2;
+  margin: 0 0 8px;
 }
 
 .sf-new-factory-section .sf-hint {
@@ -1478,14 +1557,15 @@ textarea.sf-input {
 
 .sf-table-wrap {
   background: var(--sf-surface);
-  border: 1px solid var(--sf-border);
+  border: 1px solid var(--sf-chrome-border);
   border-radius: var(--sf-radius);
   overflow-x: auto;
+  width: 100%;
 }
 
 .sf-table {
   border-collapse: collapse;
-  font-size: 13px;
+  font-size: 12px;
   min-width: 0;
   width: 100%;
 }
@@ -1494,22 +1574,27 @@ textarea.sf-input {
 .sf-table td {
   text-align: left;
   vertical-align: middle;
+  padding: 16px;
+  line-height: 1.7;
+  border-bottom: 1px solid var(--sf-chrome-border);
 }
 
 .sf-table td {
-  padding: 8px 12px;
+  padding: 16px;
 }
 
 .sf-table th {
-  padding: 8px 12px;
+  padding: 14px 16px;
   border-bottom: 1px solid var(--sf-chrome-border);
   color: var(--sf-muted);
   font-family: var(--sf-mono);
-  font-size: var(--sf-label-size);
-  font-weight: 600;
-  letter-spacing: var(--sf-label-tracking);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: .1em;
   line-height: var(--sf-label-line);
   text-transform: none;
+  background: var(--sf-surface-sunk);
+  white-space: nowrap;
 }
 
 .sf-table tbody tr {
@@ -1522,7 +1607,7 @@ textarea.sf-input {
 }
 
 .sf-table tbody tr:hover {
-  background: var(--sf-surface-sunk);
+  background: var(--sf-primary-soft);
 }
 
 .sf-dialog-backdrop {
@@ -1539,8 +1624,9 @@ textarea.sf-input {
   background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
-  max-width: 420px;
-  padding: 16px;
+  max-width: 480px;
+  padding: 32px;
+  width: calc(100% - 32px);
 }
 
 .sf-dialog p {
@@ -1589,7 +1675,8 @@ textarea.sf-input {
 }
 
 .sf-history-pill {
-  background: transparent;
+  min-height: 40px;
+  background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   color: var(--sf-text);
@@ -1598,7 +1685,7 @@ textarea.sf-input {
   font-size: var(--sf-label-size);
   letter-spacing: var(--sf-label-tracking);
   line-height: var(--sf-label-line);
-  padding: 2px 8px;
+  padding: 10px 14px;
 }
 
 .sf-history-pill[aria-pressed="true"] {
@@ -1620,8 +1707,8 @@ textarea.sf-input {
 .sf-settings {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-width: 1200px;
+  gap: 24px;
+  max-width: none;
 }
 
 .sf-settings .sf-toolbar {
@@ -1639,16 +1726,17 @@ textarea.sf-input {
 .sf-settings-sections {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 24px;
   min-width: 0;
 }
 
 .sf-settings-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 20px;
   /* Clear the sticky top bar when a nav link jumps here. */
   scroll-margin-top: calc(var(--sf-bar-height) + 16px);
+  padding: 28px;
 }
 
 .sf-settings-section > h2 {
@@ -1664,6 +1752,9 @@ textarea.sf-input {
   position: sticky;
   /* Stick below the app's sticky top bar, not under it. */
   top: calc(var(--sf-bar-height) + 16px);
+  padding: 16px;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-chrome-border);
 }
 
 .sf-settings-nav ul {
@@ -1771,33 +1862,34 @@ textarea.sf-input {
   align-items: center;
   cursor: pointer;
   display: inline-flex;
-  gap: 10px;
+  gap: 12px;
+  line-height: 1.6;
 }
 
 .sf-switch input {
   appearance: none;
   background: var(--sf-surface-sunk);
   border: 1px solid var(--sf-border);
-  border-radius: 999px;
+  border-radius: 0;
   cursor: pointer;
   flex: none;
-  height: 16px;
+  height: 22px;
   margin: 0;
   position: relative;
-  width: 28px;
+  width: 36px;
 }
 
 .sf-switch input::before {
   background: var(--sf-surface);
   border: 1px solid var(--sf-border);
-  border-radius: 50%;
+  border-radius: 0;
   content: "";
-  height: 12px;
-  left: 1px;
+  height: 16px;
+  left: 2px;
   position: absolute;
-  top: 1px;
+  top: 2px;
   transition: transform 120ms ease;
-  width: 12px;
+  width: 16px;
 }
 
 .sf-switch input:checked {
@@ -1808,7 +1900,7 @@ textarea.sf-input {
 .sf-switch input:checked::before {
   background: var(--sf-on-primary);
   border-color: var(--sf-on-primary);
-  transform: translateX(12px);
+  transform: translateX(14px);
 }
 
 .sf-switch input:disabled {
@@ -1822,7 +1914,7 @@ textarea.sf-input {
   }
 }
 
-/* Colour changes on the shared controls last 150ms and stop on request. */
+/* Colour changes on the shared controls last 220ms and stop on request. */
 .sf-button,
 .sf-select,
 .sf-input,
@@ -1835,6 +1927,9 @@ textarea.sf-input {
 .sf-history-pill,
 .sf-tab {
   transition: background-color 220ms ease, border-color 220ms ease, color 220ms ease;
+  padding: 12px 16px;
+  letter-spacing: .02em;
+  min-height: 44px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1888,18 +1983,19 @@ textarea.sf-input {
   flex-direction: column;
   gap: 64px;
   margin: 0 auto;
-  max-width: 1280px;
-  padding: 32px 16px 48px;
+  max-width: none;
+  padding: 48px;
   width: 100%;
 }
 
 .sf-landing-hero {
-  border: 1px solid var(--sf-chrome-border);
+  border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   display: grid;
   gap: 24px 0;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  padding: 64px 32px;
+  padding: 64px 48px;
+  background: var(--sf-surface);
 }
 
 .sf-landing-hero > * {
@@ -1969,10 +2065,11 @@ textarea.sf-input {
 
 .sf-landing-heading {
   color: var(--sf-text);
-  font-size: 28px;
-  font-weight: 700;
-  line-height: 32px;
+  font-size: 44px;
+  font-weight: 400;
+  line-height: 1.1;
   margin: 0 0 16px;
+  font-family: var(--sf-display);
 }
 
 .sf-landing-steps,
@@ -1994,13 +2091,13 @@ textarea.sf-input {
 
 .sf-landing-cell {
   align-items: flex-start;
-  background: transparent;
+  background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 16px;
+  padding: 24px;
 }
 
 .sf-landing-cell-title {
@@ -2116,7 +2213,9 @@ textarea.sf-input {
 }
 
 .sf-lane-empty {
-  display: none;
+  display: block;
+  padding: 24px 4px;
+  font-size: 11px;
 }
 
 /* Tabs */
@@ -2124,7 +2223,10 @@ textarea.sf-input {
   border-bottom: 1px solid var(--sf-chrome-border);
   display: flex;
   gap: 4px;
-  margin-bottom: 12px;
+  margin-bottom: 0;
+  padding: 8px 12px 0;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-chrome-border);
 }
 
 .sf-tab {
@@ -2145,8 +2247,9 @@ textarea.sf-input {
 }
 
 .sf-tab[aria-selected="true"] {
-  border-bottom-color: var(--sf-text);
-  color: var(--sf-text);
+  border-bottom-color: var(--sf-accent);
+  color: var(--sf-accent-text);
+  background: var(--sf-accent-soft);
 }
 
 .sf-tab:focus-visible {
@@ -2259,20 +2362,20 @@ textarea.sf-input {
 .sf-radio-cards {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  margin-bottom: 12px;
+  gap: 12px;
+  margin-bottom: 0;
 }
 
 .sf-radio-card {
   align-items: flex-start;
-  background: transparent;
+  background: var(--sf-surface);
   border: 1px solid var(--sf-border);
   border-radius: var(--sf-radius);
   cursor: pointer;
   display: flex;
-  gap: 10px;
+  gap: 14px;
   min-width: 0;
-  padding: 14px;
+  padding: 18px;
 }
 
 .sf-radio-card:hover {
@@ -2306,7 +2409,11 @@ textarea.sf-input {
 }
 
 .sf-radio-label {
-  font-weight: 600;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .sf-radio-label .sf-chip {
@@ -2318,6 +2425,12 @@ textarea.sf-input {
   color: var(--sf-muted);
   min-width: 0;
   overflow-wrap: anywhere;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  line-height: 1.7;
+  font-size: 12px;
+  margin-top: 6px;
 }
 
 .sf-qa-log {
@@ -2519,46 +2632,450 @@ textarea.sf-input {
   overflow-wrap: anywhere;
 }
 
-/* Breakwater: open frame, strong rules, and editorial display typography. */
-.sf-harbour-field { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; background: linear-gradient(transparent 70%, rgba(70,147,195,.04)); }
-.sf-harbour-field::before { content: ""; position: absolute; inset: 45% -50% -80%; background-image: linear-gradient(rgba(150,164,174,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(150,164,174,.08) 1px, transparent 1px); background-size: 36px 36px; transform: perspective(380px) rotateX(60deg); mask-image: linear-gradient(transparent, black); }
-.sf-harbour-field canvas { width: 100%; height: 100%; display: block; }
-#root { isolation: isolate; min-height: 100vh; }
-.sf-main { padding: 32px 36px; }
-.sf-topbar { padding: 0 36px; gap: 12px 28px; }
-.sf-project { letter-spacing: .06em; }
-.sf-project::before { content: ""; display: inline-block; width: 18px; height: 18px; margin-right: 12px; vertical-align: middle; border: 1px solid var(--sf-accent); background: repeating-linear-gradient(0deg, transparent 0 4px, var(--sf-accent) 4px 5px); }
-.sf-account, .sf-avatar { border-radius: 0; }
-.sf-board-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding: 20px 0 36px; margin-bottom: 24px; border-bottom: 1px solid var(--sf-border); }
-.sf-intro-label { color: var(--sf-muted); margin: 0 0 20px; }
-.sf-board-intro h1 { font-family: var(--sf-display); font-size: clamp(64px, 8.5vw, 122px); font-weight: 400; line-height: .9; letter-spacing: -.018em; margin: 0; }
-.sf-intro-copy { color: var(--sf-muted); max-width: 380px; margin: 0 0 4px; font-size: 12px; }
-.sf-toolbar { padding-bottom: 20px; border-bottom: 1px solid var(--sf-chrome-border); margin-bottom: 24px; gap: 14px 20px; }
-.sf-view h2 { font-family: var(--sf-display); font-size: 36px; font-weight: 400; line-height: 1.1; }
-.sf-page-title, .sf-view h2.sf-page-title { font-family: var(--sf-display); font-size: 52px; line-height: 1.1; font-weight: 400; }
-.sf-view h3.sf-page-title { font-family: var(--sf-display); font-size: 32px; font-weight: 400; }
-.sf-lanes { gap: 20px; }
-.sf-lane { padding: 16px; min-height: 260px; background: var(--sf-surface-sunk); border-color: var(--sf-chrome-border); }
-.sf-lane-needs-you { border-top: 2px solid var(--sf-accent); background: var(--sf-accent-soft); }
-.sf-lane-head { padding-bottom: 12px; border-bottom: 1px solid var(--sf-chrome-border); margin-bottom: 12px; }
-.sf-lane-hint { font-size: 11px; margin-bottom: 20px; }
-.sf-card-list { gap: 14px; }
-.sf-card { padding: 16px; gap: 10px; }
-.sf-card-title { font-size: 15px; line-height: 1.5; }
-.sf-column { padding: 14px; background: var(--sf-surface-sunk); }
-.sf-panel, .sf-details { padding: 24px; }
-.sf-button { min-height: 40px; padding: 10px 16px; }
-.sf-input { background: var(--sf-surface); padding: 10px 12px; }
-.sf-select { background-color: var(--sf-surface); height: 40px; }
-.sf-settings { max-width: none; }
-.sf-settings-section { padding: 24px 0; border-bottom: 1px solid var(--sf-chrome-border); }
-.sf-table td, .sf-table th { padding: 16px; }
-.sf-task { max-width: none; gap: 24px; }
-.sf-task-main, .sf-task-side { gap: 24px; }
-@media (max-width: 900px) {
-  .sf-board-intro { align-items: flex-start; flex-direction: column; }
-  .sf-main { padding: 24px 20px; }
-  .sf-topbar { padding: 12px 20px; }
+/* Workspace frame */
+.sf-harbour-field {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+.sf-harbour-field::before {
+  content: "";
+  position: absolute;
+  inset: 45% -50% -80%;
+  background-image: linear-gradient(rgba(150,164,174,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(150,164,174,.08) 1px, transparent 1px);
+  background-size: 36px 36px;
+  transform: perspective(380px) rotateX(60deg);
+  mask-image: linear-gradient(transparent, black);
+}
+.sf-harbour-field canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+#root {
+  isolation: isolate;
+  min-height: 100vh;
+}
+.sf-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 208px;
+  background: #0c1114;
+  color: #eef2f3;
+  display: flex;
+  flex-direction: column;
+  padding: 32px 16px 20px;
+  border-right: 1px solid #263640;
+  z-index: 12;
+}
+.sf-sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px 36px;
+  font-size: 12px;
+  line-height: 1.5;
+  letter-spacing: .04em;
+}
+.sf-sidebar-brand svg {
+  color: #4693c3;
+  flex: none;
+}
+.sf-sidebar-brand strong {
+  font-family: var(--sf-display);
+  font-weight: 400;
+  font-size: 30px;
+  letter-spacing: -.02em;
+}
+.sf-sidebar-label {
+  color: #9db2c0;
+  font-size: 10px;
+  letter-spacing: .08em;
+  padding: 0 16px;
+  margin: 0 0 16px;
+}
+.sf-sidebar-note {
+  margin: auto 8px 24px;
+  padding-top: 24px;
+  border-top: 1px solid #2b3c46;
+}
+.sf-sidebar-note > span {
+  color: #a7bdcc;
+  font-size: 9px;
+}
+.sf-sidebar-note p {
+  color: #b1c1cb;
+  font-size: 11px;
+  line-height: 1.8;
+  margin: 12px 0 20px;
+}
+.sf-sidebar-note a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #eef2f3;
+  font-size: 11px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #4693c3;
+}
+.sf-sidebar-footer {
+  color: #a7bdcc;
+  font-size: 9px;
+  padding: 0 8px;
+}
+.sf-workspace-context {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--sf-muted);
+  font-size: 11px;
+}
+.sf-context-dot {
+  width: 6px;
+  height: 6px;
+  background: var(--sf-accent);
+}
+.sf-skip-link {
+  position: fixed;
+  top: -100px;
+  left: 16px;
+  padding: 12px 20px;
+  background: var(--sf-surface);
+  color: var(--sf-text);
+  z-index: 100;
+}
+.sf-skip-link:focus {
+  top: 12px;
+}
+.sf-page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+.sf-eyebrow {
+  color: var(--sf-muted);
+  font-size: 10px;
+  letter-spacing: .14em;
+  margin: 0 0 12px;
+}
+.sf-page-description {
+  color: var(--sf-muted);
+  margin: 12px 0 0;
+  font-size: 12px;
+  max-width: 64ch;
+}
+.sf-queue-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--sf-chrome-border);
+  background: var(--sf-surface);
+  margin-bottom: 28px;
+}
+.sf-queue-stat {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 20px 24px;
+  border-right: 1px solid var(--sf-chrome-border);
+}
+.sf-queue-stat:last-child {
+  border-right: 0;
+}
+.sf-queue-stat > span:first-child {
+  font-size: 11px;
+}
+.sf-queue-stat strong {
+  font-family: var(--sf-display);
+  font-weight: 400;
+  font-size: 44px;
+  line-height: 1;
+  grid-row: span 2;
+}
+.sf-queue-stat-caption {
+  color: var(--sf-muted);
+  font-size: 10px;
+  line-height: 1.6;
+}
+.sf-queue-stat-needs-you {
+  background: var(--sf-accent-soft);
+  border-top: 2px solid var(--sf-accent);
+}
+.sf-queue-stat-working strong {
+  color: var(--sf-progress-text);
+}
+.sf-board-controls {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-chrome-border);
+  margin-bottom: 28px;
+}
+.sf-board-filters {
+  padding: 20px;
+  margin: 0;
+  align-items: flex-end;
+  gap: 16px;
+}
+.sf-board-filter-fields > .sf-inline-field {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.sf-board-filter-fields > .sf-inline-field:has(input[type="checkbox"]) {
+  flex-direction: row;
+  align-items: center;
+  min-height: 44px;
+  order: 5;
+}
+.sf-board-filters .sf-board-search {
+  flex: 1 1 220px;
+  min-width: 160px;
+  max-width: none;
+}
+.sf-board-filters .sf-board-view {
+  margin-left: auto;
+}
+.sf-board-results {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--sf-chrome-border);
+  color: var(--sf-muted);
+  font-size: 10px;
+}
+.sf-lane-stopped {
+  grid-column: 1 / -1;
+  min-height: 0;
+}
+.sf-lane-stopped .sf-lane-head {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.sf-lane-stopped .sf-lane-hint {
+  min-height: 0;
+  margin: 8px 0 0;
+}
+.sf-lane-stopped .sf-card-list {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.sf-card-repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sf-card[data-status="build"] .sf-card-status, .sf-card[data-status="verify"] .sf-card-status, .sf-card[data-status="plan"] .sf-card-status, .sf-card[data-status="review"] .sf-card-status, .sf-card[data-status="spec"] .sf-card-status {
+  background: var(--sf-progress-soft);
+  color: var(--sf-progress-text);
+}
+.sf-card-ready {
+  justify-content: flex-start;
+  margin-top: 4px;
+}
+.sf-button:hover:not(:disabled), a.sf-button:hover {
+  border-color: var(--sf-accent);
+  text-decoration: none;
+}
+.sf-button:focus-visible, .sf-input:focus-visible, .sf-select:focus-visible {
+  outline: 2px solid var(--sf-focus);
+  outline-offset: 3px;
+}
+.sf-input:focus, .sf-select:focus {
+  border-color: var(--sf-accent);
+}
+.sf-input[aria-invalid="true"] {
+  border-color: var(--sf-removed);
+  background: var(--sf-removed-soft);
+}
+.sf-action-bar {
+  padding-top: 20px;
+  border-top: 1px solid var(--sf-chrome-border);
+}
+.sf-form > .sf-actions:last-child .sf-button-primary {
+  margin-right: 4px;
+}
+.sf-panel-needs-you > h3, .sf-panel-decision > h3 {
+  font-family: var(--sf-display);
+  font-size: 32px;
+  font-weight: 400;
+  line-height: 1.2;
+  margin-bottom: 20px;
+}
+.sf-tab-panel {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-chrome-border);
+  border-top: 0;
+  padding: 24px;
+}
+.sf-doc-controls {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--sf-chrome-border);
+  margin-bottom: 12px;
+}
+.sf-markdown {
+  font-size: 14px;
+  line-height: 1.9;
+  max-width: 78ch;
+}
+.sf-markdown h1, .sf-markdown h2, .sf-markdown h3 {
+  font-family: var(--sf-display);
+  font-weight: 400;
+  letter-spacing: -.01em;
+}
+.sf-markdown h1 {
+  font-size: 36px;
+}
+.sf-markdown h2 {
+  font-size: 28px;
+}
+.sf-markdown h3 {
+  font-size: 24px;
+}
+.sf-markdown ul, .sf-markdown ol {
+  padding-left: 24px;
+}
+.sf-markdown li {
+  margin-bottom: 8px;
+}
+.sf-table tbody tr:nth-child(even) {
+  background: var(--sf-surface-sunk);
+}
+.sf-table tbody tr:hover {
+  background: var(--sf-primary-soft);
+}
+.sf-table a {
+  color: var(--sf-accent-text);
+  text-underline-offset: 3px;
+}
+.sf-history-table .sf-history-change {
+  min-width: 240px;
+  max-width: 520px;
+}
+.sf-filters {
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-chrome-border);
+  padding: 20px;
+}
+.sf-filters > .sf-input {
+  flex: 1 1 200px;
+  max-width: 360px;
+}
+.sf-feedback {
+  padding: 14px 18px;
+  margin: 0;
+  border: 1px solid var(--sf-accent);
+  background: var(--sf-accent-soft);
+  color: var(--sf-accent-text);
+}
+.sf-filter-empty {
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 48px 24px;
+  border: 1px dashed var(--sf-border);
+  background: var(--sf-surface);
+  margin-bottom: 24px;
+}
+.sf-filter-empty h2 {
+  margin: 0;
+}
+.sf-filter-empty p {
+  margin: 0 0 8px;
+  color: var(--sf-muted);
+}
+.sf-settings-section > h2 {
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--sf-chrome-border);
+}
+.sf-settings-section .sf-switch-row {
+  background: var(--sf-surface-sunk);
+  padding: 16px;
+}
+.sf-settings-section .sf-switch-row .sf-hint {
+  padding-left: 48px;
+}
+.sf-side-summary {
+  background: var(--sf-surface-sunk);
+  padding: 28px;
+}
+.sf-side-summary ol {
+  padding-left: 20px;
+}
+.sf-side-summary li {
+  padding: 0 0 16px 8px;
+}
+.sf-new-task > .sf-page-title, .sf-new-factory > .sf-page-title {
+  margin: 16px 0 28px;
+}
+.sf-dialog h3 {
+  font-family: var(--sf-display);
+  font-size: 32px;
+  font-weight: 400;
+  margin: 0 0 16px;
+}
+.sf-dialog .sf-actions {
+  margin-top: 24px;
+}
+.sf-screen-panel > h1, .sf-screen-panel > h2 {
+  font-family: var(--sf-display);
+  font-size: 44px;
+  font-weight: 400;
+  line-height: 1.1;
+}
+.sf-landing > .sf-topbar {
+  background: #0c1114;
+  color: #eef2f3;
+  border-bottom: 1px solid #2b3c46;
+}
+.sf-landing .sf-landing-brand {
+  color: #eef2f3;
+}
+@media (max-width: 1199px) and (min-width: 640px) {
+  .sf-app {
+    padding-left: 72px;
+  }
+  .sf-sidebar {
+    width: 72px;
+    padding: 24px 10px;
+  }
+  .sf-sidebar-brand {
+    padding: 0 10px 32px;
+  }
+  .sf-sidebar-brand span, .sf-sidebar-label, .sf-sidebar-note, .sf-sidebar-footer, .sf-sidebar .sf-view-link span {
+    display: none;
+  }
+  .sf-sidebar .sf-view-link {
+    justify-content: center;
+    padding: 14px 0;
+  }
+}
+@media (max-width: 1099px) {
+  .sf-queue-stat {
+    padding: 16px;
+  }
+  .sf-queue-stat-caption {
+    display: none;
+  }
+  .sf-queue-stat strong {
+    grid-row: auto;
+  }
+}
+.sf-board-filter-fields {
+  display: contents;
+}
+.sf-filter-toggle {
+  display: none;
+}
+.sf-view input[type="checkbox"],
+.sf-view input[type="radio"] {
+  accent-color: var(--sf-accent);
 }
 
 /* Phones, below 640px. One block, last in the file, so equal specificity wins by source order. A selector
@@ -2566,6 +3083,157 @@ textarea.sf-input {
    (phoneLayout.css.test.ts checks); where a base rule is more specific its prefix is copied, never !important.
    Desktop values above are unchanged. */
 @media (max-width: 639px) {
+  .sf-board-filter-fields {
+    display: none;
+    order: 3;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--sf-chrome-border);
+  }
+  .sf-board-filter-fields[data-open="true"] {
+    display: grid;
+  }
+  .sf-board-filter-fields > .sf-inline-field:has(input[type="checkbox"]) {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+  .sf-filter-toggle {
+    display: inline-flex;
+    margin-left: auto;
+  }
+  .sf-board-filters .sf-board-view {
+    margin-left: 0;
+  }
+
+  .sf-app {
+    padding-left: 0;
+  }
+  .sf-sidebar {
+    display: contents;
+  }
+  .sf-sidebar-brand, .sf-sidebar-label, .sf-sidebar-note, .sf-sidebar-footer {
+    display: none;
+  }
+  .sf-workspace-context {
+    display: none;
+  }
+  .sf-project {
+    display: inline;
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+  .sf-main {
+    padding: 24px 16px;
+  }
+  .sf-page-heading {
+    align-items: flex-start;
+    margin-bottom: 24px;
+    gap: 16px;
+  }
+  .sf-view h1.sf-page-title, .sf-view h2.sf-page-title, .sf-view h3.sf-page-title {
+    font-size: 44px;
+  }
+  .sf-page-description {
+    font-size: 11px;
+  }
+  .sf-eyebrow {
+    font-size: 9px;
+    margin-bottom: 8px;
+  }
+  .sf-page-heading > .sf-button {
+    padding: 10px 12px;
+    flex: none;
+    font-size: 10px;
+  }
+  .sf-queue-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-bottom: 20px;
+  }
+  .sf-queue-stat {
+    border-bottom: 1px solid var(--sf-chrome-border);
+    padding: 16px;
+  }
+  .sf-queue-stat:nth-child(2) {
+    border-right: 0;
+  }
+  .sf-queue-stat strong {
+    font-size: 36px;
+  }
+  .sf-board-filters {
+    padding: 16px;
+    gap: 16px;
+  }
+  .sf-board-filter-fields > .sf-inline-field:not(:has(input[type="checkbox"])) {
+    flex: 1;
+    min-width: 100px;
+  }
+  .sf-board-filters .sf-select {
+    width: 100%;
+  }
+  .sf-board-filters .sf-board-search {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+  .sf-board-results {
+    padding: 12px 16px;
+  }
+  .sf-board-results > span:last-child {
+    display: none;
+  }
+  .sf-lane-stopped .sf-card-list {
+    grid-template-columns: 1fr;
+  }
+  .sf-lane {
+    min-height: 0;
+    padding: 12px;
+  }
+  .sf-views {
+    flex-direction: row;
+  }
+  .sf-view-link {
+    flex-direction: column;
+    gap: 4px;
+    color: var(--sf-muted);
+    font-size: 10px;
+  }
+  .sf-view-link[aria-current="page"] {
+    background: var(--sf-accent-soft);
+    color: var(--sf-accent-text);
+    border-color: var(--sf-accent);
+  }
+  .sf-panel, .sf-details, .sf-settings-section {
+    padding: 20px;
+  }
+  .sf-tab-panel {
+    padding: 16px;
+  }
+  .sf-panel-needs-you > h3 {
+    font-size: 28px;
+  }
+  .sf-radio-card {
+    padding: 16px;
+  }
+  .sf-card {
+    padding: 18px;
+  }
+  .sf-filters {
+    padding: 16px;
+  }
+  .sf-table td, .sf-table th {
+    padding: 12px;
+  }
+  .sf-landing-main {
+    padding: 24px 16px;
+  }
+  .sf-landing-title {
+    font-size: 64px;
+  }
+  .sf-landing-heading {
+    font-size: 36px;
+  }
+
   /* Lanes: one column (moved here from the old 639px block). */
   .sf-lanes {
     grid-template-columns: 1fr;
@@ -2626,6 +3294,7 @@ textarea.sf-input {
     padding-bottom: env(safe-area-inset-bottom);
     position: fixed;
     right: 0;
+    z-index: 20;
   }
 
   .sf-view-link {
@@ -2748,12 +3417,12 @@ textarea.sf-input {
 
   /* T-33 phone design gaps. The View switch takes its own row under the header, above the lane pills. */
   .sf-board-view {
-    flex-basis: 100%;
-    order: 1;
+    flex-basis: auto;
+    order: 0;
   }
 
   .sf-board-view-label {
-    display: inline;
+    display: none;
   }
 
   .sf-task-repo,

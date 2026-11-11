@@ -1,3 +1,4 @@
+import { ArrowUpRight, GitBranch } from "lucide-react";
 import { Fragment, useState, type MouseEvent } from "react";
 import { markReady, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
@@ -51,7 +52,7 @@ export function TaskCard({ onNavigate, showFactory = false, task, view = "lanes"
   }
 
   return (
-    <article className={`sf-card${tone}`}>
+    <article className={`sf-card${tone}`} data-status={task.status}>
       <div className="sf-card-top">
         <span className="sf-mono sf-card-id">{showFactory ? `${task.factoryId} · ${task.taskId}` : task.taskId}</span>
         {chip !== null ? <span className={`sf-card-status${needsYou ? " sf-card-status-waiting" : ""}`}>{chip}</span> : null}
@@ -61,7 +62,7 @@ export function TaskCard({ onNavigate, showFactory = false, task, view = "lanes"
         {task.title}
       </a>
       <div className="sf-card-meta">
-        <span>{task.repo}</span>
+        <span className="sf-card-repo"><GitBranch size={13} aria-hidden="true" />{task.repo}</span>
         {showSteps ? (
           <span className="sf-steps" role="img" aria-label={progressLabel(task.status, task.stage)}>
             {steps.map((state, i) => (
@@ -89,7 +90,7 @@ export function TaskCard({ onNavigate, showFactory = false, task, view = "lanes"
       ) : null}
       {cta ? (
         <a className="sf-button sf-button-small sf-card-cta" href={href} onClick={(event) => followInApp(event, href, onNavigate)}>
-          {cta}
+          {cta}<ArrowUpRight size={14} aria-hidden="true" />
         </a>
       ) : null}
       {task.status === "inbox" ? (

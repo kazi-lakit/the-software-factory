@@ -356,8 +356,8 @@ describe("AppShell waiting badge", () => {
     const parent = project.parentElement;
     const badge = await screen.findByText("1 waiting for you");
     expect(project.parentElement).toBe(parent);
-    expect(nav.parentElement).toBe(parent);
-    expect(nav.nextElementSibling).toBe(document.querySelector(".sf-topbar-end"));
+    expect(nav.parentElement).toBe(document.querySelector(".sf-sidebar"));
+    expect(badge.parentElement).toBe(document.querySelector(".sf-topbar-end"));
     expect(nav).not.toContainElement(badge);
   });
 
@@ -501,4 +501,15 @@ describe("AppShell account menu", () => {
     fireEvent.click(screen.getByRole("button", { name: "Account (Kazi)" }));
     expect(screen.queryByRole("menu")).toBeNull();
   });
+});
+
+// Tablet navigation hides its visible labels; every icon link still needs a name.
+it("keeps icon-only navigation named", () => {
+  renderShell();
+  for (const label of ["Board", "History", "Settings"]) {
+    const link = within(screen.getByRole("navigation", { name: "Views" })).getByRole("link", { name: label });
+    expect(link).toHaveAttribute("aria-label", label);
+    expect(link).toHaveAttribute("title", label);
+  }
+  expect(screen.getByRole("link", { name: "Software Factory home" })).toBeInTheDocument();
 });

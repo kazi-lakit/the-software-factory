@@ -227,11 +227,11 @@ export function SettingsView({ onNavigate }: { onNavigate?: (path: string) => vo
 
   return (
     <div className="sf-view sf-settings">
-      <div className="sf-toolbar">
-        <h2 className="sf-page-title">Settings</h2>
+      <header className="sf-page-heading">
+        <div><p className="sf-eyebrow">Workspace configuration</p><h2 className="sf-page-title">Settings</h2><p className="sf-page-description">Your factories, your guardrails. Make the workflow work for you.</p></div>
         {factories.defs.length > 1 ? <FactoryPicker defs={factories.defs} value={entry ? picked : "all"} onChange={setPicked} /> : null}
-      </div>
-      <p className="sf-visually-hidden" role="status">{notice}</p>
+      </header>
+      <p className={notice ? "sf-feedback" : "sf-visually-hidden"} role="status">{notice}</p>
       {settings.isPending ? <p className="sf-empty" role="status">Loading settings…</p> : null}
       {!settings.isPending && !settings.data ? (
         <div className="sf-problem" role="alert">
