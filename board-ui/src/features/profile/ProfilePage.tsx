@@ -1,14 +1,10 @@
-import { Clock, Mail, RefreshCw, ShieldCheck, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
 import { useAuth } from "../../app/providers/AuthProvider";
 import { blocksConfig } from "../../lib/blocks/config";
 import { useT } from "../../lib/i18n/LocalizationProvider";
-import { ActionButton } from "../../shared/ui/ActionButton";
 import { ChipList } from "../../shared/ui/Chip";
 import { JsonPanel } from "../../shared/ui/JsonPanel";
-import { PageHeader } from "../../shared/ui/PageHeader";
-import { Skeleton } from "../../shared/ui/Skeleton";
-import { StatusPill } from "../../shared/ui/StatusPill";
+import { ScreenPanel } from "../../shared/ui/ScreenPanel";
 import { useCurrentUser, userDisplayName, userInitials } from "./useCurrentUser";
 
 export function ProfilePage() {
@@ -21,71 +17,51 @@ export function ProfilePage() {
   const expiresAt = typeof claims?.exp === "number" ? new Date((claims.exp as number) * 1000) : undefined;
 
   return (
-    <section>
-      <PageHeader
-        title={t("profile.title")}
-        subtitle={t("profile.subtitle")}
-        actions={<ActionButton variant="icon" onClick={() => me.refetch()} title="Refresh profile" icon={<RefreshCw size={18} />} />}
-      />
-
-      {me.isLoading ? (
-        <div className="profile-card">
-          <Skeleton className="skeleton-avatar-lg" />
-          <div className="profile-heading">
-            <Skeleton className="skeleton-line-lg" />
-            <Skeleton className="skeleton-line" />
-          </div>
-        </div>
-      ) : (
-        <div className="profile-card">
-          <span className="avatar avatar-lg">{userInitials(profile)}</span>
-          <div className="profile-heading">
-            <h3>{name || (me.isError ? "Session unavailable" : "Unknown user")}</h3>
-            {profile?.email ? <span className="muted"><Mail size={14} /> {profile.email}</span> : null}
-            <StatusPill tone={me.isSuccess ? "good" : "warn"}>
-              {me.isSuccess ? "Authenticated" : "Session unavailable"}
-            </StatusPill>
-          </div>
-        </div>
-      )}
-
-      <div className="profile-panels">
-        <DetailCard icon={<UserRound size={16} />} label="User ID" loading={me.isLoading} value={profile?.itemId} />
-        <DetailCard icon={<ShieldCheck size={16} />} label="Tenant id (x-blocks-key)" value={blocksConfig.xBlocksKey} />
-        <DetailCard icon={<Clock size={16} />} label="Session expires" value={expiresAt?.toLocaleString()} />
-      </div>
-
-      <div className="panel">
-        <div className="panel-title"><ShieldCheck size={16} /><span>Roles</span></div>
-        {me.isLoading ? <Skeleton className="skeleton-line" /> : <ChipList empty="No roles assigned" items={profile?.roles} />}
-      </div>
-
-      <div className="panel">
-        <div className="panel-title"><ShieldCheck size={16} /><span>Permissions ({profile?.permissions?.length ?? 0})</span></div>
-        {me.isLoading ? <Skeleton className="skeleton-line" /> : <ChipList empty="No permissions returned" items={profile?.permissions} />}
-      </div>
-
-      <div className="panel">
-        <div className="panel-title"><Clock size={16} /><span>Session</span></div>
-        <div className="chips">
-          <span className="chip">Signed in {issuedAt ? issuedAt.toLocaleTimeString() : "unknown"}</span>
-          <span className="chip">Expires {expiresAt ? expiresAt.toLocaleTimeString() : "unknown"}</span>
+    <ScreenPanel title={t("profile.title")}>
+      <div className="sf-screen-who">
+        <span className="sf-avatar" aria-hidden="true">{userInitials(profile)}</span>
+        <div>
+          <p className="sf-screen-name">{name || (me.isError ? "Session unavailable" : "Unknown user")}</p>
+          {profile?.email ? <p className="sf-muted">{profile.email}</p> : null}
+          <span className="sf-chip">{me.isSuccess ? "Authenticated" : "Session unavailable"}</span>
         </div>
       </div>
 
-      <details className="raw-details">
-        <summary>View raw response</summary>
+      {me.isLoading ? <p className="sf-muted" role="status">Loading…</p> : null}
+
+      <dl className="sf-screen-facts">
+        <Fact label="User ID"><span className="sf-mono">{profile?.itemId || "Not available"}</span></Fact>
+        <Fact label="Tenant id (x-blocks-key)"><span className="sf-mono">{blocksConfig.xBlocksKey || "Not available"}</span></Fact>
+        <Fact label="Session expires">{expiresAt?.toLocaleString() || "Not available"}</Fact>
+        <Fact label="Roles"><ChipList empty="No roles assigned" items={profile?.roles} /></Fact>
+        <Fact label={`Permissions (${profile?.permissions?.length ?? 0})`}>
+          <ChipList empty="No permissions returned" items={profile?.permissions} />
+        </Fact>
+        <Fact label="Session">
+          <ul className="sf-chips">
+            <li className="sf-chip">Signed in {issuedAt ? issuedAt.toLocaleTimeString() : "unknown"}</li>
+            <li className="sf-chip">Expires {expiresAt ? expiresAt.toLocaleTimeString() : "unknown"}</li>
+          </ul>
+        </Fact>
+      </dl>
+
+      <details className="sf-screen-raw">
+        <summary className="sf-label">View raw response</summary>
         <JsonPanel value={profile ?? me.error ?? me.data} />
       </details>
-    </section>
+
+      <div className="sf-actions">
+        <button type="button" className="sf-button" onClick={() => void me.refetch()}>Refresh profile</button>
+      </div>
+    </ScreenPanel>
   );
 }
 
-function DetailCard({ icon, label, loading, value }: { icon: ReactNode; label: string; loading?: boolean; value?: string }) {
+function Fact({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="panel">
-      <div className="panel-title">{icon}<span>{label}</span></div>
-      {loading ? <Skeleton className="skeleton-line" /> : <strong className="mono">{value || "Not available"}</strong>}
+    <div>
+      <dt>{label}</dt>
+      <dd>{children}</dd>
     </div>
   );
 }

@@ -28,6 +28,7 @@ afterEach(() => {
   cleanup();
   clearAllUnsent();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 async function blockedTask(question = "Which base branch?\nThe repo has dev and stg.") {
@@ -42,21 +43,75 @@ async function renderPanel(question?: string, actor?: string) {
 
 describe("AnswerPanel layout", () => {
   it("shows_the_question_as_a_heading_with_who_asks", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-01T15:00:00.000Z"));
     await renderPanel(LETTERED(true));
     const heading = screen.getByRole("heading", { name: "Which branch?" });
     expect(heading.tagName).toBe("H3");
     expect(heading).toHaveClass("sf-question-title");
-    expect(screen.getByText("Spec writer")).toBeInTheDocument();
+    const asker = screen.getByTestId("asker");
+    expect(asker).toHaveTextContent("Spec writer asks · question 1 of this task · 5h ago");
+    expect(asker).toHaveClass("sf-muted");
+    const resume = screen.getByText("The task resumes as soon as you answer.");
+    expect(asker.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(resume.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByText("agent asked")).toBeInTheDocument();
   });
 
   it("an_unusual_actor_is_humanised_and_a_missing_one_shows_no_asker", async () => {
     await renderPanel("Continue?", "core · loop");
-    expect(screen.getByText("Factory")).toBeInTheDocument();
+    expect(screen.getByTestId("asker").textContent).toMatch(/^Factory asks · question 1 of this task/);
     cleanup();
     const task = await blockedTask("Continue?");
     renderWithClient(<AnswerPanel task={task} events={[]} onReload={vi.fn()} />);
     expect(screen.queryByTestId("asker")).toBeNull();
+    expect(screen.getByText("The task resumes as soon as you answer.")).toBeInTheDocument();
+  });
+
+  it("asker_line_says_just_now_without_ago", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-01T10:00:30.000Z"));
+    await renderPanel(LETTERED(true));
+    const text = screen.getByTestId("asker").textContent ?? "";
+    expect(text.endsWith("· just now")).toBe(true);
+    expect(text).not.toMatch(/ago/);
+  });
+
+  it("question_number_counts_earlier_questions", async () => {
+    const task = await blockedTask(LETTERED(true));
+    const current = questionEvent(task);
+    const earlier: FactoryEvent = { ...current, at: "2026-10-30T10:00:00.000Z", to: "Earlier?" };
+    const cleared: FactoryEvent = { ...current, at: "2026-10-31T10:00:00.000Z", to: null, reason: "answered" };
+    renderWithClient(<AnswerPanel task={task} events={[earlier, cleared, current]} onReload={vi.fn()} />);
+    expect(screen.getByTestId("asker")).toHaveTextContent("question 2 of this task");
+  });
+
+  it("other_card_hint_reads_write_your_own_answer", async () => {
+    await renderPanel(LETTERED(true));
+    expect(screen.getByText("Write your own answer.")).toHaveClass("sf-radio-why");
+  });
+
+  it("recommended_marker_uses_the_accent_chip", async () => {
+    await renderPanel(LETTERED(true));
+    expect(screen.getByText("Recommended")).toHaveClass("sf-chip", "sf-chip-waiting");
+  });
+
+  it("textarea_shows_only_while_other_is_chosen", async () => {
+    await renderPanel(LETTERED(true));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    const radios = screen.getAllByRole("radio");
+    fireEvent.click(radios[radios.length - 1]!);
+    expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    fireEvent.click(radios[0]!);
+    expect(screen.queryByRole("textbox")).toBeNull();
+  });
+
+  it("no_note_field", async () => {
+    await renderPanel(LETTERED(true));
+    const radios = screen.getAllByRole("radio");
+    fireEvent.click(radios[radios.length - 1]!);
+    expect(screen.getAllByRole("textbox")).toHaveLength(1);
+    expect(screen.queryByLabelText(/note/i)).toBeNull();
   });
 
   it("renders_each_option_as_a_radio_card_with_label_and_why", async () => {

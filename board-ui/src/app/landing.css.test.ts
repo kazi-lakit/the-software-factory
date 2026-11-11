@@ -110,18 +110,6 @@ describe("landing styles", () => {
     expect(slice).not.toMatch(/\.outline(?![\w-])/);
   });
 
-  it("status_screen_rules", () => {
-    const screen = tokens(css, ".sf-status-screen");
-    expect(screen["min-height"]).toBe("100vh");
-    expect(screen.display).toBe("flex");
-    expect(screen["align-items"]).toBe("center");
-    expect(screen["justify-content"]).toBe("center");
-    const card = tokens(css, ".sf-status-card");
-    expect(card.background).toBe("var(--sf-surface)");
-    expect(card.border).toBe("1px solid var(--sf-border)");
-    expect(card["border-radius"]).toBe("var(--sf-radius)");
-    expect(card).not.toHaveProperty("box-shadow");
-  });
 });
 
 describe("the old sign-in card is gone", () => {

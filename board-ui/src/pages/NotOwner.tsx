@@ -1,4 +1,5 @@
 import { useAuth } from "../app/providers/AuthProvider";
+import { ScreenPanel } from "../shared/ui/ScreenPanel";
 
 export const NOT_OWNER_MESSAGE = "This account doesn't have the factory-owner role.";
 
@@ -13,12 +14,9 @@ export function NotOwnerPage({ onNavigate }: { onNavigate: (path: string) => voi
   }
 
   return (
-    <div className="sf-status-screen">
-      <div className="sf-status-card">
-        <h2>Not a factory owner</h2>
-        <p>{NOT_OWNER_MESSAGE}</p>
-        <button className="sf-button sf-button-primary" onClick={handleSignOut}>Sign out</button>
-      </div>
-    </div>
+    <ScreenPanel title="Not a factory owner">
+      <p className="sf-screen-text">{NOT_OWNER_MESSAGE}</p>
+      <button type="button" className="sf-button sf-button-primary" onClick={handleSignOut}>Sign out</button>
+    </ScreenPanel>
   );
 }

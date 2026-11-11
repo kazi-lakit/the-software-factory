@@ -5,7 +5,10 @@ import { Stepper } from "./Stepper";
 
 const states = (container: HTMLElement) =>
   [...container.querySelectorAll(".sf-step")].map((el) => el.getAttribute("data-state"));
-const renderStepper = (status: Status, stage: Task["stage"] = null) => render(<Stepper status={status} stage={stage} />);
+const renderStepper = (status: Status, stage: Task["stage"] = null, waitingVersion?: number, baseBranch = "dev") =>
+  render(<Stepper status={status} stage={stage} baseBranch={baseBranch} waitingVersion={waitingVersion} />);
+const labels = (container: HTMLElement) =>
+  [...container.querySelectorAll(".sf-step")].map((el) => el.firstChild?.textContent);
 
 afterEach(cleanup);
 
@@ -15,7 +18,7 @@ describe("Stepper", () => {
     const items = screen.getAllByRole("listitem", { hidden: true });
     expect(items).toHaveLength(6);
     for (const li of items) expect(li.querySelectorAll(".sf-step")).toHaveLength(1);
-    expect(items.map((li) => li.querySelector(".sf-step")?.firstChild?.textContent)).toEqual(["Spec", "Plan", "Build", "Verify", "Review", "PR"]);
+    expect(items.map((li) => li.querySelector(".sf-step")?.firstChild?.textContent)).toEqual(["Spec", "Plan · waiting", "Build", "Verify", "Review", "PR into dev"]);
     for (const li of items) expect(li.querySelector(".sf-step")).toHaveClass("sf-stepper-label", "sf-label");
   });
 
@@ -72,5 +75,47 @@ describe("Stepper", () => {
   it("blocked_waits_at_its_stage_step", () => {
     const { container } = renderStepper("blocked", "build");
     expect(states(container)).toEqual(["done", "done", "waiting", "todo", "todo", "todo"]);
+  });
+
+  it("spec_review_spec_step_reads_its_version_waiting", () => {
+    const { container } = renderStepper("spec_review", "spec", 2);
+    expect(labels(container)[0]).toBe("Spec · v2 waiting");
+    expect(within(container.querySelector(".sf-stepper-item-waiting") as HTMLElement).getByText("(waiting for you)")).toHaveClass("sf-visually-hidden");
+  });
+
+  it("plan_review_plan_step_reads_its_version_waiting", () => {
+    const { container } = renderStepper("plan_review", "plan", 1);
+    expect(labels(container)[1]).toBe("Plan · v1 waiting");
+  });
+
+  it("waiting_doc_step_without_a_version_reads_waiting", () => {
+    const { container } = renderStepper("spec_review", "spec");
+    expect(labels(container)[0]).toBe("Spec · waiting");
+  });
+
+  it("blocked_step_reads_question", () => {
+    const first = renderStepper("blocked", "spec");
+    expect(labels(first.container)[0]).toBe("Spec · question");
+    first.unmount();
+    const { container } = renderStepper("blocked", "build");
+    expect(labels(container)).toEqual(["Spec", "Plan", "Build · question", "Verify", "Review", "PR into dev"]);
+  });
+
+  it("last_step_always_reads_pr_into_base", () => {
+    for (const [status, stage, base, expected] of [
+      ["build", "build", "main", "PR into main"],
+      ["pr_open", "ship", "dev", "PR into dev"],
+      ["done", null, "dev", "PR into dev"]
+    ] as const) {
+      const { container, unmount } = renderStepper(status, stage, undefined, base);
+      expect(labels(container).at(-1)).toBe(expected);
+      unmount();
+    }
+  });
+
+  it("other_steps_keep_plain_names_and_progress_label", () => {
+    const { container } = renderStepper("build", "build");
+    expect(labels(container)).toEqual(["Spec", "Plan", "Build", "Verify", "Review", "PR into dev"]);
+    expect(screen.getByRole("img", { name: "Progress: Build, step 3 of 6" })).toBeInTheDocument();
   });
 });

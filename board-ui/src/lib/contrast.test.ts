@@ -85,7 +85,8 @@ describe("task_page_text_pairs_meet_4_5_to_1", () => {
     [".sf-stepper-label", "muted", "bg"],
     [".sf-stepper-item-waiting .sf-stepper-label", "accent-text", "bg"],
     [".sf-details dt", "muted", "surface"],
-    [".sf-task-meta", "muted", "bg"]
+    [".sf-breadcrumb", "muted", "bg"],
+    [".sf-gate-hint", "muted", "surface"]
   ];
   const cases = Object.keys(themes).flatMap((t) => rules.map(([sel, fg, bg]) => [t, sel, fg, bg] as const));
   it.each(cases)("%s: %s (%s on %s)", (theme, selector, fg, bg) => {

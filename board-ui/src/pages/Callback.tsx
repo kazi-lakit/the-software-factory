@@ -3,6 +3,7 @@ import { useAuth } from "../app/providers/AuthProvider";
 import { completeLogin } from "../lib/blocks/auth";
 import { useT } from "../lib/i18n/LocalizationProvider";
 import { LoadingScreen } from "../shared/ui/LoadingScreen";
+import { ScreenPanel } from "../shared/ui/ScreenPanel";
 
 export function CallbackPage({ onNavigate }: { onNavigate: (path: string) => void }) {
   const { refresh } = useAuth();
@@ -35,13 +36,10 @@ export function CallbackPage({ onNavigate }: { onNavigate: (path: string) => voi
 
   if (error) {
     return (
-      <div className="sf-status-screen">
-        <div className="sf-status-card">
-          <h2>{t("auth.failed")}</h2>
-          <p className="sf-problem" role="alert">{error}</p>
-          <button className="sf-button sf-button-primary" onClick={() => onNavigate("/login")}>{t("auth.back")}</button>
-        </div>
-      </div>
+      <ScreenPanel title={t("auth.failed")}>
+        <p className="sf-problem" role="alert">{error}</p>
+        <button type="button" className="sf-button sf-button-primary" onClick={() => onNavigate("/login")}>{t("auth.back")}</button>
+      </ScreenPanel>
     );
   }
 

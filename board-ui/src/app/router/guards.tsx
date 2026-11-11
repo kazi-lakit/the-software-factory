@@ -5,6 +5,7 @@ import { useCurrentUser } from "../../features/profile/useCurrentUser";
 import { isFactoryOwner } from "../../lib/roles";
 import { NotOwnerPage } from "../../pages/NotOwner";
 import { LoadingScreen } from "../../shared/ui/LoadingScreen";
+import { ScreenPanel } from "../../shared/ui/ScreenPanel";
 
 type GuardProps = { children: ReactNode; onNavigate: (path: string) => void };
 
@@ -50,13 +51,10 @@ export function RequireOwner({ children, onNavigate }: GuardProps) {
   }
   if (me.isError) {
     return (
-      <div className="sf-status-screen">
-        <div className="sf-status-card">
-          <h2>Could not load your account</h2>
-          <p>Check your connection and try again.</p>
-          <button className="sf-button sf-button-primary" onClick={() => void me.refetch()}>Try again</button>
-        </div>
-      </div>
+      <ScreenPanel title="Could not load your account">
+        <p className="sf-screen-text">Check your connection and try again.</p>
+        <button type="button" className="sf-button sf-button-primary" onClick={() => void me.refetch()}>Try again</button>
+      </ScreenPanel>
     );
   }
   return <LoadingScreen />;
