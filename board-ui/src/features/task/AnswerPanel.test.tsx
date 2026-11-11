@@ -345,3 +345,27 @@ describe("AnswerPanel action bar", () => {
     expect(screen.getByRole("button", { name: "Send answer" })).toHaveClass("sf-button-accent");
   });
 });
+
+describe("AnswerPanel phone header", () => {
+  it("shows_a_question_for_you_and_the_from_line", async () => {
+    const task = await blockedTask(LETTERED(true));
+    renderWithClient(<AnswerPanel task={task} events={[questionEvent(task)]} onReload={vi.fn()} />);
+    const heading = screen.getByRole("heading", { level: 2, name: "A question for you" });
+    expect(heading).toHaveClass("sf-question-for-you");
+    const from = document.querySelector("p.sf-question-from") as HTMLElement;
+    expect(from).toHaveClass("sf-muted");
+    expect(from).toHaveTextContent(/^Spec writer · Stuck$/);
+    const title = document.querySelector("h3.sf-question-title") as HTMLElement;
+    expect(heading.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(from.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(document.querySelector(".sf-radio-cards")).not.toBeNull();
+    const bar = document.querySelector(".sf-action-bar") as HTMLElement;
+    expect(within(bar).getAllByRole("button").map((b) => b.textContent)).toEqual(["Send answer"]);
+  });
+
+  it("from_line_is_the_title_alone_without_a_question_event", async () => {
+    const task = await blockedTask();
+    renderWithClient(<AnswerPanel task={task} events={[]} onReload={vi.fn()} />);
+    expect(document.querySelector("p.sf-question-from")).toHaveTextContent(/^Stuck$/);
+  });
+});

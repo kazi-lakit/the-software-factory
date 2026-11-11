@@ -4,7 +4,7 @@ import { answerTask, type FactoryEvent, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { useUnsent } from "../../lib/unsent";
 import { optionText, parseQuestion, recommendedLetter } from "./parseQuestion";
-import { askerLine } from "./qaEntries";
+import { askerLine, questionFromLine } from "./qaEntries";
 import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "./writeOutcome";
 
 const OTHER = "other";
@@ -59,6 +59,9 @@ function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryE
 
   return (
     <section className="sf-panel sf-panel-needs-you" aria-labelledby={headingId}>
+      {/* Phone header; the base CSS hides it. */}
+      <h2 className="sf-question-for-you">A question for you</h2>
+      <p className="sf-muted sf-question-from">{questionFromLine(events, task.title)}</p>
       {task.question ? (
         <>
           {asker ? <p className="sf-muted sf-question-asker" data-testid="asker">{asker}</p> : null}

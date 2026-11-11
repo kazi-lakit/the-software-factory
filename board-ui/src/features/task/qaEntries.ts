@@ -142,3 +142,25 @@ export function askerLine(events: readonly FactoryEvent[], nowMs: number = Date.
   const parts = [asker ? `${asker} asks` : "", `question ${questions.length} of this task`, age === null ? "" : age === "just now" ? age : `${age} ago`];
   return parts.filter((part) => part !== "").join(" · ");
 }
+
+/** The answer view's from line: "Spec writer · <task title>" from the latest question event; the title alone without an asker. */
+export function questionFromLine(events: readonly FactoryEvent[], title: string): string {
+  const questions = events.filter(isQuestion);
+  const latest = questions[questions.length - 1];
+  const asker = latest ? askerName(latest.actor) : "";
+  return asker ? `${asker} · ${title}` : title;
+}
+
+/**
+ * "You answered A. jsdom tests (recommended) at 07:58" for an earlier question: the chosen option as "<letter>. <label>"
+ * (with " (recommended)" when it was the recommended one) or the free-text answer, then local HH:MM when answered today,
+ * else the locale date and time. Null when there is no answer.
+ */
+export function earlierAnsweredLine(entry: QaEntry, nowMs: number = Date.now()): string | null {
+  if (entry.answer === null || entry.answeredAt === null) return null;
+  const chosen = entry.options.find((option) => option.chosen);
+  const answer = chosen ? `${chosen.letter}. ${chosen.label}${chosen.recommended ? " (recommended)" : ""}` : entry.answer;
+  const date = new Date(entry.answeredAt);
+  const today = !Number.isNaN(date.getTime()) && date.toDateString() === new Date(nowMs).toDateString();
+  return `You answered ${answer} at ${today ? clockOf(entry.answeredAt) : formatTime(entry.answeredAt)}`;
+}
