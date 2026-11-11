@@ -1880,21 +1880,28 @@ textarea.sf-input {
 
 /* Matches h3.sf-page-title above: the .sf-view h3 rule is more specific than the bare class. */
 .sf-view h3.sf-question-title {
-  font-size: 20px;
-  line-height: 28px;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
   margin: 0;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-.sf-asker {
+.sf-question-asker {
+  font-size: var(--sf-size-small);
   margin: 0;
+}
+
+.sf-question-resume {
+  font-size: var(--sf-size-small);
+  margin: 0 0 4px;
 }
 
 .sf-radio-cards {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 14px;
   margin-bottom: 12px;
 }
 
@@ -1907,7 +1914,7 @@ textarea.sf-input {
   display: flex;
   gap: 10px;
   min-width: 0;
-  padding: 10px 12px;
+  padding: 14px;
 }
 
 .sf-radio-card:hover {
@@ -1920,12 +1927,12 @@ textarea.sf-input {
 }
 
 .sf-radio-card-selected {
-  background: var(--sf-accent-soft);
+  background: var(--sf-surface);
   border-color: var(--sf-accent);
 }
 
 .sf-radio-card-selected:hover {
-  background: var(--sf-accent-soft);
+  background: var(--sf-surface);
 }
 
 .sf-radio-card input {
@@ -1944,17 +1951,15 @@ textarea.sf-input {
   font-weight: 600;
 }
 
+.sf-radio-label .sf-chip {
+  font-weight: 400;
+  margin-left: 8px;
+}
+
 .sf-radio-why {
   color: var(--sf-muted);
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sf-badge-muted {
-  border-color: var(--sf-border);
-  color: var(--sf-muted);
+  overflow-wrap: anywhere;
 }
 
 .sf-qa-log {
@@ -1980,6 +1985,91 @@ textarea.sf-input {
 
 .sf-qa-question {
   font-weight: 600;
+}
+
+.sf-qa-head {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.sf-qa-head h3 {
+  margin: 0;
+}
+
+.sf-qa-counts {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+  margin: 0;
+}
+
+.sf-qa-entry-open {
+  border-color: var(--sf-accent);
+}
+
+.sf-qa-chips {
+  margin: 0 0 6px;
+}
+
+.sf-qa-label {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
+.sf-qa-options {
+  display: flex;
+  flex-direction: column;
+  font-size: var(--sf-size-small);
+  gap: 4px;
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.sf-qa-option {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.sf-qa-option-chosen {
+  font-weight: 600;
+}
+
+.sf-qa-option .sf-chip {
+  font-weight: 400;
+}
+
+.sf-qa-free {
+  margin-top: 4px;
+}
+
+.sf-qa-answer-label {
+  color: var(--sf-muted);
+  font-family: var(--sf-mono);
+  font-size: var(--sf-label-size);
+  letter-spacing: var(--sf-label-tracking);
+  line-height: var(--sf-label-line);
+}
+
+.sf-qa-answered {
+  font-size: var(--sf-size-small);
+}
+
+/* Beats the .sf-qa-entry p reset. */
+.sf-qa-entry p.sf-qa-answered,
+.sf-qa-entry p.sf-qa-question {
+  margin-top: 4px;
 }
 
 .sf-deps {
