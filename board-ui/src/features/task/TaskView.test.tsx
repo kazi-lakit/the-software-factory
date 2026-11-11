@@ -9,6 +9,7 @@ import { clearAllUnsent } from "../../lib/unsent";
 import { factory } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
 import { TopBarLeadContext, type Lead } from "../../app/topBarLead";
+import { atPhoneWidth, BOARD_CSS, renderedClasses, tooWide } from "../../test/phoneWidth";
 import { TaskView } from "./TaskView";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
@@ -764,5 +765,48 @@ describe("TaskView phone markup", () => {
     await screen.findByRole("heading", { level: 1, name: "Moving" });
     expect(container.querySelector(".sf-task-main")).not.toHaveClass("sf-task-answering");
     expect(container.querySelector("details.sf-qa-earlier")).toBeNull();
+  });
+});
+
+describe("TaskView at 360px", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = atPhoneWidth();
+  });
+  afterEach(() => restore());
+
+  it("task_page_fits_360_with_phone_markup", async () => {
+    const task = await seedTask({ title: "Phone gate" }, "spec_review", { stage: "spec" });
+    await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nOne.", "spec-agent");
+    const { container } = renderTask(task.taskId);
+    const approve = await screen.findByRole("button", { name: "Approve spec v1" });
+    expect(container.querySelector(".sf-task-repo")).toHaveTextContent("data → dev");
+    const names = [...container.querySelectorAll(".sf-stepper-name")].map((el) => el.firstChild?.textContent);
+    expect(names).toEqual(["Spec", "Plan", "Build", "Verify", "Review", "PR"]);
+    const more = container.querySelector("details.sf-task-more") as HTMLElement;
+    expect(more).not.toHaveAttribute("open");
+    expect(more.querySelector("summary.sf-label")).toHaveTextContent("Details and history");
+    const bar = approve.closest(".sf-action-bar") as HTMLElement;
+    expect(bar).not.toBeNull();
+    expect(within(bar).getByRole("button", { name: "Request changes" })).toBeInTheDocument();
+    expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
+  });
+
+  it("question_panel_fits_360_with_phone_markup", async () => {
+    const question = "Which base?\nA. dev: matches (recommended)\nB. stg: later";
+    const task = await seedTask({ title: "Phone question" }, "blocked", { question, stage: "spec" });
+    const ask = (to: string, at: string) => ({ action: "set" as const, actor: "spec-writer · sdk · run R-1", at, factoryId: "blocks", field: "question", from: null, reason: "asked", taskId: task.taskId, to });
+    await fakeBoard().core.addEvents([
+      ask("Go on?", "2026-11-01T10:00:00.000Z"),
+      { action: "set", actor: "you", at: "2026-11-01T11:00:00.000Z", factoryId: "blocks", field: "answer", from: null, reason: "answered", taskId: task.taskId, to: "yes" },
+      ask(question, "2026-11-02T10:00:00.000Z")
+    ]);
+    const { container } = renderTask(task.taskId);
+    expect(await screen.findByRole("heading", { level: 2, name: "A question for you" })).toBeInTheDocument();
+    expect(container.querySelector("p.sf-question-from")).toHaveTextContent(/^Spec writer · Phone question$/);
+    expect(container.querySelectorAll(".sf-radio-card").length).toBeGreaterThan(0);
+    expect(container.querySelector("details.sf-qa-earlier")).not.toHaveAttribute("open");
+    expect(screen.getByRole("button", { name: "Send answer" }).parentElement).toHaveClass("sf-action-bar");
+    expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
   });
 });
