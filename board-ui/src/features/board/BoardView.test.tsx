@@ -1113,7 +1113,9 @@ describe("BoardView dependencies", () => {
     const t = await owner.createTask({ dependsOn: [dep.taskId], description: "", factoryId: "blocks", repo: "data", title: "Waiter" });
     await core.updateTask(t.taskId, t.version, { status: "ready" });
     renderBoard();
-    expect(await screen.findByText(`Waiting on ${dep.taskId}`)).toBeInTheDocument();
+    const link = await screen.findByRole("link", { name: dep.taskId });
+    expect(link).toHaveAttribute("href", `/tasks/${dep.taskId}`);
+    expect(link.closest(".sf-card-waiting")).toHaveTextContent(`Waiting on ${dep.taskId}`);
   });
 
   it("creates_a_task_with_the_picked_dependency", async () => {
