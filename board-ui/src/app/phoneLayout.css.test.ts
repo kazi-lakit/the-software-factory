@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { outranked, phoneBlockInfo, phoneOutranked, phoneRules, specificity } from "../test/cssMedia";
+import { baseRules, outranked, phoneBlockInfo, phoneOutranked, phoneRules, specificity } from "../test/cssMedia";
 import { tokens } from "../test/cssTokens";
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "board.css"), "utf8");
@@ -189,7 +189,11 @@ describe("phone action bar, inputs and buttons", () => {
   });
 
   it("no phone rule is out-ranked by an earlier base rule", () => {
-    const ELEMENT_OF = { "sf-lane-name": "span", "sf-question-title": "h3", "sf-page-title": "h2", "sf-input": "input", "sf-select": "select", "sf-pill": "button", "sf-account-name": "span" };
+    const ELEMENT_OF = {
+      "sf-lane-name": "span", "sf-question-title": "h3", "sf-page-title": "h2", "sf-input": "input", "sf-select": "select", "sf-pill": "button", "sf-account-name": "span",
+      "sf-board-view-label": "span", "sf-stepper-more": "span", "sf-task-repo": "p", "sf-question-from": "p", "sf-question-for-you": "h2",
+      "sf-task-more": "details", "sf-qa-earlier": "details", "sf-chip-repo": "li"
+    };
     expect(outranked(css, ELEMENT_OF, [".sf-theme-switch"])).toEqual([]);
   });
 });
@@ -239,3 +243,46 @@ function matchesStructure(selector: string, chain: string[]): boolean {
   }
   return true;
 }
+
+describe("phone design gaps (T-33)", () => {
+  it("base_hides_and_phone_shows_phone_only_markup", () => {
+    const shown: Record<string, string> = {
+      ".sf-board-view-label": "inline", ".sf-task-repo": "block", ".sf-task-more": "block", ".sf-question-for-you": "block", ".sf-question-from": "block", ".sf-qa-earlier": "block"
+    };
+    for (const [s, display] of Object.entries(shown)) {
+      expect(tokens(css, s).display, s).toBe("none");
+      expect(phone(s).display, s).toBe(display);
+    }
+  });
+
+  it("phone_hides_desktop_duplicates", () => {
+    for (const s of [".sf-chip-repo", ".sf-stepper-more", ".sf-task-side .sf-details", ".sf-question-asker", ".sf-task-answering .sf-qa-panel"]) {
+      expect(phone(s).display, s).toBe("none");
+    }
+  });
+
+  it("view_switch_takes_its_own_row_last", () => {
+    expect(phone(".sf-board-view")).toMatchObject({ "flex-basis": "100%", order: "1" });
+    expect(tokens(css, ".sf-board-view")).toMatchObject({ display: "inline-flex" });
+  });
+
+  it("doc_comes_first_in_the_decision_panel", () => {
+    expect(phone(".sf-panel-decision")).toMatchObject({ display: "flex", "flex-direction": "column" });
+    expect(phone(".sf-panel-decision > .sf-doc").order).toBe("-1");
+    const base = tokens(css, ".sf-panel-decision");
+    expect(base).not.toHaveProperty("order");
+    expect(base).not.toHaveProperty("display");
+  });
+
+  it("request_changes_comes_first", () => {
+    expect(phone(".sf-action-bar .sf-gate-changes").order).toBe("-1");
+    const base = baseRules(css).filter((r) => r.selector.includes("sf-gate-changes") && "order" in r.decls);
+    expect(base).toEqual([]);
+  });
+
+  it("phone_only_markup_rules_set_no_fill_or_motion", () => {
+    const added = phoneRules(css).filter((r) => /sf-(board-view|task-repo|task-more|question-for-you|question-from|qa-earlier|gate-changes|panel-decision)/.test(r.selector));
+    expect(added.length).toBeGreaterThan(0);
+    for (const r of added) for (const p of ["background", "background-color", "transition", "animation", "box-shadow"]) expect(r.decls, r.selector).not.toHaveProperty(p);
+  });
+});
