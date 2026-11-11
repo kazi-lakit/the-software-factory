@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTheme } from "../../lib/theme";
-import { startField, type Field } from "./dotField";
+import { loseContext, startField, type Field } from "./dotField";
 
 function prefersReducedMotion(): boolean {
   try {
@@ -18,6 +18,9 @@ export function DotField() {
   const [on, setOn] = useState(() => !prefersReducedMotion());
   const ref = useRef<HTMLCanvasElement>(null);
   const field = useRef<Field | null>(null);
+  // StrictMode runs effect cleanup and setup back to back on the same canvas. A lost context stays lost on
+  // its canvas, so the context is only dropped on the next tick, and a setup that follows cancels that.
+  const pendingLoss = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const theme = useTheme();
   const themeRef = useRef(theme);
   themeRef.current = theme;
@@ -25,8 +28,10 @@ export function DotField() {
   useEffect(() => {
     const canvas = ref.current;
     if (!on || !canvas) return;
+    clearTimeout(pendingLoss.current);
+    pendingLoss.current = undefined;
     const gl = canvas.getContext("webgl2", { alpha: true, premultipliedAlpha: false }) as WebGL2RenderingContext | null;
-    if (!gl) {
+    if (!gl || gl.isContextLost()) {
       setOn(false);
       return;
     }
@@ -39,6 +44,10 @@ export function DotField() {
     return () => {
       field.current?.stop();
       field.current = null;
+      pendingLoss.current = setTimeout(() => {
+        pendingLoss.current = undefined;
+        loseContext(gl);
+      }, 0);
     };
   }, [on]);
 

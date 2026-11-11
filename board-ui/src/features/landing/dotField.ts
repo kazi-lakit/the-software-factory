@@ -110,7 +110,11 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string): WebG
   return shader;
 }
 
-/** Start drawing the field on `canvas`. Pauses while the tab is hidden; `stop()` frees everything. */
+/**
+ * Start drawing the field on `canvas`. Pauses while the tab is hidden. `stop()` frees the loop, listeners and
+ * GL objects but leaves the context alive, so a remount on the same canvas (React StrictMode) can reuse it;
+ * the caller drops the context once the canvas is really gone (see `loseContext`).
+ */
 export function startField(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext, { theme }: { theme: Theme }): Field {
   const vs = compile(gl, gl.VERTEX_SHADER, VERTEX_SHADER);
   const fs = compile(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER);
@@ -143,11 +147,15 @@ export function startField(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext
   gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
 
   gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  // Colour blends by source alpha; alpha accumulates as src + dst * (1 - src), so a dot over the cleared,
+  // transparent canvas keeps its own alpha (blendFunc would store srcA * srcA on a non-premultiplied canvas).
+  gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   gl.clearColor(0, 0, 0, 0);
 
   let count = 0;
+  let resizePending = false;
   function resize() {
+    resizePending = false;
     const dpr = window.devicePixelRatio || 1;
     const width = window.innerWidth;
     const height = window.innerHeight;
@@ -176,6 +184,7 @@ export function startField(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext
 
   function frame(now: number) {
     if (!running) return;
+    if (resizePending) resize();
     drift = stepDrift(drift, target, 0.05);
     gl.uniform2f(u.drift, drift.x, drift.y);
     gl.uniform1f(u.time, now - startedAt);
@@ -196,6 +205,10 @@ export function startField(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext
     frameId = undefined;
   }
 
+  // Resize events come in bursts while the window is dragged; rebuild the dots once, on the next frame.
+  const onResize = () => {
+    resizePending = true;
+  };
   const onVisibility = () => (document.hidden ? pause() : play());
   const onPointer = (event: PointerEvent) => {
     target = { x: (event.clientX / Math.max(1, window.innerWidth)) * 2 - 1, y: (event.clientY / Math.max(1, window.innerHeight)) * 2 - 1 };
@@ -203,7 +216,7 @@ export function startField(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext
 
   resize();
   setTheme(theme);
-  window.addEventListener("resize", resize);
+  window.addEventListener("resize", onResize);
   window.addEventListener("pointermove", onPointer);
   document.addEventListener("visibilitychange", onVisibility);
   if (!document.hidden) play();
@@ -212,7 +225,7 @@ export function startField(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext
     setTheme,
     stop() {
       pause();
-      window.removeEventListener("resize", resize);
+      window.removeEventListener("resize", onResize);
       window.removeEventListener("pointermove", onPointer);
       document.removeEventListener("visibilitychange", onVisibility);
       gl.deleteBuffer(buffer);
@@ -220,7 +233,11 @@ export function startField(canvas: HTMLCanvasElement, gl: WebGL2RenderingContext
       gl.deleteProgram(program);
       gl.deleteShader(vs);
       gl.deleteShader(fs);
-      gl.getExtension("WEBGL_lose_context")?.loseContext();
     }
   };
+}
+
+/** Release the GPU context of a canvas that is gone for good. */
+export function loseContext(gl: WebGL2RenderingContext): void {
+  gl.getExtension("WEBGL_lose_context")?.loseContext();
 }

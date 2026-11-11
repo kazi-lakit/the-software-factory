@@ -1,4 +1,5 @@
 import { act, cleanup, render, waitFor } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setTheme } from "../../lib/theme";
 import { DOT_ALPHA_MAX, DOT_RGB } from "./dotField";
@@ -6,13 +7,14 @@ import { DotField } from "./DotField";
 
 type Fake = Record<string, ReturnType<typeof vi.fn>>;
 
-function fakeGl(loseContext: ReturnType<typeof vi.fn>): Fake {
+function fakeGl(loseContext: ReturnType<typeof vi.fn>, isLost: () => boolean = () => false): Fake {
   const cache: Fake = {};
   return new Proxy(cache, {
     get(target, prop: string) {
       if (!target[prop]) {
         if (prop === "getShaderParameter" || prop === "getProgramParameter") target[prop] = vi.fn(() => true);
-        else if (prop.startsWith("create") || prop === "getUniformLocation") target[prop] = vi.fn(() => ({}));
+        else if (prop.startsWith("create") || prop === "getUniformLocation") target[prop] = vi.fn(() => (isLost() ? null : {}));
+        else if (prop === "isContextLost") target[prop] = vi.fn(() => isLost());
         else if (prop === "getExtension") target[prop] = vi.fn(() => ({ loseContext }));
         else if (prop === "getAttribLocation") target[prop] = vi.fn(() => 0);
         else target[prop] = vi.fn();
@@ -132,13 +134,57 @@ describe("DotField", () => {
     expect(gl.uniform1f).toHaveBeenCalledWith(expect.anything(), DOT_ALPHA_MAX.light);
   });
 
-  it("cleans_up_on_unmount", () => {
+  it("blends_alpha_separately_so_the_dot_alpha_is_not_squared", () => {
+    const { gl } = withGl();
+    render(<DotField />);
+    expect(gl.blendFuncSeparate).toHaveBeenCalledWith(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    expect(gl.blendFunc).not.toHaveBeenCalled();
+  });
+
+  it("survives_a_strict_mode_remount_on_the_same_canvas", async () => {
+    // A lost context stays lost on its canvas: getContext hands it back and createShader returns null.
+    let lost = false;
+    const loseContext = vi.fn(() => {
+      lost = true;
+    });
+    const gl = fakeGl(loseContext, () => lost);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(((kind: string) => (kind === "webgl2" ? gl : null)) as never);
+    const { container, unmount } = render(
+      <StrictMode>
+        <DotField />
+      </StrictMode>
+    );
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(container.querySelector("canvas.sf-landing-field")).not.toBeNull();
+    expect(loseContext).not.toHaveBeenCalled();
+    expect(lost).toBe(false);
+    unmount();
+    await waitFor(() => expect(loseContext).toHaveBeenCalled());
+  });
+
+  it("coalesces_resize_events_into_one_rebuild_per_frame", () => {
+    const { gl } = withGl();
+    render(<DotField />);
+    const bufferData = gl.bufferData as ReturnType<typeof vi.fn>;
+    const uploads = bufferData.mock.calls.length;
+    expect(uploads).toBeGreaterThan(0);
+    for (let i = 0; i < 5; i++) window.dispatchEvent(new Event("resize"));
+    expect(bufferData.mock.calls.length).toBe(uploads);
+    runFrames();
+    expect(bufferData.mock.calls.length).toBe(uploads + 1);
+    runFrames();
+    expect(bufferData.mock.calls.length).toBe(uploads + 1);
+  });
+
+  it("cleans_up_on_unmount", async () => {
     const { loseContext } = withGl();
     const removeWindow = vi.spyOn(window, "removeEventListener");
     const removeDocument = vi.spyOn(document, "removeEventListener");
     const { unmount } = render(<DotField />);
     unmount();
-    expect(loseContext).toHaveBeenCalled();
+    await waitFor(() => expect(loseContext).toHaveBeenCalled());
     expect(caf).toHaveBeenCalled();
     const windowEvents = removeWindow.mock.calls.map((c) => c[0]);
     expect(windowEvents).toContain("pointermove");
