@@ -1057,22 +1057,48 @@ describe("board_css_t16_forms_tables_tabs", () => {
 });
 
 describe("board_css_question_and_radio_cards", () => {
-  it("question_title_is_20px", () => {
-    const title = tokens(read("board.css"), ".sf-view h3.sf-question-title");
-    expect(title["font-size"]).toBe("20px");
-    expect(title.margin).toBe("0");
+  it("question_title_is_16_24_600", () => {
+    expect(tokens(read("board.css"), ".sf-view h3.sf-question-title")).toMatchObject({ "font-size": "16px", "line-height": "24px", "font-weight": "600", margin: "0" });
   });
 
-  it("radio_card_uses_only_tokens_and_focus_ring", () => {
+  it("radio_cards_pad_and_space_14px", () => {
     const css = read("board.css");
-    const selected = tokens(css, ".sf-radio-card-selected");
-    expect(selected["border-color"]).toBe("var(--sf-accent)");
-    expect(selected.background).toBe("var(--sf-accent-soft)");
-    expect(tokens(css, ".sf-radio-card:focus-within").outline).toBe("2px solid var(--sf-focus)");
+    expect(tokens(css, ".sf-radio-card").padding).toBe("14px");
+    expect(tokens(css, ".sf-radio-cards").gap).toBe("14px");
     expect(tokens(css, ".sf-radio-card").border).toBe("1px solid var(--sf-border)");
-    const why = tokens(css, ".sf-radio-why");
-    expect(why["white-space"]).toBe("nowrap");
-    expect(why["text-overflow"]).toBe("ellipsis");
+    expect(tokens(css, ".sf-radio-card:focus-within").outline).toBe("2px solid var(--sf-focus)");
+  });
+
+  it("radio_why_wraps", () => {
+    const why = tokens(read("board.css"), ".sf-radio-why");
+    expect(why).not.toHaveProperty("white-space");
+    expect(why).not.toHaveProperty("text-overflow");
+    expect(why).not.toHaveProperty("overflow");
+    expect(why["overflow-wrap"]).toBe("anywhere");
+  });
+
+  it("selected_card_is_surface_with_accent_border_also_on_hover", () => {
+    const css = read("board.css");
+    expect(tokens(css, ".sf-radio-card-selected")).toEqual({ background: "var(--sf-surface)", "border-color": "var(--sf-accent)" });
+    expect(tokens(css, ".sf-radio-card-selected:hover").background).toBe("var(--sf-surface)");
+    expect(cascaded(css, ["sf-radio-card", "sf-radio-card-selected"], "background")).toBe("var(--sf-surface)");
+    const clean = css.replace(/\/\*[\s\S]*?\*\//g, "");
+    for (const m of clean.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+      if ((m[1] ?? "").includes(".sf-radio-card")) expect(m[2]).not.toContain("--sf-accent-soft");
+    }
+  });
+
+  it("qa_panel_rules_use_tokens_only", () => {
+    const css = read("board.css");
+    expect(tokens(css, ".sf-qa-label")).toMatchObject({ ...labelLine, color: "var(--sf-muted)" });
+    for (const sel of [".sf-qa-counts", ".sf-qa-options", ".sf-qa-option", ".sf-qa-entry-open", ".sf-qa-answer-label", ".sf-question-asker", ".sf-question-resume"]) {
+      const t = tokens(css, sel);
+      expect(Object.keys(t).length, sel).toBeGreaterThan(0);
+      for (const [k, v] of Object.entries(t)) {
+        expect(k, sel).not.toBe("box-shadow");
+        expect(v, sel).not.toMatch(/#[0-9a-fA-F]{3,8}\b|rgba?\(|hsla?\(/);
+      }
+    }
   });
 });
 
