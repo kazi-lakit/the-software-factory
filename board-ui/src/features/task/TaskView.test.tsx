@@ -507,10 +507,27 @@ describe("TaskView questions and answers", () => {
     const log = await screen.findByRole("region", { name: "Questions and answers" });
     expect(within(log).getByText("Which branch?")).toBeInTheDocument();
     expect(within(log).getByText("A. main: fits")).toBeInTheDocument();
-    expect(within(log).getByText("Recommended")).toBeInTheDocument();
-    expect(within(log).queryByText("Open now?")).toBeNull();
+    expect(within(log).getAllByText("Recommended")).toHaveLength(1);
+    expect(within(log).getByText("Your answer")).toBeInTheDocument();
+    expect(within(log).getByText("Open now?")).toBeInTheDocument();
+    expect(within(log).getByText("Waiting for your answer")).toBeInTheDocument();
+    expect(log.querySelector("li.sf-qa-entry")).toHaveTextContent("Open now?");
+    expect(log).toHaveTextContent("2 asked · 1 answered");
     const panel = screen.getByRole("region", { name: "Open now?" });
     expect(panel.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("how_questions_work_aside_shows_with_the_qa_panel", async () => {
+    const task = await seedTask({ title: "Moving" }, "plan", { stage: "plan" });
+    await fakeBoard().core.addEvents([qa(task.taskId, "question", "Continue?", 1), qa(task.taskId, "answer", "yes", 2)]);
+    const { container } = renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Questions and answers" });
+    const side = container.querySelector(".sf-task-side") as HTMLElement;
+    const aside = within(side).getByRole("region", { name: "How questions work" });
+    expect(aside).toHaveClass("sf-panel");
+    expect(aside.querySelector("p")?.textContent).toBe(
+      "An agent that can't go on asks one question, offers 2 to 4 answers and marks the one it recommends, with a reason. Pick one or write your own. Every question and answer stays on the task and in History."
+    );
   });
 
   it("non_blocked_task_with_past_answers_shows_the_log_without_a_panel", async () => {
@@ -526,6 +543,7 @@ describe("TaskView questions and answers", () => {
     renderTask(task.taskId);
     await screen.findByRole("heading", { level: 1, name: "Quiet" });
     expect(screen.queryByRole("region", { name: "Questions and answers" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "How questions work" })).toBeNull();
   });
 
   it("gate_changes_requested_answer_is_not_in_the_log", async () => {

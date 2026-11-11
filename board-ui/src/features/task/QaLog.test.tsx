@@ -1,39 +1,103 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { QaLog } from "./QaLog";
-import type { QaEntry } from "./qaEntries";
+import type { QaEntry, QaOption } from "./qaEntries";
 
 afterEach(cleanup);
 
-const entry = (over: Partial<QaEntry>): QaEntry => ({ key: String(Math.random()), answer: "A. main", answeredAt: "2026-11-02T10:00:00.000Z", askedBy: "Spec writer", mark: "none", question: "Q?", ...over });
+const localIso = (day: number, h: number, m: number) => new Date(2026, 10, day, h, m).toISOString();
+const NOW = new Date(2026, 10, 11, 12, 0).getTime();
+
+const entry = (over: Partial<QaEntry>): QaEntry => ({
+  key: String(Math.random()),
+  number: 1,
+  question: "Q?",
+  askedBy: "Spec writer",
+  askedAt: localIso(11, 8, 14),
+  stage: "spec",
+  options: [],
+  answer: "A. main",
+  answeredAt: localIso(11, 7, 58),
+  resumedAt: null,
+  open: false,
+  mark: "none",
+  ...over
+});
+
+const option = (letter: string, label: string, over: Partial<QaOption> = {}): QaOption => ({ letter, label, why: "why", recommended: false, chosen: false, ...over });
+const OPTIONS = [option("A", "main", { recommended: true }), option("B", "develop", { chosen: true })];
+
+const entryItems = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>("li.sf-qa-entry")];
 
 describe("QaLog", () => {
-  it("lists_question_answer_time_and_mark_newest_first", () => {
-    render(<QaLog entries={[entry({ mark: "recommended", question: "Second?" }), entry({ answer: "use release", mark: "not-recommended", question: "First?" })]} />);
-    const items = screen.getAllByRole("listitem");
-    expect(items).toHaveLength(2);
-    expect(within(items[0]!).getByText("Second?")).toBeInTheDocument();
-    expect(within(items[0]!).getByText("A. main")).toBeInTheDocument();
-    expect(within(items[0]!).getByText("Recommended")).toBeInTheDocument();
-    expect(within(items[0]!).getByText("Spec writer")).toBeInTheDocument();
-    expect(items[0]!.querySelector("time")).toHaveAttribute("dateTime", "2026-11-02T10:00:00.000Z");
-    expect(within(items[1]!).getByText("Not recommended")).toBeInTheDocument();
+  it("panel_has_heading_and_counts", () => {
+    render(<QaLog nowMs={NOW} entries={[entry({ answer: null, answeredAt: null, open: true }), entry({})]} />);
+    const panel = screen.getByRole("region", { name: "Questions and answers" });
+    expect(panel).toHaveClass("sf-panel");
+    expect(panel).toHaveTextContent("2 asked · 1 answered");
   });
 
-  it("shows_no_mark_for_plain_or_unrecommended_questions", () => {
-    render(<QaLog entries={[entry({ mark: "none" })]} />);
-    expect(screen.queryByText("Recommended")).toBeNull();
-    expect(screen.queryByText("Not recommended")).toBeNull();
+  it("entries_render_in_the_given_newest_first_order", () => {
+    const { container } = render(<QaLog nowMs={NOW} entries={[entry({ question: "Second?" }), entry({ question: "First?" })]} />);
+    expect(entryItems(container).map((li) => li.querySelector(".sf-qa-question")?.textContent)).toEqual(["Second?", "First?"]);
   });
 
-  it("shows_no_answer_recorded_for_an_unanswered_question", () => {
-    render(<QaLog entries={[entry({ answer: null, answeredAt: null })]} />);
+  it("open_entry_has_waiting_and_options_chips", () => {
+    render(<QaLog nowMs={NOW} entries={[entry({ answer: null, answeredAt: null, open: true, options: [option("A", "main"), option("B", "develop")] })]} />);
+    expect(screen.getByText("Waiting for your answer")).toHaveClass("sf-chip", "sf-chip-waiting");
+    const offered = screen.getByText("2 options offered");
+    expect(offered).toHaveClass("sf-chip");
+    expect(offered).not.toHaveClass("sf-chip-waiting");
+    expect(screen.queryByText("No answer recorded")).toBeNull();
+    cleanup();
+    render(<QaLog nowMs={NOW} entries={[entry({ answer: null, answeredAt: null, open: true })]} />);
+    expect(screen.getByText("Waiting for your answer")).toBeInTheDocument();
+    expect(screen.queryByText(/options offered/)).toBeNull();
+  });
+
+  it("entry_shows_label_line_question_and_options_with_marks", () => {
+    const { container } = render(<QaLog nowMs={NOW} entries={[entry({ number: 2, question: "Which branch?", answer: "B", options: OPTIONS })]} />);
+    const label = screen.getByText("Question 2 · spec writer · spec stage · today 08:14");
+    expect(label).toHaveClass("sf-qa-label");
+    expect(screen.getByText("Which branch?")).toBeInTheDocument();
+    const options = [...container.querySelectorAll<HTMLElement>("li.sf-qa-option")];
+    expect(options).toHaveLength(2);
+    expect(within(options[0]!).getByText("A. main: why")).toBeInTheDocument();
+    expect(within(options[0]!).getByText("Recommended")).toBeInTheDocument();
+    expect(within(options[1]!).getByText("B. develop: why")).toBeInTheDocument();
+    expect(within(options[1]!).getByText("Your answer")).toBeInTheDocument();
+    expect(within(options[0]!).queryByText("Your answer")).toBeNull();
+  });
+
+  it("free_text_answer_shows_under_your_answer", () => {
+    render(<QaLog nowMs={NOW} entries={[entry({ answer: "use release", options: [option("A", "main"), option("B", "develop")] })]} />);
+    const label = screen.getByText("Your answer");
+    const answer = screen.getByText("use release");
+    expect(label.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("answered_line_with_and_without_resume", () => {
+    render(<QaLog nowMs={NOW} entries={[entry({})]} />);
+    expect(screen.getByText("Answered by you · today 07:58")).toBeInTheDocument();
+    expect(screen.queryByText(/resumed at/)).toBeNull();
+    cleanup();
+    render(<QaLog nowMs={NOW} entries={[entry({ resumedAt: localIso(11, 7, 59) })]} />);
+    expect(screen.getByText("Answered by you · today 07:58 · the spec writer resumed at 07:59")).toBeInTheDocument();
+  });
+
+  it("shows_no_answer_recorded_for_an_unanswered_closed_question", () => {
+    render(<QaLog nowMs={NOW} entries={[entry({ answer: null, answeredAt: null })]} />);
     expect(screen.getByText("No answer recorded")).toBeInTheDocument();
-    expect(document.querySelector("time")).toBeNull();
+    expect(screen.queryByText(/Answered by you/)).toBeNull();
   });
 
   it("renders_nothing_when_there_are_no_entries", () => {
     const { container } = render(<QaLog entries={[]} />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("no_not_recommended_badge", () => {
+    render(<QaLog nowMs={NOW} entries={[entry({ answer: "B", mark: "not-recommended", options: OPTIONS })]} />);
+    expect(screen.queryByText("Not recommended")).toBeNull();
   });
 });

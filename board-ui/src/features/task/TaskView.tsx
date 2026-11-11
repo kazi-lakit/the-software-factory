@@ -62,6 +62,9 @@ const short = (value: string | null): string => {
   return line.length > 120 ? `${line.slice(0, 119)}…` : line;
 };
 
+const HOW_QUESTIONS_WORK =
+  "An agent that can't go on asks one question, offers 2 to 4 answers and marks the one it recommends, with a reason. Pick one or write your own. Every question and answer stays on the task and in History.";
+
 function Section({ children, className = "sf-task-section", title }: { children: ReactNode; className?: string; title: string }) {
   const id = useId();
   return (
@@ -138,7 +141,7 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
             <GatePanel key={`${task.taskId}:${gate}`} task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} />
           ) : null}
           {task.status === "blocked" ? <AnswerPanel key={task.taskId} task={task} events={events} onReload={reload} /> : null}
-          {qaEntries.length > 0 ? <Section title="Questions and answers"><QaLog entries={qaEntries} /></Section> : null}
+          {qaEntries.length > 0 ? <QaLog entries={qaEntries} /> : null}
           {/* The decision panel shows the gate's doc, so its section is left out here. */}
           {DOC_SECTIONS.filter(([kind]) => !gate || GATE_DOC[gate] !== kind).map(([kind, title]) => (
             <Section key={kind} title={title}><DocVersions label={title} docs={docs[kind]} /></Section>
@@ -151,6 +154,11 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
             {task.description.trim() ? <pre className="sf-doc-body">{task.description}</pre> : <p className="sf-empty">No description.</p>}
           </Section>
           <Section title="Runs" className="sf-panel"><RunsList runs={runs} /></Section>
+          {qaEntries.length > 0 ? (
+            <Section title="How questions work" className="sf-panel">
+              <p className="sf-muted sf-qa-how">{HOW_QUESTIONS_WORK}</p>
+            </Section>
+          ) : null}
         </aside>
       </div>
     </div>
