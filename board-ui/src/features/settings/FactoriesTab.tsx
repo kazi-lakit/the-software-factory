@@ -17,11 +17,13 @@ type Editing =
 
 /** The gh login as `factory status` last found it (gh auth status); a factory the core has not checked is `unknown`. */
 function GhStatus({ health }: { health: FactoryHealth | undefined }) {
-  if (!health) return <span className="sf-gh sf-gh-unknown">unknown</span>;
+  if (!health) return <span className="sf-chip sf-gh sf-gh-unknown" title="Not checked yet">gh unknown</span>;
+  const state = health.ghLoggedIn ? "signed-in" : "signed-out";
   return (
-    <span className={`sf-gh ${health.ghLoggedIn ? "sf-gh-logged-in" : "sf-gh-logged-out"}`}>
-      {health.ghLoggedIn ? "logged in" : "not logged in"} <span className="sf-muted">(checked <time dateTime={health.checkedAt}>{formatTime(health.checkedAt)}</time>)</span>
-    </span>
+    <>
+      <span className={`sf-chip sf-gh sf-gh-${state}`} title={`Checked ${formatTime(health.checkedAt)}`}>{health.ghLoggedIn ? "gh signed in" : "gh signed out"}</span>
+      <span className="sf-muted">checked <time dateTime={health.checkedAt}>{formatTime(health.checkedAt)}</time></span>
+    </>
   );
 }
 
@@ -135,18 +137,20 @@ function FactorySection({ editing, entry, form, health, onEdit }: {
   const { def, repos } = entry;
   const here = editing && "factoryId" in editing && editing.factoryId === def.factoryId ? editing : undefined;
   return (
-    <section className="sf-panel sf-factory" aria-label={`Factory ${def.factoryId}`}>
+    <section className="sf-factory-row" aria-label={`Factory ${def.factoryId}`}>
       <div className="sf-actions">
         <h3>{def.name}</h3>
-        <span className="sf-mono sf-muted">{def.factoryId}</span>
-        <span className={def.active ? "sf-status-on" : "sf-muted"}>{def.active ? "Active" : "Inactive"}</span>
+        <span className="sf-mono">{`GitHub login ${def.ghUser}`}</span>
+        <GhStatus health={health} />
         <button type="button" className="sf-button" aria-label={`Edit factory ${def.factoryId}`} onClick={() => onEdit({ factoryId: def.factoryId, kind: "edit-factory" })}>Edit</button>
       </div>
       <dl className="sf-facts">
+        <dt>Id</dt>
+        <dd className="sf-mono">{def.factoryId}</dd>
+        <dt>State</dt>
+        <dd className={def.active ? "sf-status-on" : "sf-muted"}>{def.active ? "Active" : "Inactive"}</dd>
         <dt>Protected branches</dt>
         <dd className="sf-mono">{def.protectedBranches.join(", ")}</dd>
-        <dt>GitHub login</dt>
-        <dd><span className="sf-mono">{def.ghUser}</span> <GhStatus health={health} /></dd>
       </dl>
       {here?.kind === "edit-factory" ? form : null}
       <h4>Repos</h4>

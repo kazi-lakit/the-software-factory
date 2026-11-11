@@ -42,15 +42,32 @@ describe("Factories tab", () => {
     await fakeBoard().core.setFactoryHealth({ checkedAt: "2026-11-10T08:00:00.000Z", factoryId: "blocks", ghLoggedIn: true });
     await openFactoriesSection();
     const delta = await screen.findByRole("region", { name: "Factory delta" });
-    await waitFor(() => expect(within(delta).getByText("not logged in")).toBeInTheDocument());
-    expect(within(delta).getByText("GitHub login")).toBeInTheDocument();
-    expect(within(delta).getByText("gh-delta")).toBeInTheDocument();
+    await waitFor(() => expect(within(delta).getByText("gh signed out")).toHaveClass("sf-chip"));
+    expect(within(delta).getByText("GitHub login gh-delta")).toBeInTheDocument();
     expect(within(delta).getByText(/checked/)).toBeInTheDocument();
-    expect(within(screen.getByRole("region", { name: "Factory blocks" })).getByText("logged in")).toBeInTheDocument();
+    expect(within(screen.getByRole("region", { name: "Factory blocks" })).getByText("gh signed in")).toHaveClass("sf-chip");
     cleanup();
     resetFakeBoard(factory("alpha", ["api"]));
     await openFactoriesSection();
-    expect(within(await screen.findByRole("region", { name: "Factory alpha" })).getByText("unknown")).toBeInTheDocument();
+    expect(within(await screen.findByRole("region", { name: "Factory alpha" })).getByText("gh unknown")).toHaveClass("sf-chip");
+  });
+
+  it("lists_each_factory_with_name_login_chip_and_edit", async () => {
+    await openFactoriesSection();
+    const section = screen.getByRole("region", { name: "Factories" });
+    expect(within(section).getByRole("region", { name: "Factory blocks" })).toBeInTheDocument();
+    const delta = within(section).getByRole("region", { name: "Factory delta" });
+    expect(within(delta).getByRole("heading", { name: "Delta" })).toBeInTheDocument();
+    expect(within(delta).getByText("GitHub login gh-delta")).toBeInTheDocument();
+    expect(within(delta).getByRole("button", { name: "Edit factory delta" })).toBeInTheDocument();
+    expect(delta.querySelectorAll(".sf-chip")).toHaveLength(1);
+  });
+
+  it("add_factory_opens_the_add_form_inside_the_factories_section", async () => {
+    await openFactoriesSection();
+    const section = screen.getByRole("region", { name: "Factories" });
+    fireEvent.click(within(section).getByRole("button", { name: "Add factory" }));
+    expect(await within(section).findByRole("form", { name: "Add factory" })).toBeInTheDocument();
   });
 
   it("creates_a_factory_whose_protected_branches_always_include_main", async () => {
