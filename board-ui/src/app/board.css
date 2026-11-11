@@ -621,6 +621,11 @@ textarea.sf-input {
   margin: 0;
 }
 
+/* A link styled as a button (404, error page) sizes like a real button. */
+.sf-screen-panel > .sf-button {
+  align-self: flex-start;
+}
+
 .sf-screen-text {
   color: var(--sf-muted);
 }
