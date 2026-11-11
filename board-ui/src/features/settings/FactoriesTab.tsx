@@ -26,7 +26,7 @@ function GhStatus({ health }: { health: FactoryHealth | undefined }) {
 }
 
 /** Factories and their repos: list, add, edit, import, and the definitions the Board cannot use. */
-export function FactoriesTab() {
+export function FactoriesSection() {
   const client = useQueryClient();
   const factories = useFactories();
   const health = useFactoryHealth();
@@ -49,15 +49,8 @@ export function FactoriesTab() {
     await Promise.all([client.invalidateQueries({ queryKey: FACTORIES_KEY }), client.invalidateQueries({ queryKey: HISTORY_KEY })]);
   }
 
-  if (factories.loading) return <p className="sf-empty" role="status">Loading factories…</p>;
-  if (factories.error && entries.length === 0) {
-    return (
-      <div className="sf-problem" role="alert">
-        <span>Could not load the factories.</span>
-        <button type="button" className="sf-button" onClick={() => void factories.refetch()}>Retry</button>
-      </div>
-    );
-  }
+  // The page shows the loading and load-error messages once, above the sections.
+  if (factories.loading || (factories.error && entries.length === 0)) return null;
 
   const form = (() => {
     if (!editing) return null;
