@@ -310,7 +310,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
                 {shown.length > 0 ? (
                   <ul id={listId} className="sf-card-list">
                     {shown.map((task) => (
-                      <li key={task.taskId}><TaskCard task={task} showFactory={all} waitingOn={waitingOn(task)} onNavigate={onNavigate} /></li>
+                      <li key={task.taskId}><TaskCard task={task} showFactory={all} view="lanes" waitingOn={waitingOn(task)} onNavigate={onNavigate} /></li>
                     ))}
                   </ul>
                 ) : tasks.length === 0 && selectedLane === lane.id ? (
@@ -359,7 +359,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
                 {listed ? (
                   <ul id={listId} className="sf-card-list">
                     {tasks.map((task) => (
-                      <li key={task.taskId}><TaskCard task={task} showFactory={all} waitingOn={waitingOn(task)} onNavigate={onNavigate} /></li>
+                      <li key={task.taskId}><TaskCard task={task} showFactory={all} view="stages" waitingOn={waitingOn(task)} onNavigate={onNavigate} /></li>
                     ))}
                   </ul>
                 ) : null}
