@@ -305,7 +305,9 @@ describe("TaskView body", () => {
     await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nOne.", "spec-agent");
     const { container } = renderTask(task.taskId);
     const panel = await screen.findByRole("region", { name: "Your decision: approve the spec" });
-    expect(container.querySelector(".sf-task-main")!.firstElementChild).toBe(panel);
+    // The phone-only Details and history disclosure (hidden at 640px and up) comes first; the panel follows it.
+    expect(container.querySelector(".sf-task-main")!.firstElementChild).toHaveClass("sf-task-more");
+    expect(container.querySelector(".sf-task-main > .sf-task-more")!.nextElementSibling).toBe(panel);
     expect(panel).toHaveClass("sf-panel-decision");
   });
 
@@ -354,7 +356,9 @@ describe("TaskView body", () => {
     const { container } = renderTask(task.taskId);
     const panel = await screen.findByRole("region", { name: "Open now?" });
     const main = container.querySelector(".sf-task-main") as HTMLElement;
-    expect(main.firstElementChild).toBe(panel);
+    // The phone-only Details and history disclosure (hidden at 640px and up) comes first; the panel follows it.
+    expect(main.firstElementChild).toHaveClass("sf-task-more");
+    expect(main.firstElementChild!.nextElementSibling).toBe(panel);
     const log = screen.getByRole("region", { name: "Questions and answers" });
     const tablist = screen.getByRole("tablist", { name: "Task sections" });
     expect(follows(panel, log)).toBe(true);
@@ -730,6 +734,35 @@ describe("TaskView phone markup", () => {
     const last = moreRow(container, "Last event")!;
     expect(last).toHaveTextContent(describeEvent(newest).text);
     expect(last).toHaveTextContent(formatWhenShort(at));
+  });
+
+  it("details_and_history_lists_waits_for_with_its_badge", async () => {
+    const { core, owner } = fakeBoard();
+    const dep = await seedTask({ title: "Dep" }, "build", { stage: "build" });
+    const child = await owner.createTask({ dependsOn: [dep.taskId], description: "", factoryId: "blocks", repo: "data", title: "Child" });
+    await core.updateTask(child.taskId, child.version, { status: "ready" });
+    const { container, onNavigate } = renderTask(child.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    expect([...more(container).querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Branch", "Cost", "Waits for", "Last event"]);
+    const waits = moreRow(container, "Waits for")!;
+    const link = within(waits).getByRole("link", { name: dep.taskId });
+    await waitFor(() => expect(link.closest("li")).toHaveTextContent("Build"));
+    await waitFor(() => expect(within(waits).getByText(`Waiting on ${dep.taskId}`)).toHaveClass("sf-badge"));
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledWith(`/tasks/${dep.taskId}`);
+  });
+
+  it("details_and_history_is_first_in_the_main_column", async () => {
+    const gated = await seedTask({ title: "Gated" }, "spec_review", { stage: "spec" });
+    await fakeBoard().core.addDoc(gated.taskId, "spec", "# Spec\nOne.", "spec-agent");
+    const first = renderTask(gated.taskId);
+    await screen.findByRole("button", { name: "Approve spec v1" });
+    expect(first.container.querySelector(".sf-task-main")?.firstElementChild).toBe(more(first.container));
+    first.unmount();
+    const stuck = await seedTask({ title: "Stuck" }, "blocked", { question: "Open now?", stage: "plan" });
+    const { container } = renderTask(stuck.taskId);
+    await screen.findByRole("region", { name: "Open now?" });
+    expect(container.querySelector(".sf-task-main")?.firstElementChild).toBe(more(container));
   });
 
   it("details_and_history_without_pr_or_events", async () => {

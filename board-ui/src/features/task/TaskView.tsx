@@ -129,12 +129,12 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
 
       <div className="sf-task-body">
         <div className={blocked ? "sf-task-main sf-task-answering" : "sf-task-main"}>
+          <TaskMore events={events} task={task} onNavigate={onNavigate} />
           {gate ? (
             <GatePanel key={`${task.taskId}:${gate}`} task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} />
           ) : null}
           {blocked ? <AnswerPanel key={task.taskId} task={task} events={events} onReload={reload} /> : null}
           {blocked && earlier.length > 0 ? <EarlierQuestions entries={earlier} /> : null}
-          <TaskMore events={events} task={task} />
           {qaEntries.length > 0 ? <QaLog entries={qaEntries} /> : null}
           <TaskTabs
             key={task.taskId}
@@ -181,8 +181,34 @@ function PrLink({ url }: { url: string }) {
   );
 }
 
-/** Phones: Branch, Cost, PR and the last event in a closed disclosure (the base CSS hides it; the Details panel shows them at 640px and up). */
-function TaskMore({ events, task }: { events: readonly FactoryEvent[]; task: Task }) {
+/** The tasks this one waits for, each with its status, and a badge naming the unfinished ones while the task is ready. */
+function WaitsFor({ onNavigate, task }: { onNavigate: (path: string) => void; task: Task }) {
+  const board = useBoard().data ?? [];
+  const waiting = task.status === "ready" ? unfinishedDeps(task, board) : [];
+  return (
+    <>
+      <ul className="sf-deps">
+        {task.dependsOn.map((id) => {
+          const dep = board.find((t) => t.taskId === id);
+          const href = taskPath(id);
+          return (
+            <li key={id}>
+              <a className="sf-mono" href={href} onClick={(event) => followInApp(event, href, onNavigate)}>{id}</a>
+              {dep ? <span> {STATUS_LABEL[dep.status]}</span> : null}
+            </li>
+          );
+        })}
+      </ul>
+      {waiting.length > 0 ? <span className="sf-badge">Waiting on {waiting.join(", ")}</span> : null}
+    </>
+  );
+}
+
+/**
+ * Phones: Branch, Cost, PR, Waits for and the last event in a closed disclosure at the top of the main column
+ * (the base CSS hides it; the Details panel shows them at 640px and up).
+ */
+function TaskMore({ events, onNavigate, task }: { events: readonly FactoryEvent[]; onNavigate: (path: string) => void; task: Task }) {
   const limit = useCostLimit(task);
   const prUrl = githubUrl(task.prUrl);
   const newest = events[events.length - 1];
@@ -193,6 +219,7 @@ function TaskMore({ events, task }: { events: readonly FactoryEvent[]; task: Tas
         <div><dt>Branch</dt><dd className="sf-mono">{task.branch ?? "—"}</dd></div>
         <div><dt>Cost</dt><dd className="sf-mono">{costLabel(task.costUsd, limit)}</dd></div>
         {prUrl ? <div><dt>PR</dt><dd><PrLink url={prUrl} /></dd></div> : null}
+        {task.dependsOn.length > 0 ? <div><dt>Waits for</dt><dd><WaitsFor task={task} onNavigate={onNavigate} /></dd></div> : null}
         <div>
           <dt>Last event</dt>
           <dd>
@@ -210,8 +237,6 @@ function TaskMore({ events, task }: { events: readonly FactoryEvent[]; task: Tas
 }
 
 function Details({ onNavigate, task }: { onNavigate: (path: string) => void; task: Task }) {
-  const board = useBoard().data ?? [];
-  const waiting = task.status === "ready" ? unfinishedDeps(task, board) : [];
   const prUrl = githubUrl(task.prUrl);
   // The factory's name when it is visible, else its id.
   const factoryName = useFactories().byId.get(task.factoryId)?.def.name ?? task.factoryId;
@@ -235,19 +260,7 @@ function Details({ onNavigate, task }: { onNavigate: (path: string) => void; tas
           <div>
             <dt>Waits for</dt>
             <dd>
-              <ul className="sf-deps">
-                {task.dependsOn.map((id) => {
-                  const dep = board.find((t) => t.taskId === id);
-                  const href = taskPath(id);
-                  return (
-                    <li key={id}>
-                      <a className="sf-mono" href={href} onClick={(event) => followInApp(event, href, onNavigate)}>{id}</a>
-                      {dep ? <span> {STATUS_LABEL[dep.status]}</span> : null}
-                    </li>
-                  );
-                })}
-              </ul>
-              {waiting.length > 0 ? <span className="sf-badge">Waiting on {waiting.join(", ")}</span> : null}
+              <WaitsFor task={task} onNavigate={onNavigate} />
             </dd>
           </div>
         ) : null}
