@@ -593,13 +593,13 @@ describe("TaskView after New task", () => {
     const task = await seedTask({ title: "Fresh" });
     setReadyProblem(task.taskId, describeWriteError(new ForbiddenError("no")));
     renderTask(task.taskId);
-    await screen.findByRole("heading", { level: 2, name: "Fresh" });
+    await screen.findByRole("heading", { level: 1, name: "Fresh" });
     const alerts = screen.getAllByRole("alert").map((a) => a.textContent ?? "");
     expect(alerts.some((t) => t.includes("The task was created but not marked ready."))).toBe(true);
     expect(alerts.some((t) => t.includes("Blocks refused this change for your account."))).toBe(true);
     cleanup();
     renderTask(task.taskId);
-    await screen.findByRole("heading", { level: 2, name: "Fresh" });
+    await screen.findByRole("heading", { level: 1, name: "Fresh" });
     expect(screen.queryByText("The task was created but not marked ready.")).not.toBeInTheDocument();
   });
 });
