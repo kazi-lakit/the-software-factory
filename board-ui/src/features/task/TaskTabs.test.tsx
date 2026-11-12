@@ -75,3 +75,12 @@ describe("TaskTabs", () => {
     expect(panel.getAttribute("aria-labelledby")).toBe(tab("C").id);
   });
 });
+
+it("keeps a marked panel mounted and hides it while another tab is selected", () => {
+  render(<TaskTabs label="Sections" tabs={[{ id: "a", label: "A", content: <input aria-label="Draft" />, keepMounted: true }, { id: "b", label: "B", content: <p>Other</p> }]} />);
+  fireEvent.change(screen.getByLabelText("Draft"), { target: { value: "unfinished" } });
+  fireEvent.click(screen.getByRole("tab", { name: "B" }));
+  expect(screen.queryByRole("textbox", { name: "Draft" })).toBeNull();
+  fireEvent.click(screen.getByRole("tab", { name: "A" }));
+  expect(screen.getByLabelText("Draft")).toHaveValue("unfinished");
+});

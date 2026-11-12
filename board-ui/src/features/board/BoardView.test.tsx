@@ -70,6 +70,7 @@ describe("BoardView", () => {
     renderBoard();
     await screen.findByText("Real work");
     expect(screen.queryByText("Gate probe")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^Filters/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Show test tasks" }));
     expect(screen.getByText("Gate probe")).toBeInTheDocument();
   });
@@ -529,6 +530,7 @@ describe("BoardView lanes", () => {
     expect(within(lane("Queued")).getByText("Alpha web")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Repo"), { target: { value: "api" } });
     expect(screen.queryByText("Gate probe")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Filters/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Show test tasks" }));
     expect(within(lane("Queued")).getByText("Gate probe")).toBeInTheDocument();
   });
@@ -583,6 +585,7 @@ describe("BoardView lanes", () => {
     await screen.findByRole("region", { name: "Needs you" });
     const spy = vi.spyOn(fakeBoard().owner, "listTasks");
     fireEvent.change(screen.getByLabelText("Repo"), { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: /^Filters/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Show test tasks" }));
     fireEvent.click(screen.getByRole("button", { name: "All stages" }));
     fireEvent.click(screen.getByRole("button", { name: "Lanes" }));
@@ -703,6 +706,7 @@ describe("BoardView all stages restyle", () => {
     const plan = await screen.findByRole("region", { name: "Plan review" });
     expect(within(plan).getByText("0")).toHaveClass("sf-count");
     expect(screen.getAllByRole("region")).toHaveLength(13);
+    fireEvent.click(screen.getByRole("button", { name: /^Filters/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: "Show test tasks" }));
     expect(screen.getAllByRole("region")).toHaveLength(13);
   });

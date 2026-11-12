@@ -88,9 +88,9 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   }
 
   return (
-    <div className={view === "stages" ? "sf-view sf-view-stages" : "sf-view"}>
+    <div className={view === "stages" ? "sf-view sf-board-page sf-view-stages" : "sf-view sf-board-page"}>
       <header className="sf-page-heading">
-        <div><p className="sf-eyebrow">Workspace overview</p><h1 className="sf-page-title">Board</h1><p className="sf-page-description">Keep work moving. Make the decisions that matter.</p></div>
+        <div><h1 className="sf-page-title">Board</h1></div>
         <a href={NEW_TASK_PATH} className="sf-button sf-button-primary" onClick={(event) => followInApp(event, NEW_TASK_PATH, onNavigate)}><Plus size={16} aria-hidden="true" />New task</a>
       </header>
       <div className="sf-queue-summary" role="group" aria-label="Queue summary">
@@ -123,10 +123,10 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             })}
           </select>
         </label>
-        <label className="sf-inline-field">
+        {filtersOpen ? <label className="sf-inline-field">
           <input type="checkbox" checked={showTest} onChange={(event) => setShowTest(event.target.checked)} />
           <span>Show test tasks</span>
-        </label>
+        </label> : null}
         </div>
         <input
           type="search"
@@ -143,9 +143,9 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
             <button type="button" className="sf-segment" aria-pressed={view === "stages"} onClick={() => setView("stages")}>All stages</button>
           </div>
         </div>
-        <button type="button" className="sf-button sf-filter-toggle" aria-expanded={filtersOpen} aria-controls={`${filterId}-options`} onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={14} aria-hidden="true" />Filters</button>
+        <button type="button" className="sf-button sf-filter-toggle" aria-expanded={filtersOpen} aria-controls={`${filterId}-options`} onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={14} aria-hidden="true" />Filters{repo || showTest || factory !== "all" ? " (active)" : ""}</button>
         </div>
-        <div className="sf-board-results"><span>{board.isPending ? "Loading your workspace…" : `${visible.length} ${visible.length === 1 ? "task" : "tasks"} in view`}</span><span>Changes refresh every 30 seconds</span></div>
+        <div className="sf-board-results"><span>{board.isPending ? "Loading your workspace…" : `${visible.length} ${visible.length === 1 ? "task" : "tasks"} in view`}</span>{query || repo || showTest || factory !== "all" ? <button type="button" className="sf-button" onClick={() => { setQuery(""); setRepo(""); setShowTest(false); setPicked("all"); }}>Reset filters</button> : null}</div>
       </div>
       {board.data && visible.length === 0 && (query || repo) ? (
         <div className="sf-filter-empty">

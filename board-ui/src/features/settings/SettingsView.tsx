@@ -1,12 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import {
   DEFAULT_SETTINGS, resetRemovedRepoSettings, saveSettings, SETTING_RANGES, VersionConflictError,
   type FactoryRepo, type Gate, type RepoSettings, type RepoSettingsPatch, type Settings, type StoredSettings
 } from "@factory/core";
 import { boardStore } from "../../lib/board";
-import { FactoryPicker } from "../board/FactoryPicker";
 import { useFactories, useSelectedFactory, type FactoryEntry } from "../factories/useFactories";
 import { HISTORY_KEY } from "../history/useHistory";
 import { describeWriteError, now, WriteProblemNotice, type WriteProblem } from "../task/writeOutcome";
@@ -57,10 +56,16 @@ function useSaved(onNotice: (text: string) => void) {
  * and remounting shows the stored values. When the stored scope changes (a reload, a save elsewhere), the fields
  * the owner did not change take the new stored value.
  */
+const DraftContext = createContext<(id: string, dirty: boolean) => void>(() => {});
+
 function useScopeDraft<K extends string>(keys: readonly K[], stored: Record<K, string>) {
   const [origin, setOrigin] = useState(stored);
   const [values, setValues] = useState(stored);
   const changed = keys.filter((key) => values[key] !== origin[key]);
+  const draftId = useId();
+  const reportDraft = useContext(DraftContext);
+  useEffect(() => { reportDraft(draftId, changed.length > 0); }, [reportDraft, draftId, changed.length]);
+  useEffect(() => () => reportDraft(draftId, false), [reportDraft, draftId]);
 
   const storedKey = JSON.stringify(stored);
   useEffect(() => {
@@ -90,95 +95,14 @@ function useScopeDraft<K extends string>(keys: readonly K[], stored: Record<K, s
 }
 
 const SECTIONS = [
-  { id: "settings-factory", title: "Factory" },
-  { id: "settings-gates-and-limits", title: "Gates and limits" },
-  { id: "settings-repos", title: "Repos" },
-  { id: "settings-factories", title: "Factories" }
+  { id: "settings-factory", title: "General" },
+  { id: "settings-gates-and-limits", title: "Gates & limits" },
+  { id: "settings-repos", title: "Repositories" },
+  { id: "settings-factories", title: "Manage factories" }
 ] as const;
 const SECTION_IDS: readonly string[] = SECTIONS.map((s) => s.id);
 const [FACTORY_SECTION, GATES_SECTION, REPOS_SECTION, FACTORIES_SECTION] = SECTIONS;
 const PICK_A_FACTORY = "Pick a factory to see its settings.";
-
-/** Input that means the user scrolls on their own, which ends the hold a clicked link puts on the nav. */
-const USER_SCROLL_EVENTS = ["wheel", "touchstart", "keydown", "mousedown"] as const;
-
-/** How far below the top bar a section's top may sit and still be the one being read; a nav jump leaves 16px. */
-const READING_SLACK = 24;
-
-/** The bottom edge of the app's sticky top bar, which covers the top of the viewport; 0 when there is none. */
-function topBarBottom(): number {
-  const bar = document.querySelector(".sf-topbar");
-  return bar ? Math.max(0, Math.round(bar.getBoundingClientRect().bottom)) : 0;
-}
-
-/**
- * The nav's current section: the first one, a clicked one, or, while scrolling, the last visible section whose top
- * has reached the reading line just below the sticky top bar. When none has, the visible section nearest that line.
- * Positions are read live, at most once a frame while scrolling, never kept from an earlier update. A clicked link
- * stays current until the user scrolls, since the anchor jump cannot always bring its section to the top.
- */
-function useCurrentSection(ids: readonly string[]): [string, (id: string) => void] {
-  const [current, setCurrent] = useState<string>(ids[0] ?? "");
-  const held = useRef(false);
-  useEffect(() => {
-    if (typeof IntersectionObserver === "undefined") return;
-    const visible = new Set<Element>();
-    const bar = topBarBottom();
-    const update = () => {
-      if (held.current) return;
-      const line = bar + READING_SLACK;
-      let reached: string | undefined;
-      let nearest: string | undefined;
-      let nearestDistance = Number.POSITIVE_INFINITY;
-      for (const id of ids) {
-        const element = document.getElementById(id);
-        if (!element || !visible.has(element)) continue;
-        const top = element.getBoundingClientRect().top;
-        if (top <= line) reached = id;
-        const distance = Math.abs(top - line);
-        if (distance < nearestDistance) {
-          nearest = id;
-          nearestDistance = distance;
-        }
-      }
-      const best = reached ?? nearest;
-      if (best) setCurrent(best);
-    };
-    let frame: number | undefined;
-    const onScroll = () => {
-      if (frame !== undefined) return;
-      frame = requestAnimationFrame(() => {
-        frame = undefined;
-        update();
-      });
-    };
-    const release = () => { held.current = false; };
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) visible.add(entry.target);
-        else visible.delete(entry.target);
-      }
-      update();
-    }, { rootMargin: `-${bar}px 0px -60% 0px` });
-    for (const id of ids) {
-      const element = document.getElementById(id);
-      if (element) observer.observe(element);
-    }
-    window.addEventListener("scroll", onScroll, { passive: true });
-    for (const type of USER_SCROLL_EVENTS) window.addEventListener(type, release, { capture: true, passive: true });
-    return () => {
-      observer.disconnect();
-      if (frame !== undefined) cancelAnimationFrame(frame);
-      window.removeEventListener("scroll", onScroll);
-      for (const type of USER_SCROLL_EVENTS) window.removeEventListener(type, release, { capture: true });
-    };
-  }, [ids]);
-  const select = useCallback((id: string) => {
-    held.current = true;
-    setCurrent(id);
-  }, []);
-  return [current, select];
-}
 
 /** One settings section: a surface panel named by its h2, the target of a nav link. */
 function SettingsSection({ children, section: { id, title } }: { children: ReactNode; section: (typeof SECTIONS)[number] }) {
@@ -199,20 +123,31 @@ export function SettingsView({ onNavigate }: { onNavigate?: (path: string) => vo
   const factories = useFactories();
   const [picked, setPicked] = useSelectedFactory();
   const [notice, setNotice] = useState("");
-  const [currentSection, setCurrentSection] = useCurrentSection(SECTION_IDS);
+  const [currentSection, setCurrentSection] = useState(() => SECTION_IDS.includes(window.location.hash.slice(1)) ? window.location.hash.slice(1) : SECTION_IDS[0]!);
+  const [localFactory, setLocalFactory] = useState(picked);
+  const [dirtyDrafts, setDirtyDrafts] = useState<ReadonlySet<string>>(new Set());
+  const reportDraft = useCallback((id: string, dirty: boolean) => setDirtyDrafts((current) => {
+    if (current.has(id) === dirty) return current;
+    const next = new Set(current);
+    if (dirty) next.add(id); else next.delete(id);
+    return next;
+  }), []);
   const noteId = useId();
 
-  // Arriving with #<section> (the New factory breadcrumb): an in-app navigation does not jump to it, so scroll there.
   useEffect(() => {
-    const id = window.location.hash.slice(1);
-    if (!SECTION_IDS.includes(id)) return;
-    document.getElementById(id)?.scrollIntoView?.();
-    setCurrentSection(id);
-  }, [setCurrentSection]);
+    const followHash = () => { const id = window.location.hash.slice(1); if (SECTION_IDS.includes(id)) setCurrentSection(id); };
+    window.addEventListener("hashchange", followHash);
+    return () => window.removeEventListener("hashchange", followHash);
+  }, []);
 
-  // With one factory there is nothing to pick: its settings show whatever the stored pick says.
-  const only = factories.defs.length === 1 ? factories.defs[0] : undefined;
-  const entry = only ? factories.byId.get(only.factoryId) : factories.byId.get(picked);
+  const selectedEntry = factories.byId.get(localFactory);
+  const lastEntry = useRef<FactoryEntry>();
+  if (selectedEntry) lastEntry.current = selectedEntry;
+  const entry = selectedEntry ?? lastEntry.current ?? factories.byId.get(factories.defs[0]?.factoryId ?? "");
+  const unavailable = Boolean(lastEntry.current && !selectedEntry && !factories.loading);
+  useEffect(() => {
+    if (!lastEntry.current && entry) { lastEntry.current = entry; setLocalFactory(entry.def.factoryId); }
+  }, [entry]);
   const factoriesFailed = Boolean(factories.error) && factories.byId.size === 0;
   const reload = async () => { await settings.refetch(); };
 
@@ -229,9 +164,10 @@ export function SettingsView({ onNavigate }: { onNavigate?: (path: string) => vo
     <div className="sf-view sf-settings">
       <header className="sf-page-heading">
         <div><p className="sf-eyebrow">Workspace configuration</p><h2 className="sf-page-title">Settings</h2><p className="sf-page-description">Your factories, your guardrails. Make the workflow work for you.</p></div>
-        {factories.defs.length > 1 ? <FactoryPicker defs={factories.defs} value={entry ? picked : "all"} onChange={setPicked} /> : null}
+        {entry ? <label className="sf-inline-field"><span>Editing factory</span><select className="sf-select" value={entry.def.factoryId} onChange={(event) => { if (dirtyDrafts.size > 0 && !window.confirm("Changing factory will discard unsaved settings. Continue?")) return; setLocalFactory(event.target.value); setPicked(event.target.value); }}>{unavailable ? <option value={entry.def.factoryId}>{entry.def.name} (unavailable)</option> : null}{factories.defs.map((def) => <option key={def.factoryId} value={def.factoryId}>{def.name}</option>)}</select></label> : null}
       </header>
       <p className={notice ? "sf-feedback" : "sf-visually-hidden"} role="status">{notice}</p>
+      {unavailable ? <p className="sf-problem" role="alert">This factory is no longer available. Your unsaved settings are preserved; choose another factory to continue.</p> : null}
       {settings.isPending ? <p className="sf-empty" role="status">Loading settings…</p> : null}
       {!settings.isPending && !settings.data ? (
         <div className="sf-problem" role="alert">
@@ -254,40 +190,48 @@ export function SettingsView({ onNavigate }: { onNavigate?: (path: string) => vo
       ) : null}
       <div className="sf-settings-layout">
         <nav className="sf-settings-nav" aria-label="Settings sections">
-          <ul>
-            {SECTIONS.map(({ id, title }) => (
+          <ul role="tablist" aria-label="Settings sections">
+            {SECTIONS.map(({ id, title }, index) => (
               <li key={id}>
-                <a href={`#${id}`} aria-current={currentSection === id ? "location" : undefined} onClick={() => setCurrentSection(id)}>{title}</a>
+                <a href={`#${id}`} role="tab" id={`${id}-tab`} aria-selected={currentSection === id} aria-controls={`${id}-panel`} tabIndex={currentSection === id ? 0 : -1} onClick={(event) => { event.preventDefault(); setCurrentSection(id); window.history.replaceState(window.history.state, "", `#${id}`); }} onKeyDown={(event) => {
+                  const next = event.key === "ArrowRight" ? (index + 1) % SECTIONS.length : event.key === "ArrowLeft" ? (index + SECTIONS.length - 1) % SECTIONS.length : event.key === "Home" ? 0 : event.key === "End" ? SECTIONS.length - 1 : -1;
+                  if (next < 0) return;
+                  event.preventDefault();
+                  const target = SECTIONS[next]!;
+                  setCurrentSection(target.id);
+                  window.history.replaceState(window.history.state, "", `#${target.id}`);
+                  document.getElementById(`${target.id}-tab`)?.focus();
+                }}>{title}</a>
               </li>
             ))}
           </ul>
         </nav>
-        <div className="sf-settings-sections">
-          <SettingsSection section={FACTORY_SECTION}>
+        <DraftContext.Provider value={reportDraft}><div className="sf-settings-sections">
+          <div role="tabpanel" id="settings-factory-panel" aria-labelledby="settings-factory-tab" hidden={currentSection !== FACTORY_SECTION.id}><fieldset disabled={unavailable} className="sf-settings-scope"><SettingsSection section={FACTORY_SECTION}>
             {scoped((factoryId, current) => (
               <PauseControl key={`${factoryId}:pause`} factoryId={factoryId} paused={current.factory.paused} onNotice={setNotice} onReload={reload} />
             ))}
-          </SettingsSection>
-          <SettingsSection section={GATES_SECTION}>
+          </SettingsSection></fieldset></div>
+          <div role="tabpanel" id="settings-gates-and-limits-panel" aria-labelledby="settings-gates-and-limits-tab" hidden={currentSection !== GATES_SECTION.id}><fieldset disabled={unavailable} className="sf-settings-scope"><SettingsSection section={GATES_SECTION}>
             {scoped((factoryId, current, { def }) => (
               <>
                 <p className="sf-hint">These apply to every repo unless a repo overrides them below.</p>
                 <GlobalForm key={`${factoryId}:defaults`} factoryId={factoryId} global={current.factory} protectedBranches={def.protectedBranches} noteId={noteId} onNotice={setNotice} onReload={reload} />
               </>
             ))}
-          </SettingsSection>
-          <SettingsSection section={REPOS_SECTION}>
+          </SettingsSection></fieldset></div>
+          <div role="tabpanel" id="settings-repos-panel" aria-labelledby="settings-repos-tab" hidden={currentSection !== REPOS_SECTION.id}><fieldset disabled={unavailable} className="sf-settings-scope"><SettingsSection section={REPOS_SECTION}>
             {scoped((factoryId, current, { repos }) => (
               <>
                 <RepoTable key={`${factoryId}:repos`} factoryId={factoryId} repos={repos} stored={current} noteId={noteId} onNotice={setNotice} onReload={reload} />
                 <RemovedRepoSettings key={`${factoryId}:removed`} factoryId={factoryId} repos={repos} existing={factories.storedRepos} stored={current} onNotice={setNotice} onReload={reload} />
               </>
             ))}
-          </SettingsSection>
-          <SettingsSection section={FACTORIES_SECTION}>
+          </SettingsSection></fieldset></div>
+          <div role="tabpanel" id="settings-factories-panel" aria-labelledby="settings-factories-tab" hidden={currentSection !== FACTORIES_SECTION.id}><SettingsSection section={FACTORIES_SECTION}>
             <FactoriesSection onNavigate={onNavigate} />
-          </SettingsSection>
-        </div>
+          </SettingsSection></div>
+        </div></DraftContext.Provider>
       </div>
     </div>
   );
@@ -519,9 +463,9 @@ function RepoRow({ mounted, open, onToggle, repo, ...rest }: RepoRowProps & { mo
     <>
       <tr aria-label={repoId}>
         <th scope="row" className="sf-mono">{repoId}</th>
-        <td className="sf-mono">{repo.baseBranch}</td>
-        <td>{gatesSummary(rest.stored)}</td>
-        <td className="sf-mono">{checksSummary(repo.checks)}</td>
+        <td data-label="Base branch" className="sf-mono">{repo.baseBranch}</td>
+        <td data-label="Overrides"><span className="sf-chip">{rest.stored && Object.keys(rest.stored).length ? "Overridden" : "Inherited"}</span> {gatesSummary(rest.stored)}</td>
+        <td data-label="Checks" className="sf-mono">{checksSummary(repo.checks)}</td>
         <td>
           <button type="button" className="sf-button" aria-label={`Edit overrides for ${repoId}`} aria-expanded={open} onClick={onToggle}>Edit</button>
           {!open && unsaved ? <span className="sf-muted"> Unsaved changes</span> : null}

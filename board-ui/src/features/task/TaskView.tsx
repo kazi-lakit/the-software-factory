@@ -25,7 +25,7 @@ import { useSettings } from "../settings/useSettings";
 import { AnswerPanel } from "./AnswerPanel";
 import { DocVersions } from "./DocVersions";
 import { GatePanel } from "./GatePanel";
-import { EarlierQuestions, QaLog } from "./QaLog";
+import { QaLog } from "./QaLog";
 import { buildQaLog } from "./qaEntries";
 import { Stepper } from "./Stepper";
 import { TaskActions } from "./TaskActions";
@@ -75,7 +75,11 @@ export function BackToBoard({ label, onNavigate }: { label: string; onNavigate: 
  * then a tab strip: History, Spec, Plan, Checks, Review, Runs) and a side column (details, description, how questions work).
  */
 export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) => void; taskId: string }) {
+  const [selectedTab, setSelectedTab] = useState("description");
+  const [answerSent, setAnswerSent] = useState(false);
+  useEffect(() => { setSelectedTab("description"); setAnswerSent(false); }, [taskId]);
   const query = useTask(taskId);
+  useEffect(() => setAnswerSent(false), [query.data?.task.question]);
   const { refetch } = query;
   // Phones: Back sits at the left of the top bar in every state (the in-page link is hidden there).
   useTopBarLead({ label: "Back", onClick: () => onNavigate("/") });
@@ -130,30 +134,27 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
       <div className="sf-task-body">
         <div className={blocked ? "sf-task-main sf-task-answering" : "sf-task-main"}>
           <TaskMore events={events} task={task} onNavigate={onNavigate} />
-          {gate ? (
-            <GatePanel key={`${task.taskId}:${gate}`} task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} />
-          ) : null}
-          {blocked ? <AnswerPanel key={task.taskId} task={task} events={events} onReload={reload} /> : null}
-          {blocked && earlier.length > 0 ? <EarlierQuestions entries={earlier} /> : null}
-          {qaEntries.length > 0 ? <QaLog entries={qaEntries} /> : null}
+          {blocked ? <p className="sf-pending-action">{task.answer || answerSent ? "Answer received." : "Your answer is needed."} <button type="button" className="sf-button" onClick={() => setSelectedTab("qa")}>View question</button></p> : null}
+          {gate ? <p className="sf-pending-action">{gate === "pr" ? "PR review" : `${gate === "spec" ? "Spec" : "Plan"} approval`} needed. <button type="button" className="sf-button" onClick={() => setSelectedTab(gate === "pr" ? "review" : gate)}>Review {gate === "pr" ? "PR" : gate}</button></p> : null}
           <TaskTabs
             key={task.taskId}
             label="Task sections"
+            value={selectedTab}
+            onChange={setSelectedTab}
             tabs={[
-              { content: <TaskHistory events={events} />, id: "history", label: "History" },
-              { content: <DocVersions label="Spec" docs={docs.spec} />, id: "spec", label: `Spec (${docs.spec.length})` },
-              { content: <DocVersions label="Plan" docs={docs.plan} />, id: "plan", label: `Plan (${docs.plan.length})` },
-              { content: <DocVersions label="Checks" docs={docs.verify} />, id: "checks", label: "Checks" },
-              { content: <DocVersions label="Review" docs={docs.review} />, id: "review", label: "Review" },
-              { content: <RunsTable runs={runs} />, id: "runs", label: `Runs (${runs.length})` }
+              { id: "description", label: "Description", content: task.description.trim() ? <pre className="sf-doc-body">{task.description}</pre> : <p className="sf-empty">No description.</p> },
+              { id: "spec", label: `Spec (${docs.spec.length})`, keepMounted: true, content: <>{gate === "spec" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : null}<DocVersions label="Spec" docs={docs.spec} /></> },
+              { id: "plan", label: `Plan (${docs.plan.length})`, keepMounted: true, content: <>{gate === "plan" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : null}<DocVersions label="Plan" docs={docs.plan} /></> },
+              { id: "qa", label: "Q&A", keepMounted: true, content: <>{blocked ? <AnswerPanel key={task.taskId} task={task} events={events} onReload={reload} onAnswerSent={() => setAnswerSent(true)} /> : null}{earlier.length ? <QaLog entries={earlier} /> : !blocked ? <p className="sf-empty">No questions yet.</p> : null}</> },
+              { id: "checks", label: "Checks", content: <DocVersions label="Checks" docs={docs.verify} /> },
+              { id: "review", label: "Review", keepMounted: true, content: <>{gate === "pr" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : null}<DocVersions label="Review" docs={docs.review} /></> },
+              { id: "runs", label: `Runs (${runs.length})`, content: <RunsTable runs={runs} /> },
+              { id: "history", label: "History", content: <TaskHistory events={events} /> }
             ]}
           />
         </div>
         <aside className="sf-task-side" aria-label="Task side panels">
           <Details task={task} onNavigate={onNavigate} />
-          <Section title="Description" className="sf-panel">
-            {task.description.trim() ? <pre className="sf-doc-body">{task.description}</pre> : <p className="sf-empty">No description.</p>}
-          </Section>
           {qaEntries.length > 0 ? (
             <Section title="How questions work" className="sf-panel">
               <p className="sf-muted sf-qa-how">{HOW_QUESTIONS_WORK}</p>

@@ -12,6 +12,7 @@ const importJson = (over: Record<string, unknown> = {}) =>
 
 async function openImport() {
   renderWithClient(<SettingsView />);
+  fireEvent.click(screen.getByRole("tab", { name: "Manage factories" }));
   fireEvent.click(await screen.findByRole("button", { name: "Import factory" }));
   return screen.findByRole("region", { name: "Import factory" });
 }

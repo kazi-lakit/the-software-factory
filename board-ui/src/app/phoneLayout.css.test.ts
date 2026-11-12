@@ -256,7 +256,7 @@ describe("phone design gaps (T-33)", () => {
   });
 
   it("phone_hides_desktop_duplicates", () => {
-    for (const s of [".sf-chip-repo", ".sf-stepper-more", ".sf-task-side .sf-details", ".sf-question-asker", ".sf-task-answering .sf-qa-panel"]) {
+    for (const s of [".sf-chip-repo", ".sf-stepper-more", ".sf-task-side .sf-details", ".sf-question-asker"]) {
       expect(phone(s).display, s).toBe("none");
     }
   });

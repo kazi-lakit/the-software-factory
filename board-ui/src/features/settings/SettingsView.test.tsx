@@ -24,7 +24,8 @@ vi.mock("../../lib/blocks/auth", () => ({
 
 const PR_NOTE = "A PR into dev, stg or main always waits for you, whatever this says.";
 const PAUSE_HINT = "While paused, the factory starts no new work. Steps already running finish. This saves at once.";
-const SECTION_NAMES = ["Factory", "Gates and limits", "Repos", "Factories"];
+const SECTION_NAMES = ["General", "Gates & limits", "Repositories", "Manage factories"];
+const selectSection = (name: string) => fireEvent.click(screen.getByRole("tab", { name }));
 const now = () => new Date("2026-11-10T09:00:00.000Z");
 
 function renderSettings() {
@@ -38,6 +39,7 @@ const overrides = (repo: string) => screen.getByRole("form", { name: `${repo} ov
 const region = (name: string) => screen.getByRole("region", { name });
 
 beforeEach(() => {
+  window.history.replaceState({}, "", "/settings");
   resetFakeBoard();
   window.localStorage.setItem("factory-board:factory", "blocks");
 });
@@ -53,8 +55,9 @@ afterEach(() => {
 describe("SettingsView", () => {
   it("shows_the_global_settings_and_the_pr_gate_note", async () => {
     renderSettings();
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
-    expect(within(region("Gates and limits")).getByText("These apply to every repo unless a repo overrides them below.")).toBeInTheDocument();
+    expect(within(region("Gates & limits")).getByText("These apply to every repo unless a repo overrides them below.")).toBeInTheDocument();
     const form = globalForm();
     const group = within(form).getByRole("group", { name: "Where the factory stops for you" });
     expect(within(group).getByRole("switch", { name: "Spec: you approve every spec" })).toBeChecked();
@@ -69,12 +72,14 @@ describe("SettingsView", () => {
     expect(within(form).getByLabelText("Turns per stage")).toHaveAccessibleDescription("1 to 500");
     expect(within(form).getByLabelText("Cost per task (USD)")).toHaveValue("5");
     expect(within(form).getByLabelText("Cost per task (USD)")).toHaveAccessibleDescription("The runner stops a task above this");
+    selectSection("General");
     expect(screen.getByRole("switch", { name: "Pause the factory" })).not.toBeChecked();
   });
 
   it("builds_the_pr_gate_note_from_the_selected_factory's_list", async () => {
     resetFakeBoard(factory("blocks", ["data"], { protectedBranches: ["rel", "main"] }));
     renderSettings();
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
     const note = "A PR into rel or main always waits for you, whatever this says.";
     expect(within(globalForm()).getByRole("switch", { name: "PR: you merge every PR" })).toHaveAccessibleDescription(note);
@@ -88,12 +93,14 @@ describe("SettingsView", () => {
 
   it("drops_unsaved_changes_when_the_view_unmounts", async () => {
     const first = renderSettings();
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
     fireEvent.click(within(globalForm()).getByRole("switch", { name: "Plan: you approve every plan" }));
     expect(within(globalForm()).getByRole("switch", { name: "Plan: you approve every plan" })).toBeChecked();
     first.unmount();
     expect(sessionStorage.length).toBe(0);
     renderSettings();
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
     expect(within(globalForm()).getByRole("switch", { name: "Plan: you approve every plan" })).not.toBeChecked();
   });
@@ -101,6 +108,7 @@ describe("SettingsView", () => {
   it("lists_the_seven_repos_with_inherit_on_off_per_gate", async () => {
     await saveSettings(fakeBoard().owner, now, "blocks/iam", { gates: { pr: false }, maxTurnsPerStage: 30 });
     renderSettings();
+    selectSection("Repositories");
     await screen.findByRole("table", { name: "Repos" });
     for (const repo of ["os", "iam", "monitor", "logic", "data", "localization", "release"]) {
       expect(within(repoRow(repo)).getByRole("button", { name: `Edit overrides for ${repo}` })).toBeInTheDocument();
@@ -121,6 +129,7 @@ describe("SettingsView", () => {
   it("refuses_max_parallel_0_with_the_validation_message", async () => {
     const write = vi.spyOn(fakeBoard().owner, "updateSettingsScope");
     renderSettings();
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
     fireEvent.change(within(globalForm()).getByLabelText("Tasks at once"), { target: { value: "0" } });
     fireEvent.click(within(globalForm()).getByRole("button", { name: "Save gates and limits" }));
@@ -131,6 +140,7 @@ describe("SettingsView", () => {
 
   it("refuses_a_repo_limit_out_of_range_next_to_that_repo", async () => {
     renderSettings();
+    selectSection("Repositories");
     await screen.findByRole("table", { name: "Repos" });
     openOverrides("logic");
     fireEvent.change(within(overrides("logic")).getByLabelText("logic cost limit"), { target: { value: "5000" } });
@@ -141,6 +151,7 @@ describe("SettingsView", () => {
   it("saves_the_global_scope_with_only_the_changed_keys", async () => {
     const write = vi.spyOn(fakeBoard().owner, "updateSettingsScope");
     renderSettings();
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
     fireEvent.click(within(globalForm()).getByRole("switch", { name: "Plan: you approve every plan" }));
     fireEvent.change(within(globalForm()).getByLabelText("Tasks at once"), { target: { value: "4" } });
@@ -161,12 +172,15 @@ describe("SettingsView", () => {
   it("saves_a_repo_override_to_that_scope_only", async () => {
     const write = vi.spyOn(fakeBoard().owner, "updateSettingsScope");
     renderSettings();
+    selectSection("Repositories");
     await screen.findByRole("table", { name: "Repos" });
     openOverrides("iam");
     fireEvent.change(within(overrides("iam")).getByRole("combobox", { name: "iam spec gate" }), { target: { value: "off" } });
     fireEvent.change(within(overrides("iam")).getByLabelText("iam turn limit"), { target: { value: "25" } });
     // An unsaved edit elsewhere stays out of the iam save.
+    selectSection("Gates & limits");
     fireEvent.change(within(globalForm()).getByLabelText("Tasks at once"), { target: { value: "3" } });
+    selectSection("Repositories");
     fireEvent.click(within(overrides("iam")).getByRole("button", { name: "Save iam" }));
     await screen.findByText("Saved iam settings.");
     expect(write.mock.calls.map((call) => call[0])).toEqual(["blocks/iam"]);
@@ -178,6 +192,7 @@ describe("SettingsView", () => {
   it("sends_inherit_as_null_so_the_repo_takes_the_global_value_again", async () => {
     await saveSettings(fakeBoard().owner, now, "blocks/data", { gates: { pr: false, spec: true }, maxCostPerTaskUsd: 2 });
     renderSettings();
+    selectSection("Repositories");
     await screen.findByRole("table", { name: "Repos" });
     openOverrides("data");
     const form = overrides("data");
@@ -198,6 +213,7 @@ describe("SettingsView", () => {
   it("keeps_unsaved_edits_through_a_conflict_and_reload", async () => {
     const owner = fakeBoard().owner;
     renderSettings();
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
     fireEvent.change(within(globalForm()).getByLabelText("Tasks at once"), { target: { value: "4" } });
     // Someone else saves the turn limit, and this save loses the race.
@@ -219,6 +235,7 @@ describe("SettingsView", () => {
   it("refreshes_settings_and_history_after_a_save", async () => {
     const { client } = renderSettings();
     client.setQueryData(["history", { showTest: false }], { events: [], taskIds: [] });
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
     fireEvent.change(within(globalForm()).getByLabelText("Turns per stage"), { target: { value: "70" } });
     fireEvent.click(within(globalForm()).getByRole("button", { name: "Save gates and limits" }));
@@ -232,11 +249,9 @@ describe("SettingsView", () => {
     renderSettings();
     expect(await screen.findByText("Could not load the settings.")).toBeInTheDocument();
     expect(screen.queryByRole("form", { name: "Gates and limits" })).not.toBeInTheDocument();
-    expect(region("Factories")).toBeInTheDocument();
-    for (const name of ["Factory", "Gates and limits", "Repos"]) {
-      expect(within(region(name)).getByText("Settings are not available.")).toBeInTheDocument();
-    }
+    expect(within(region("General")).getByText("Settings are not available.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    selectSection("Gates & limits");
     expect(await screen.findByRole("form", { name: "Gates and limits" })).toBeInTheDocument();
     expect(getSettings).toHaveBeenCalledTimes(2);
   });
@@ -262,9 +277,10 @@ describe("repo summaries", () => {
 describe("repos table", () => {
   it("repos_table_has_repo_base_gates_checks_and_actions_columns", async () => {
     renderSettings();
+    selectSection("Repositories");
     const table = await screen.findByRole("table", { name: "Repos" });
     expect(table.closest(".sf-table-wrap")).not.toBeNull();
-    expect(region("Repos").contains(table)).toBe(true);
+    expect(region("Repositories").contains(table)).toBe(true);
     const headers = within(table).getAllByRole("columnheader");
     expect(headers.map((h) => h.textContent)).toEqual(["Repo", "Base", "Gates", "Checks", "Actions"]);
     expect(within(headers[4]!).getByText("Actions")).toHaveClass("sf-visually-hidden");
@@ -278,12 +294,14 @@ describe("repos table", () => {
   it("repos_table_shows_plan_gate_on_for_a_plan_override", async () => {
     await saveSettings(fakeBoard().owner, now, "blocks/iam", { gates: { plan: true } });
     renderSettings();
+    selectSection("Repositories");
     await screen.findByRole("table", { name: "Repos" });
     expect(within(repoRow("iam")).getByText("Plan gate on")).toBeInTheDocument();
   });
 
   it("opening_another_repo_closes_the_first_and_close_hides_it", async () => {
     renderSettings();
+    selectSection("Repositories");
     await screen.findByRole("table", { name: "Repos" });
     openOverrides("iam");
     expect(overrides("iam")).toBeInTheDocument();
@@ -296,6 +314,7 @@ describe("repos table", () => {
   it("keeps_a_repo's_unsaved_overrides_when_its_form_is_closed_and_opened_again", async () => {
     const write = vi.spyOn(fakeBoard().owner, "updateSettingsScope");
     renderSettings();
+    selectSection("Repositories");
     await screen.findByRole("table", { name: "Repos" });
     openOverrides("iam");
     fireEvent.change(within(overrides("iam")).getByLabelText("iam turn limit"), { target: { value: "25" } });
@@ -311,6 +330,7 @@ describe("repos table", () => {
 
   it("marks_a_closed_repo_row_that_has_unsaved_overrides", async () => {
     renderSettings();
+    selectSection("Repositories");
     await screen.findByRole("table", { name: "Repos" });
     const row = () => repoRow("iam");
     openOverrides("iam");
@@ -328,44 +348,44 @@ describe("repos table", () => {
 });
 
 describe("factory picker and scope", () => {
-  it("asks_to_pick_a_factory_while_all_is_selected", async () => {
+  it("defaults_to_a_valid_factory_and_shows_its_scope", async () => {
     resetFakeBoard(merge(blocksFactories(), factory("delta", ["api"])));
     window.localStorage.clear();
     renderSettings();
-    expect(await screen.findAllByText("Pick a factory to see its settings.")).toHaveLength(3);
-    for (const name of ["Factory", "Gates and limits", "Repos"]) {
-      expect(within(region(name)).getByText("Pick a factory to see its settings.")).toBeInTheDocument();
-    }
-    expect(within(region("Factories")).getByRole("link", { name: "Add factory" })).toBeInTheDocument();
-    expect(screen.queryByRole("form", { name: "Gates and limits" })).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Factory", { selector: "select" }), { target: { value: "blocks" } });
-    expect(await screen.findByRole("form", { name: "Gates and limits" })).toBeInTheDocument();
+    const picker = await screen.findByLabelText("Editing factory");
+    expect(["blocks", "delta"]).toContain((picker as HTMLSelectElement).value);
+    expect(within(picker).queryByRole("option", { name: "All factories" })).toBeNull();
+    selectSection("Gates & limits");
+    expect(await screen.findByRole("form", { name: "Gates and limits" })).toBeVisible();
   });
 
-  it("uses_the_only_factory_without_a_picker_and_does_not_store_the_pick", async () => {
+  it("shows_the_only_factory_without_storing_a_pick", async () => {
     window.localStorage.clear();
     const setItem = vi.spyOn(Storage.prototype, "setItem");
     renderSettings();
-    await screen.findByRole("form", { name: "Gates and limits" });
-    expect(screen.queryByLabelText("Factory", { selector: "select" })).toBeNull();
+    expect(await screen.findByLabelText("Editing factory")).toHaveValue("blocks");
     expect(setItem.mock.calls.filter((call) => call[0] === "factory-board:factory")).toEqual([]);
   });
 
   it("uses_the_only_factory_even_with_a_stale_pick", async () => {
     window.localStorage.setItem("factory-board:factory", "gone");
     renderSettings();
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
+    selectSection("Repositories");
     expect(repoRow("iam")).toBeInTheDocument();
   });
 
   it("switching_the_picker_switches_the_scoped_sections", async () => {
     resetFakeBoard(merge(blocksFactories(), factory("delta", ["api"])));
     renderSettings();
+    selectSection("Repositories");
     await screen.findByRole("table", { name: "Repos" });
     expect(repoRow("iam")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Factory", { selector: "select" }), { target: { value: "delta" } });
+    fireEvent.change(screen.getByLabelText("Editing factory", { selector: "select" }), { target: { value: "delta" } });
     expect(await screen.findByRole("row", { name: "api" })).toBeInTheDocument();
     expect(screen.queryByRole("row", { name: "iam" })).not.toBeInTheDocument();
+    selectSection("Gates & limits");
     expect(globalForm()).toBeInTheDocument();
   });
 
@@ -374,6 +394,7 @@ describe("factory picker and scope", () => {
     window.localStorage.setItem("factory-board:factory", "delta");
     const write = vi.spyOn(fakeBoard().owner, "updateSettingsScope");
     renderSettings();
+    selectSection("Repositories");
     await screen.findByRole("table", { name: "Repos" });
     expect(screen.queryByRole("row", { name: "iam" })).not.toBeInTheDocument();
     openOverrides("api");
@@ -391,10 +412,12 @@ describe("factory picker and scope", () => {
     window.localStorage.setItem("factory-board:factory", "delta");
     const write = vi.spyOn(fakeBoard().owner, "updateSettingsScope");
     renderSettings();
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
     fireEvent.change(within(globalForm()).getByLabelText("Tasks at once"), { target: { value: "5" } });
     fireEvent.click(within(globalForm()).getByRole("button", { name: "Save gates and limits" }));
     await screen.findByText("Saved gates and limits.");
+    selectSection("General");
     fireEvent.click(screen.getByRole("switch", { name: "Pause the factory" }));
     await waitFor(() => expect(screen.getByRole("switch", { name: "Pause the factory" })).toBeChecked());
     expect(write.mock.calls.map((call) => call[0])).toEqual(["delta", "delta"]);
@@ -406,8 +429,9 @@ describe("factory picker and scope", () => {
   it("lists_settings_of_removed_repos_and_resets_them_to_inherit", async () => {
     await fakeBoard().owner.updateSettingsScope("blocks/gone", undefined, { gates: { pr: false }, maxParallel: 3 });
     renderSettings();
+    selectSection("Repositories");
     const section = (await screen.findByRole("heading", { name: "Settings for removed repos" })).closest("section")!;
-    expect(within(region("Repos")).getByRole("heading", { name: "Settings for removed repos" })).toBeInTheDocument();
+    expect(within(region("Repositories")).getByRole("heading", { name: "Settings for removed repos" })).toBeInTheDocument();
     expect(within(section).getByText("gone")).toBeInTheDocument();
     expect(within(section).getByText(/max parallel 3/)).toBeInTheDocument();
     expect(screen.queryByRole("row", { name: "gone" })).not.toBeInTheDocument();
@@ -426,8 +450,9 @@ describe("factory picker and scope", () => {
     await fakeBoard().owner.updateSettingsScope("blocks/bad", undefined, { maxParallel: 3 });
     await fakeBoard().owner.updateSettingsScope("blocks/gone", undefined, { maxParallel: 2 });
     renderSettings();
+    selectSection("Repositories");
     const invalid = await screen.findByRole("region", { name: "Settings for invalid repos" });
-    expect(region("Repos").contains(invalid)).toBe(true);
+    expect(region("Repositories").contains(invalid)).toBe(true);
     expect(within(invalid).getByText(/Fix them in the Factories section\./)).toBeInTheDocument();
     expect(within(invalid).getByText("bad")).toBeInTheDocument();
     expect(within(invalid).queryByRole("button")).not.toBeInTheDocument();
@@ -441,40 +466,45 @@ describe("factory picker and scope", () => {
     const list = vi.spyOn(fakeBoard().owner, "listFactoryDefs").mockRejectedValueOnce(new Error("blocks: unavailable"));
     renderSettings();
     expect(await screen.findAllByText("Could not load the factories.")).toHaveLength(1);
-    expect(within(region("Factories")).getByText("Settings are not available.")).toBeInTheDocument();
+    expect(within(region("General")).getByText("Settings are not available.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    selectSection("Gates & limits");
     expect(await screen.findByRole("form", { name: "Gates and limits" })).toBeInTheDocument();
-    expect(screen.queryByLabelText("Factory", { selector: "select" })).toBeNull();
+    expect(screen.getByLabelText("Editing factory", { selector: "select" })).toHaveValue("blocks");
     expect(list).toHaveBeenCalledTimes(2);
   });
 
   it("keeps_a_draft_when_another_tab_changes_the_pick", async () => {
     resetFakeBoard(merge(blocksFactories(), factory("delta", ["api"])));
     renderSettings();
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
     fireEvent.change(within(globalForm()).getByLabelText("Tasks at once"), { target: { value: "4" } });
     window.localStorage.setItem("factory-board:factory", "delta");
     window.dispatchEvent(new StorageEvent("storage", { key: "factory-board:factory", newValue: "delta" }));
     await Promise.resolve();
     expect(within(globalForm()).getByLabelText("Tasks at once")).toHaveValue("4");
-    expect(screen.getByLabelText("Factory", { selector: "select" })).toHaveValue("blocks");
+    expect(screen.getByLabelText("Editing factory", { selector: "select" })).toHaveValue("blocks");
   });
 
   it("applies_a_pick_in_this_tab_even_when_it_cannot_be_stored", async () => {
     resetFakeBoard(merge(blocksFactories(), factory("delta", ["api"])));
     vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("denied"); });
     renderSettings();
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
-    fireEvent.change(screen.getByLabelText("Factory", { selector: "select" }), { target: { value: "delta" } });
-    await waitFor(() => expect(screen.getByLabelText("Factory", { selector: "select" })).toHaveValue("delta"));
+    fireEvent.change(screen.getByLabelText("Editing factory", { selector: "select" }), { target: { value: "delta" } });
+    await waitFor(() => expect(screen.getByLabelText("Editing factory", { selector: "select" })).toHaveValue("delta"));
     cleanup();
     renderSettings();
+    selectSection("Repositories");
     await screen.findByRole("table", { name: "Repos" });
-    expect(screen.getByLabelText("Factory", { selector: "select" })).toHaveValue("delta");
+    expect(screen.getByLabelText("Editing factory", { selector: "select" })).toHaveValue("delta");
   });
 
   it("shows_no_removed_repo_section_when_every_scope_has_its_repo", async () => {
     renderSettings();
+    selectSection("Repositories");
     await screen.findByRole("table", { name: "Repos" });
     expect(screen.queryByRole("heading", { name: "Settings for removed repos" })).not.toBeInTheDocument();
   });
@@ -506,6 +536,7 @@ describe("the pause switch", () => {
     expect(write.mock.calls.map((call) => [call[0], (call[2] as { paused: boolean }).paused])).toEqual([["blocks", true]]);
     expect((await fakeBoard().owner.getSettings()).factories.blocks!.factory.paused).toBe(true);
 
+    selectSection("General");
     fireEvent.click(screen.getByRole("switch", { name: "Pause the factory" }));
     await waitFor(() => expect(screen.queryByText("Factory paused")).not.toBeInTheDocument());
     expect((await fakeBoard().owner.getSettings()).factories.blocks!.factory.paused).toBe(false);
@@ -522,264 +553,35 @@ describe("the pause switch", () => {
   it("pause_switch_is_described_by_its_hint", async () => {
     renderSettings();
     await screen.findByRole("switch", { name: "Pause the factory" });
-    expect(within(region("Factory")).getByRole("switch", { name: "Pause the factory" })).toHaveAccessibleDescription(PAUSE_HINT);
+    expect(within(region("General")).getByRole("switch", { name: "Pause the factory" })).toHaveAccessibleDescription(PAUSE_HINT);
   });
 });
 
-const currentLinks = () =>
-  within(screen.getByRole("navigation", { name: "Settings sections" }))
-    .getAllByRole("link")
-    .filter((l) => l.getAttribute("aria-current") === "location")
-    .map((l) => l.textContent);
-
-class FakeIO {
-  static last: FakeIO | undefined;
-  readonly targets: Element[] = [];
-  readonly callback: (entries: unknown[]) => void;
-  readonly options: IntersectionObserverInit | undefined;
-  constructor(callback: (entries: unknown[]) => void, options?: IntersectionObserverInit) {
-    this.callback = callback;
-    this.options = options;
-    FakeIO.last = this;
-  }
-  observe(target: Element) { this.targets.push(target); }
-  unobserve() {}
-  disconnect() {}
-}
-
-/** Queues animation frames so a test decides when they run; returns how many are queued and a flush. */
-function stubFrames() {
-  const queue: FrameRequestCallback[] = [];
-  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => queue.push(cb));
-  vi.stubGlobal("cancelAnimationFrame", () => { queue.length = 0; });
-  return {
-    pending: () => queue.length,
-    flush: () => act(() => { for (const cb of queue.splice(0)) cb(0); })
-  };
-}
-
-/** Puts the app's sticky top bar in the page, its bottom edge at the given height. */
-function stubTopBar(bottom: number) {
-  const bar = document.createElement("header");
-  bar.className = "sf-topbar";
-  document.body.prepend(bar);
-  vi.spyOn(bar, "getBoundingClientRect").mockImplementation(() => ({ top: 0, bottom, height: bottom }) as DOMRect);
-  return bar;
-}
-
-function stubTops(tops: Record<string, number>) {
-  for (const id of Object.keys(tops)) {
-    vi.spyOn(document.getElementById(id)!, "getBoundingClientRect").mockImplementation(() => ({ top: tops[id] }) as DOMRect);
-  }
-}
-
-const enter = (io: FakeIO, tops: Record<string, number>) =>
-  io.callback(Object.entries(tops).map(([id, top]) => ({ boundingClientRect: { top }, isIntersecting: true, target: document.getElementById(id) })));
-
 describe("settings page layout", () => {
-  it("renders_one_page_with_no_tabs_and_four_sections_in_order", () => {
+  it("renders four ordered tabs and exposes only the selected section", () => {
     renderSettings();
-    expect(screen.queryAllByRole("tab")).toHaveLength(0);
-    expect(screen.queryByRole("tablist")).toBeNull();
-    expect(screen.queryByRole("tabpanel")).toBeNull();
-    const sections = SECTION_NAMES.map((name) => region(name));
-    for (let i = 1; i < sections.length; i++) {
-      expect(sections[i - 1]!.compareDocumentPosition(sections[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    }
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual(SECTION_NAMES);
+    expect(screen.getByRole("tabpanel", { name: "General" })).toBeVisible();
+    selectSection("Repositories");
+    expect(screen.getByRole("tabpanel", { name: "Repositories" })).toBeVisible();
+    expect(screen.getByRole("tab", { name: "Repositories" })).toHaveAttribute("aria-selected", "true");
   });
-
-  it("each_section_is_an_sf_panel_section_named_by_its_h2", () => {
+  it("supports arrow keys and a legacy fragment", () => {
+    window.history.replaceState({}, "", "/settings#settings-repos");
     renderSettings();
-    for (const name of SECTION_NAMES) {
-      const section = region(name);
-      expect(section.tagName).toBe("SECTION");
-      expect(section).toHaveClass("sf-panel");
-      const heading = document.getElementById(section.getAttribute("aria-labelledby") ?? "");
-      expect(heading?.tagName).toBe("H2");
-      expect(heading).toHaveTextContent(name);
-      expect(heading).not.toHaveClass("sf-page-title");
-    }
-  });
-
-  it("nav_named_settings_sections_links_to_each_section", () => {
-    renderSettings();
-    const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    const links = within(nav).getAllByRole("link");
-    expect(links.map((l) => l.textContent)).toEqual(SECTION_NAMES);
-    for (const link of links) {
-      const href = link.getAttribute("href")!;
-      expect(href.startsWith("#")).toBe(true);
-      expect(document.getElementById(href.slice(1))).toBe(region(link.textContent!));
-    }
-  });
-
-  it("settings_title_uses_page_title_class", () => {
-    renderSettings();
-    expect(screen.getByRole("heading", { name: "Settings" })).toHaveClass("sf-page-title");
-  });
-
-  it("first_link_is_current_on_load_and_a_clicked_link_becomes_current", () => {
-    renderSettings();
-    const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    const current = () => within(nav).getAllByRole("link").filter((l) => l.getAttribute("aria-current") === "location").map((l) => l.textContent);
-    expect(current()).toEqual(["Factory"]);
-    fireEvent.click(within(nav).getByRole("link", { name: "Repos" }));
-    expect(current()).toEqual(["Repos"]);
-  });
-
-  it("opening_with_a_section_hash_scrolls_to_it_and_makes_it_current", () => {
-    const scrolled: Element[] = [];
-    const original = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function (this: Element) { scrolled.push(this); };
-    window.history.pushState({}, "", "/settings#settings-factories");
-    try {
-      renderSettings();
-      expect(scrolled).toEqual([region("Factories")]);
-      const nav = screen.getByRole("navigation", { name: "Settings sections" });
-      expect(within(nav).getByRole("link", { name: "Factories" })).toHaveAttribute("aria-current", "location");
-    } finally {
-      Element.prototype.scrollIntoView = original;
-      window.history.pushState({}, "", "/");
-    }
-  });
-
-  it("section_nearest_the_top_becomes_current_while_scrolling", () => {
-    vi.stubGlobal("IntersectionObserver", FakeIO);
-    renderSettings();
-    const io = FakeIO.last!;
-    expect(io.targets).toHaveLength(4);
-    act(() => {
-      io.callback([{ boundingClientRect: { top: 10 }, isIntersecting: true, target: document.getElementById("settings-gates-and-limits") }]);
-    });
-    const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    const current = within(nav).getAllByRole("link").filter((l) => l.getAttribute("aria-current") === "location").map((l) => l.textContent);
-    expect(current).toEqual(["Gates and limits"]);
-  });
-
-  it("reads_live_positions_while_scrolling_not_the_ones_saved_when_a_section_entered", () => {
-    vi.stubGlobal("IntersectionObserver", FakeIO);
-    const frames = stubFrames();
-    renderSettings();
-    const io = FakeIO.last!;
-    const tops: Record<string, number> = { "settings-factory": -50, "settings-gates-and-limits": 300 };
-    for (const id of Object.keys(tops)) {
-      vi.spyOn(document.getElementById(id)!, "getBoundingClientRect").mockImplementation(() => ({ top: tops[id] }) as DOMRect);
-    }
-    act(() => {
-      io.callback([
-        { boundingClientRect: { top: -50 }, isIntersecting: true, target: document.getElementById("settings-factory") },
-        { boundingClientRect: { top: 300 }, isIntersecting: true, target: document.getElementById("settings-gates-and-limits") }
-      ]);
-    });
-    expect(currentLinks()).toEqual(["Factory"]);
-    // Both stay visible, so the observer does not fire again; the page reads live positions on scroll.
-    tops["settings-factory"] = -500;
-    tops["settings-gates-and-limits"] = 20;
-    act(() => { fireEvent.scroll(window); });
-    frames.flush();
-    expect(currentLinks()).toEqual(["Gates and limits"]);
-  });
-
-  it("a_clicked_link_stays_current_until_the_user_scrolls", () => {
-    vi.stubGlobal("IntersectionObserver", FakeIO);
-    const frames = stubFrames();
-    renderSettings();
-    const io = FakeIO.last!;
-    const tops: Record<string, number> = { "settings-repos": -10, "settings-factories": 500 };
-    for (const id of Object.keys(tops)) {
-      vi.spyOn(document.getElementById(id)!, "getBoundingClientRect").mockImplementation(() => ({ top: tops[id] }) as DOMRect);
-    }
-    const nav = screen.getByRole("navigation", { name: "Settings sections" });
-    fireEvent.click(within(nav).getByRole("link", { name: "Factories" }));
-    // The anchor jump cannot bring the last section to the top, so Repos stays nearest; the click still wins.
-    act(() => {
-      io.callback([
-        { boundingClientRect: { top: -10 }, isIntersecting: true, target: document.getElementById("settings-repos") },
-        { boundingClientRect: { top: 500 }, isIntersecting: true, target: document.getElementById("settings-factories") }
-      ]);
-      fireEvent.scroll(window);
-    });
-    frames.flush();
-    expect(currentLinks()).toEqual(["Factories"]);
-    act(() => {
-      fireEvent.wheel(window);
-      fireEvent.scroll(window);
-    });
-    frames.flush();
-    expect(currentLinks()).toEqual(["Repos"]);
-  });
-
-  it("observes_sections_below_the_sticky_top_bar", () => {
-    vi.stubGlobal("IntersectionObserver", FakeIO);
-    stubTopBar(52);
-    renderSettings();
-    expect(FakeIO.last!.options?.rootMargin).toBe("-52px 0px -60% 0px");
-  });
-
-  it("a_section_jumped_to_below_the_top_bar_becomes_current", () => {
-    vi.stubGlobal("IntersectionObserver", FakeIO);
-    stubTopBar(52);
-    renderSettings();
-    // A nav jump puts the section's top 16px under the bar (scroll-margin-top); the section above has scrolled past.
-    const tops = { "settings-factory": -300, "settings-gates-and-limits": 68 };
-    stubTops(tops);
-    act(() => enter(FakeIO.last!, tops));
-    expect(currentLinks()).toEqual(["Gates and limits"]);
-  });
-
-  it("a_long_section_filling_the_top_stays_current_while_the_next_one_comes_up", () => {
-    vi.stubGlobal("IntersectionObserver", FakeIO);
-    stubTopBar(52);
-    renderSettings();
-    // Repos still fills the space under the bar; Factories is near, but its top is not up to the bar yet.
-    const tops = { "settings-repos": -400, "settings-factories": 200 };
-    stubTops(tops);
-    act(() => enter(FakeIO.last!, tops));
-    expect(currentLinks()).toEqual(["Repos"]);
-  });
-
-  it("reads_positions_at_most_once_per_frame_while_scrolling", () => {
-    vi.stubGlobal("IntersectionObserver", FakeIO);
-    const frames = stubFrames();
-    renderSettings();
-    const tops: Record<string, number> = { "settings-factory": -50, "settings-gates-and-limits": 300 };
-    stubTops(tops);
-    act(() => enter(FakeIO.last!, tops));
-    const reads = vi.spyOn(document.getElementById("settings-gates-and-limits")!, "getBoundingClientRect");
-    reads.mockClear();
-    tops["settings-factory"] = -500;
-    tops["settings-gates-and-limits"] = 10;
-    act(() => {
-      fireEvent.scroll(window);
-      fireEvent.scroll(window);
-      fireEvent.scroll(window);
-    });
-    expect(frames.pending()).toBe(1);
-    expect(reads).not.toHaveBeenCalled();
-    frames.flush();
-    expect(reads).toHaveBeenCalledTimes(1);
-    expect(currentLinks()).toEqual(["Gates and limits"]);
-  });
-
-  it("does_not_crash_without_intersection_observer", () => {
-    expect(typeof (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver).toBe("undefined");
-    renderSettings();
-    expect(screen.getByRole("navigation", { name: "Settings sections" })).toBeInTheDocument();
-  });
-
-  it("repo_overrides_table_in_wrap_and_buttons_split_primary_and_outlined", async () => {
-    renderSettings();
-    await screen.findByRole("form", { name: "Gates and limits" });
-    expect(screen.getByRole("table", { name: "Repos" }).closest(".sf-table-wrap")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "Save gates and limits" })).toHaveClass("sf-button-primary");
-    openOverrides("data");
-    expect(within(overrides("data")).getByRole("button", { name: "Save data" })).not.toHaveClass("sf-button-primary");
+    const repositories = screen.getByRole("tab", { name: "Repositories" });
+    expect(repositories).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(repositories, { key: "ArrowRight" });
+    expect(screen.getByRole("tab", { name: "Manage factories" })).toHaveFocus();
+    expect(screen.getByRole("tabpanel", { name: "Manage factories" })).toBeVisible();
+    window.history.replaceState({}, "", "/");
   });
 });
 
 describe("SettingsView action bars", () => {
   it("Settings_forms_keep_plain_sf_actions", async () => {
     renderSettings();
+    selectSection("Gates & limits");
     await screen.findByRole("form", { name: "Gates and limits" });
     expect(document.querySelectorAll(".sf-actions").length).toBeGreaterThan(0);
     expect(document.querySelector(".sf-action-bar")).toBeNull();
@@ -795,6 +597,7 @@ describe("SettingsView at 360px", () => {
 
   it("settings_fits_360", async () => {
     const { container } = renderSettings();
+    selectSection("Gates & limits");
     expect(await screen.findByRole("form", { name: "Gates and limits" })).toBeInTheDocument();
     expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
   });

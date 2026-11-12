@@ -54,8 +54,8 @@ describe("TaskView", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Add paging" })).toBeInTheDocument();
     const headings = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Your decision: approve the spec", "Details", "Description"]);
-    expect(tabNames()).toEqual(["History", "Spec (1)", "Plan (0)", "Checks", "Review", "Runs (1)"]);
+    expect(headings).toEqual(["Details"]);
+    expect(tabNames()).toEqual(["Description", "Spec (1)", "Plan (0)", "Q&A", "Checks", "Review", "Runs (1)", "History"]);
 
     const header = screen.getByRole("region", { name: "Task details" });
     const details = screen.getByRole("region", { name: "Details" });
@@ -99,6 +99,7 @@ describe("TaskView", () => {
       { action: "move", actor: "core", factoryId: "blocks", at: "2026-11-10T10:00:00.000Z", field: "status", from: "ready", reason: "claimed", taskId: task.taskId, to: "spec" }
     ]);
     renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("tab", { name: "History" }));
     const history = await screen.findByRole("table", { name: "History" });
     const items = bodyRows(history).map((row) => row.textContent ?? "");
     expect(items[0]).toContain("claimed");
@@ -113,6 +114,7 @@ describe("TaskView", () => {
     expect(screen.queryByLabelText("Your answer")).not.toBeInTheDocument();
     first.unmount();
     renderTask(blocked.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "View question" }));
     expect(await screen.findByLabelText("Your answer")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /^Approve/ })).not.toBeInTheDocument();
   });
@@ -284,6 +286,7 @@ describe("TaskView page layout", () => {
   it("blocked_task_with_question_shows_waiting_step_and_answer_panel", async () => {
     const task = await seedTask({ title: "Stuck" }, "blocked", { question: "Which base?", stage: "build" });
     const { container } = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "View question" }));
     expect(await screen.findByLabelText("Your answer")).toBeInTheDocument();
     expect(container.querySelectorAll('.sf-step[data-state="waiting"]')).toHaveLength(1);
   });
@@ -304,15 +307,15 @@ describe("TaskView body", () => {
     const task = await seedTask({ title: "Decide" }, "spec_review", { stage: "spec" });
     await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nOne.", "spec-agent");
     const { container } = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "Review spec" }));
     const panel = await screen.findByRole("region", { name: "Your decision: approve the spec" });
-    // The phone-only Details and history disclosure (hidden at 640px and up) comes first; the panel follows it.
     expect(container.querySelector(".sf-task-main")!.firstElementChild).toHaveClass("sf-task-more");
-    expect(container.querySelector(".sf-task-main > .sf-task-more")!.nextElementSibling).toBe(panel);
+    expect(screen.getByRole("tabpanel", { name: "Spec (1)" })).toContainElement(panel);
     expect(panel).toHaveClass("sf-panel-decision");
   });
 
   it("spec_and_plan_tabs_are_present_at_a_gate", async () => {
-    const six = (spec: number, plan: number) => ["History", `Spec (${spec})`, `Plan (${plan})`, "Checks", "Review", "Runs (0)"];
+    const six = (spec: number, plan: number) => ["Description", `Spec (${spec})`, `Plan (${plan})`, "Q&A", "Checks", "Review", "Runs (0)", "History"];
     const spec = await seedTask({ title: "Spec gate" }, "spec_review", { stage: "spec" });
     await fakeBoard().core.addDoc(spec.taskId, "spec", "# Spec\nOne.", "spec-agent");
     const first = renderTask(spec.taskId);
@@ -341,8 +344,8 @@ describe("TaskView body", () => {
     const task = await seedTask({ title: "Building" }, "build", { stage: "build" });
     const { container } = renderTask(task.taskId);
     await screen.findByRole("heading", { level: 1, name: "Building" });
-    expect(tabNames()).toEqual(["History", "Spec (0)", "Plan (0)", "Checks", "Review", "Runs (0)"]);
-    expect(screen.getByRole("tab", { name: "History" })).toHaveAttribute("aria-selected", "true");
+    expect(tabNames()).toEqual(["Description", "Spec (0)", "Plan (0)", "Q&A", "Checks", "Review", "Runs (0)", "History"]);
+    expect(screen.getByRole("tab", { name: "Description" })).toHaveAttribute("aria-selected", "true");
     const main = mainHeadings(container);
     for (const gone of ["Spec", "Plan", "Verify report", "Review report", "History"]) expect(main).not.toContain(gone);
   });
@@ -354,16 +357,13 @@ describe("TaskView body", () => {
       { action: "set", actor: "you", at: "2026-11-02T10:00:00.000Z", factoryId: "blocks", field: "answer", from: null, reason: "answered", taskId: task.taskId, to: "yes" }
     ]);
     const { container } = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "View question" }));
     const panel = await screen.findByRole("region", { name: "Open now?" });
     const main = container.querySelector(".sf-task-main") as HTMLElement;
-    // The phone-only Details and history disclosure (hidden at 640px and up) comes first; the panel follows it.
-    expect(main.firstElementChild).toHaveClass("sf-task-more");
-    expect(main.firstElementChild!.nextElementSibling).toBe(panel);
     const log = screen.getByRole("region", { name: "Questions and answers" });
-    const tablist = screen.getByRole("tablist", { name: "Task sections" });
+    expect(main.firstElementChild).toHaveClass("sf-task-more");
+    expect(screen.getByRole("tabpanel", { name: "Q&A" })).toContainElement(panel);
     expect(follows(panel, log)).toBe(true);
-    expect(follows(log, tablist)).toBe(true);
-    expect(main).toContainElement(tablist);
     expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
   });
 
@@ -371,23 +371,24 @@ describe("TaskView body", () => {
     const task = await seedTask({ title: "Decide" }, "spec_review", { stage: "spec" });
     await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nOne.", "spec-agent");
     renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "Review spec" }));
     const panel = await screen.findByRole("region", { name: "Your decision: approve the spec" });
-    expect(follows(panel, screen.getByRole("tablist", { name: "Task sections" }))).toBe(true);
+    expect(follows(screen.getByRole("tablist", { name: "Task sections" }), panel)).toBe(true);
   });
 
   it("arrow_keys_move_between_task_tabs", async () => {
     const task = await seedTask({ title: "Keys" });
     renderTask(task.taskId);
-    const history = await screen.findByRole("tab", { name: "History" });
-    fireEvent.keyDown(history, { key: "ArrowRight" });
+    const description = await screen.findByRole("tab", { name: "Description" });
+    fireEvent.keyDown(description, { key: "ArrowRight" });
     const spec = screen.getByRole("tab", { name: "Spec (0)" });
     expect(spec).toHaveAttribute("aria-selected", "true");
     expect(spec).toHaveFocus();
-    fireEvent.keyDown(spec, { key: "ArrowLeft" });
-    fireEvent.keyDown(screen.getByRole("tab", { name: "History" }), { key: "ArrowLeft" });
-    const runs = screen.getByRole("tab", { name: "Runs (0)" });
-    expect(runs).toHaveAttribute("aria-selected", "true");
-    expect(runs).toHaveFocus();
+    fireEvent.keyDown(spec, { key: "Home" });
+    fireEvent.keyDown(description, { key: "ArrowLeft" });
+    const history = screen.getByRole("tab", { name: "History" });
+    expect(history).toHaveAttribute("aria-selected", "true");
+    expect(history).toHaveFocus();
   });
 
   it("checks_and_review_tabs_show_their_docs", async () => {
@@ -431,18 +432,18 @@ describe("TaskView body", () => {
     const main = container.querySelector(".sf-task-main") as HTMLElement;
     expect(side.tagName).toBe("ASIDE");
     expect(main.compareDocumentPosition(side) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect([...side.querySelectorAll("h3")].map((h) => h.textContent)).toEqual(["Details", "Description"]);
+    expect([...side.querySelectorAll("h3")].map((h) => h.textContent)).toEqual(["Details"]);
   });
 
   it("description_panel_shows_the_text_or_no_description", async () => {
     const task = await seedTask({ description: "Do the thing.", title: "Described" });
     const first = renderTask(task.taskId);
-    const panel = await screen.findByRole("region", { name: "Description" });
+    const panel = await screen.findByRole("tabpanel", { name: "Description" });
     expect(panel).toHaveTextContent("Do the thing.");
     first.unmount();
     const bare = await seedTask({ title: "Bare" });
     renderTask(bare.taskId);
-    expect(await screen.findByRole("region", { name: "Description" })).toHaveTextContent("No description.");
+    expect(await screen.findByRole("tabpanel", { name: "Description" })).toHaveTextContent("No description.");
   });
 
   it("details_list_repo_base_branch_factory_pr", async () => {
@@ -578,15 +579,14 @@ describe("TaskView questions and answers", () => {
     const task = await seedTask({ title: "Stuck" }, "blocked", { question: "Open now?", stage: "plan" });
     await fakeBoard().core.addEvents([qa(task.taskId, "question", LETTERED, 1), qa(task.taskId, "answer", "A. main: fits", 2), qa(task.taskId, "question", "Open now?", 3)]);
     renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("tab", { name: "Q&A" }));
     const log = await screen.findByRole("region", { name: "Questions and answers" });
     expect(within(log).getByText("Which branch?")).toBeInTheDocument();
     expect(within(log).getByText("A. main: fits")).toBeInTheDocument();
     expect(within(log).getAllByText("Recommended")).toHaveLength(1);
     expect(within(log).getByText("Your answer")).toBeInTheDocument();
-    expect(within(log).getByText("Open now?")).toBeInTheDocument();
-    expect(within(log).getByText("Waiting for your answer")).toBeInTheDocument();
-    expect(log.querySelector("li.sf-qa-entry")).toHaveTextContent("Open now?");
-    expect(log).toHaveTextContent("2 asked · 1 answered");
+    expect(log.querySelector("li.sf-qa-entry")).toHaveTextContent("Which branch?");
+    expect(log).toHaveTextContent("1 asked · 1 answered");
     const panel = screen.getByRole("region", { name: "Open now?" });
     expect(panel.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -595,6 +595,7 @@ describe("TaskView questions and answers", () => {
     const task = await seedTask({ title: "Moving" }, "plan", { stage: "plan" });
     await fakeBoard().core.addEvents([qa(task.taskId, "question", "Continue?", 1), qa(task.taskId, "answer", "yes", 2)]);
     const { container } = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("tab", { name: "Q&A" }));
     await screen.findByRole("region", { name: "Questions and answers" });
     const side = container.querySelector(".sf-task-side") as HTMLElement;
     const aside = within(side).getByRole("region", { name: "How questions work" });
@@ -608,6 +609,7 @@ describe("TaskView questions and answers", () => {
     const task = await seedTask({ title: "Moving" }, "plan", { stage: "plan" });
     await fakeBoard().core.addEvents([qa(task.taskId, "question", "Continue?", 1), qa(task.taskId, "answer", "yes", 2)]);
     renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("tab", { name: "Q&A" }));
     expect(await screen.findByRole("region", { name: "Questions and answers" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Your answer")).toBeNull();
   });
@@ -756,11 +758,13 @@ describe("TaskView phone markup", () => {
     const gated = await seedTask({ title: "Gated" }, "spec_review", { stage: "spec" });
     await fakeBoard().core.addDoc(gated.taskId, "spec", "# Spec\nOne.", "spec-agent");
     const first = renderTask(gated.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "Review spec" }));
     await screen.findByRole("button", { name: "Approve spec v1" });
     expect(first.container.querySelector(".sf-task-main")?.firstElementChild).toBe(more(first.container));
     first.unmount();
     const stuck = await seedTask({ title: "Stuck" }, "blocked", { question: "Open now?", stage: "plan" });
     const { container } = renderTask(stuck.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "View question" }));
     await screen.findByRole("region", { name: "Open now?" });
     expect(container.querySelector(".sf-task-main")?.firstElementChild).toBe(more(container));
   });
@@ -785,12 +789,12 @@ describe("TaskView phone markup", () => {
       ask("Open now?", "2026-11-02T10:00:00.000Z")
     ]);
     const first = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "View question" }));
     await screen.findByRole("region", { name: "Open now?" });
     expect(first.container.querySelector(".sf-task-main")).toHaveClass("sf-task-answering");
-    const earlier = first.container.querySelector("details.sf-qa-earlier") as HTMLElement;
-    expect(earlier).not.toHaveAttribute("open");
-    expect(earlier.querySelector("summary")).toHaveTextContent(/^Earlier question \(1\)$/);
-    expect(earlier).toHaveTextContent("You answered main at");
+    const earlier = screen.getByRole("region", { name: "Questions and answers" });
+    expect(earlier).toHaveTextContent("Which branch?");
+    expect(earlier).toHaveTextContent("main");
     first.unmount();
 
     const other = await seedTask({ title: "Moving" }, "build", { stage: "build" });
@@ -812,6 +816,7 @@ describe("TaskView at 360px", () => {
     const task = await seedTask({ title: "Phone gate" }, "spec_review", { stage: "spec" });
     await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nOne.", "spec-agent");
     const { container } = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "Review spec" }));
     const approve = await screen.findByRole("button", { name: "Approve spec v1" });
     expect(container.querySelector(".sf-task-repo")).toHaveTextContent("data → dev");
     const names = [...container.querySelectorAll(".sf-stepper-name")].map((el) => el.firstChild?.textContent);
@@ -835,10 +840,11 @@ describe("TaskView at 360px", () => {
       ask(question, "2026-11-02T10:00:00.000Z")
     ]);
     const { container } = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "View question" }));
     expect(await screen.findByRole("heading", { level: 2, name: "A question for you" })).toBeInTheDocument();
     expect(container.querySelector("p.sf-question-from")).toHaveTextContent(/^Spec writer · Phone question$/);
     expect(container.querySelectorAll(".sf-radio-card").length).toBeGreaterThan(0);
-    expect(container.querySelector("details.sf-qa-earlier")).not.toHaveAttribute("open");
+    expect(screen.getByRole("region", { name: "Questions and answers" })).toHaveTextContent("Go on?");
     expect(screen.getByRole("button", { name: "Send answer" }).parentElement).toHaveClass("sf-action-bar");
     expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
   });

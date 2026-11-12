@@ -240,6 +240,7 @@ describe("the new factory route", () => {
   it("settings_add_factory_link_opens_the_page_in_app", async () => {
     signIn();
     renderAt("/settings");
+    fireEvent.click(await screen.findByRole("tab", { name: "Manage factories" }));
     fireEvent.click(await screen.findByRole("link", { name: "Add factory" }));
     expect(window.location.pathname).toBe("/settings/factories/new");
     expect(await screen.findByRole("heading", { level: 1, name: "New factory" })).toBeInTheDocument();

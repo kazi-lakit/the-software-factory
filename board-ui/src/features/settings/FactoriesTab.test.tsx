@@ -9,6 +9,7 @@ vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/
 
 async function openFactoriesSection() {
   const view = renderWithClient(<SettingsView />);
+  fireEvent.click(screen.getByRole("tab", { name: "Manage factories" }));
   await screen.findByRole("link", { name: "Add factory" });
   return view;
 }
@@ -54,7 +55,7 @@ describe("Factories tab", () => {
 
   it("lists_each_factory_with_name_login_chip_and_edit", async () => {
     await openFactoriesSection();
-    const section = screen.getByRole("region", { name: "Factories" });
+    const section = screen.getByRole("region", { name: "Manage factories" });
     expect(within(section).getByRole("region", { name: "Factory blocks" })).toBeInTheDocument();
     const delta = within(section).getByRole("region", { name: "Factory delta" });
     expect(within(delta).getByRole("heading", { name: "Delta" })).toBeInTheDocument();
@@ -66,7 +67,8 @@ describe("Factories tab", () => {
   it("add_factory_links_to_the_new_factory_page_and_no_inline_form", async () => {
     const onNavigate = vi.fn();
     renderWithClient(<SettingsView onNavigate={onNavigate} />);
-    const section = await screen.findByRole("region", { name: "Factories" });
+    fireEvent.click(screen.getByRole("tab", { name: "Manage factories" }));
+    const section = await screen.findByRole("region", { name: "Manage factories" });
     const link = await within(section).findByRole("link", { name: "Add factory" });
     expect(link).toHaveAttribute("href", "/settings/factories/new");
     fireEvent.click(link);

@@ -1796,7 +1796,7 @@ textarea.sf-input {
   text-decoration: underline;
 }
 
-.sf-settings-nav a[aria-current="location"] {
+.sf-settings-nav a[aria-selected="true"] {
   color: var(--sf-text);
   text-decoration: underline;
   text-underline-offset: 4px;
@@ -3083,7 +3083,7 @@ textarea.sf-input {
   display: contents;
 }
 .sf-filter-toggle {
-  display: none;
+  display: inline-flex;
 }
 .sf-view input[type="checkbox"],
 .sf-view input[type="radio"] {
@@ -3094,6 +3094,27 @@ textarea.sf-input {
    here is at least as specific as every earlier rule that sets the same property on the same element
    (phoneLayout.css.test.ts checks); where a base rule is more specific its prefix is copied, never !important.
    Desktop values above are unchanged. */
+/* Compact workspace navigation and controls. */
+.sf-settings-layout { display: block; }
+.sf-settings-scope { border: 0; padding: 0; margin: 0; min-width: 0; }
+.sf-settings-nav { position: static; padding: 0; margin-bottom: 16px; overflow-x: auto; }
+.sf-settings-nav ul { flex-direction: row; min-width: max-content; gap: 0; }
+.sf-settings-nav a { display: block; padding: 14px 18px; }
+.sf-settings-sections > [hidden], .sf-tab-panel[hidden] { display: none; }
+.sf-question-highlight { background: var(--sf-accent-soft); border-left: 3px solid var(--sf-accent); padding: 16px; overflow-wrap: anywhere; }
+.sf-question-highlight .sf-question-title { margin-top: 8px; }
+.sf-radio-body, .sf-qa-question, .sf-doc-body { overflow-wrap: anywhere; min-width: 0; }
+.sf-pending-action { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+:where(.sf-board-page) .sf-page-heading { margin-bottom: 12px; }
+:where(.sf-board-page) .sf-queue-summary { margin-bottom: 10px; }
+:where(.sf-board-page) .sf-queue-stat { padding: 8px 14px; display: flex; gap: 8px; }
+:where(.sf-board-page) .sf-queue-stat strong { font-family: var(--sf-mono); font-size: 16px; }
+:where(.sf-board-page) .sf-queue-stat-caption { display: none; }
+:where(.sf-board-page) .sf-board-controls { margin-bottom: 12px; }
+:where(.sf-board-page) .sf-board-filters { padding: 10px 12px; gap: 10px; }
+:where(.sf-board-page) .sf-board-results { padding: 4px 12px; align-items: center; }
+:where(.sf-board-page .sf-board-results) .sf-button { min-height: 44px; }
+
 @media (max-width: 639px) {
   .sf-card .sf-button,
   .sf-card .sf-card-cta {
@@ -3491,8 +3512,7 @@ textarea.sf-input {
   .sf-chip-repo,
   .sf-stepper-more,
   .sf-task-side .sf-details,
-  .sf-question-asker,
-  .sf-task-answering .sf-qa-panel {
+  .sf-question-asker {
     display: none;
   }
 
@@ -3517,4 +3537,19 @@ textarea.sf-input {
   .sf-action-bar .sf-gate-changes {
     order: -1;
   }
+  .sf-board-page .sf-queue-summary { display: none; }
+  .sf-board-page .sf-page-heading { margin-bottom: 8px; }
+  .sf-board-page .sf-board-filters { gap: 8px; }
+  .sf-settings-nav a { min-height: 44px; }
+
+  .sf-repo-table, .sf-repo-table tbody, .sf-repo-table tr, .sf-repo-table td, .sf-repo-table th { display: block; width: 100%; }
+  .sf-repo-table thead { display: none; }
+  .sf-repo-table tbody tr:not(.sf-repo-edit-row) { border: 1px solid var(--sf-chrome-border); margin-bottom: 8px; padding: 12px; }
+  .sf-repo-table tbody td, .sf-repo-table tbody th { border: 0; padding: 4px 0; overflow-wrap: anywhere; }
+  .sf-repo-table td[data-label]::before { content: attr(data-label) ": "; color: var(--sf-muted); }
+  .sf-repo-table tr.sf-repo-edit-row[hidden] { display: none; }
+  .sf-repo-table .sf-field-row { display: flex; flex-direction: column; }
+
+  .sf-board-page .sf-board-results:has(> span:only-child) { display: none; }
+
 }
