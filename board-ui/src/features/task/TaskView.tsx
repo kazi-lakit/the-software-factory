@@ -143,11 +143,11 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
             onChange={setSelectedTab}
             tabs={[
               { id: "description", label: "Description", content: task.description.trim() ? <pre className="sf-doc-body">{task.description}</pre> : <p className="sf-empty">No description.</p> },
-              { id: "spec", label: `Spec (${docs.spec.length})`, keepMounted: true, content: <>{gate === "spec" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : null}<DocVersions label="Spec" docs={docs.spec} /></> },
-              { id: "plan", label: `Plan (${docs.plan.length})`, keepMounted: true, content: <>{gate === "plan" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : null}<DocVersions label="Plan" docs={docs.plan} /></> },
+              { id: "spec", label: `Spec (${docs.spec.length})`, keepMounted: true, content: <>{gate === "spec" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : <DocVersions label="Spec" docs={docs.spec} />}</> },
+              { id: "plan", label: `Plan (${docs.plan.length})`, keepMounted: true, content: <>{gate === "plan" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : <DocVersions label="Plan" docs={docs.plan} />}</> },
               { id: "qa", label: "Q&A", keepMounted: true, content: <>{blocked ? <AnswerPanel key={task.taskId} task={task} events={events} onReload={reload} onAnswerSent={() => setAnswerSent(true)} /> : null}{earlier.length ? <QaLog entries={earlier} /> : !blocked ? <p className="sf-empty">No questions yet.</p> : null}</> },
               { id: "checks", label: "Checks", content: <DocVersions label="Checks" docs={docs.verify} /> },
-              { id: "review", label: "Review", keepMounted: true, content: <>{gate === "pr" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : null}<DocVersions label="Review" docs={docs.review} /></> },
+              { id: "review", label: "Review", keepMounted: true, content: <>{gate === "pr" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : <DocVersions label="Review" docs={docs.review} />}</> },
               { id: "runs", label: `Runs (${runs.length})`, content: <RunsTable runs={runs} /> },
               { id: "history", label: "History", content: <TaskHistory events={events} /> }
             ]}

@@ -21,3 +21,12 @@ it("the pending question action selects and focuses Q&A", async () => {
   expect(tab).toHaveFocus();
   expect(screen.getByText("Which approach?")).toBeVisible();
 });
+
+it("shows a gate document only once beside its approval controls", async () => {
+  const task = await seedTask({ title: "Review one spec" }, "spec_review", { stage: "spec" });
+  await (await import("../../test/fakeBoard")).fakeBoard().core.addDoc(task.taskId, "spec", "# Distinct spec\n\nReview once.", "spec-writer");
+  renderWithClient(<TaskView taskId={task.taskId} onNavigate={() => {}} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Review spec" }));
+  expect(screen.getAllByRole("heading", { name: "Distinct spec" })).toHaveLength(1);
+  expect(screen.getByRole("button", { name: "Approve spec v1" })).toBeVisible();
+});

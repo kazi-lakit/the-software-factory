@@ -3095,6 +3095,10 @@ textarea.sf-input {
    (phoneLayout.css.test.ts checks); where a base rule is more specific its prefix is copied, never !important.
    Desktop values above are unchanged. */
 /* Compact workspace navigation and controls. */
+.sf-settings .sf-page-heading { flex-wrap: wrap; }
+.sf-settings .sf-page-heading > div { flex: 1 1 220px; min-width: 0; }
+.sf-settings .sf-page-heading .sf-inline-field { flex: 1 1 220px; min-width: 0; max-width: 100%; }
+.sf-settings .sf-page-heading .sf-select { flex: 1 1 auto; min-width: 0; max-width: 100%; }
 .sf-settings-layout { display: block; }
 .sf-settings-scope { border: 0; padding: 0; margin: 0; min-width: 0; }
 .sf-settings-nav { position: static; padding: 0; margin-bottom: 16px; overflow-x: auto; }
