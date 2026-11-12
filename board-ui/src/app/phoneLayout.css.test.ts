@@ -305,3 +305,12 @@ describe("narrow-phone review usability", () => {
     expect(phone(".sf-theme-switch .sf-segment").width).toBe("44px");
   });
 });
+
+
+describe("settings factory picker on phones", () => {
+  it("stacks the picker and limits it to the available width", () => {
+    expect(phone(".sf-settings .sf-page-heading")).toMatchObject({ "flex-direction": "column", "align-items": "stretch" });
+    expect(phone(".sf-settings .sf-page-heading .sf-inline-field")).toMatchObject({ "min-width": "0", width: "100%" });
+    expect(phone(".sf-settings .sf-page-heading .sf-select")).toMatchObject({ "min-width": "0", width: "100%" });
+  });
+});
