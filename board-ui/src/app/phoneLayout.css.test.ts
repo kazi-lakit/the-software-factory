@@ -302,7 +302,7 @@ describe("narrow-phone review usability", () => {
   });
   it("keeps view and theme switches touch sized", () => {
     expect(phone(".sf-segment")["min-height"]).toBe("44px");
-    expect(phone(".sf-theme-switch .sf-segment").width).toBe("44px");
+    expect(tokens(css, ".sf-theme-switch").width).toBe("44px");
   });
 });
 

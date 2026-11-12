@@ -46,8 +46,7 @@ describe("LandingPage", () => {
     const bar = container.querySelector("header.sf-topbar") as HTMLElement;
     expect(bar).not.toBeNull();
     expect(within(bar).getByText("the-software-factory")).toHaveClass("sf-label");
-    expect(within(bar).getByRole("button", { name: "Light theme" })).toBeInTheDocument();
-    expect(within(bar).getByRole("button", { name: "Dark theme" })).toBeInTheDocument();
+    expect(within(bar).getByRole("button", { name: /Switch to (light|dark) mode/ })).toBeInTheDocument();
     const signIn = within(bar).getByRole("button", { name: "Sign in" });
     expect(signIn).toHaveClass("sf-button");
     expect(signIn).not.toHaveClass("sf-button-primary");

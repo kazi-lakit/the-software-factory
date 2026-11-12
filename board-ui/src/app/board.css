@@ -943,10 +943,21 @@ textarea.sf-input {
   border: 1px solid var(--sf-border);
 }
 
-/* The sun and moon buttons stay square. */
-.sf-theme-switch .sf-segment {
-  padding: 0;
+/* One unboxed theme control with a generous tap target. */
+.sf-theme-switch {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--sf-text);
+  display: inline-flex;
+  justify-content: center;
   width: 44px;
+  height: 44px;
+  padding: 0;
+}
+
+.sf-landing .sf-theme-switch {
+  color: #eef2f3;
 }
 
 .sf-card-list {
@@ -3097,10 +3108,6 @@ textarea.sf-input {
     gap: 8px;
   }
 
-  .sf-theme-switch {
-    gap: 0;
-    padding: 1px;
-  }
 
   .sf-stepper {
     display: grid;
@@ -3113,11 +3120,6 @@ textarea.sf-input {
     height: 44px;
   }
 
-  .sf-theme-switch .sf-segment {
-    min-height: 44px;
-    height: 44px;
-    width: 44px;
-  }
 
   .sf-chip-remove {
     min-height: 44px;

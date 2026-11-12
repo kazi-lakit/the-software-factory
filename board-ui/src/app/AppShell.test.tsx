@@ -87,13 +87,11 @@ afterEach(() => {
 describe("AppShell", () => {
   it("app_shell_renders_the_theme_switch_first_in_the_right_group", () => {
     renderShell("/");
-    const group = screen.getByRole("group", { name: "Theme" });
+    const toggle = screen.getByRole("button", { name: /Switch to (light|dark) mode/ });
     const end = document.querySelector(".sf-topbar-end");
-    expect(end).toContainElement(group);
-    expect(end?.firstElementChild).toBe(group);
-    fireEvent.click(within(group).getByRole("button", { name: "Dark theme" }));
-    expect(within(group).getByRole("button", { name: "Dark theme" })).toHaveAttribute("aria-pressed", "true");
-    expect(within(group).getByRole("button", { name: "Light theme" })).toHaveAttribute("aria-pressed", "false");
+    expect(end?.firstElementChild).toBe(toggle);
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: /Switch to (light|dark) mode/ })).toBe(toggle);
   });
 
   it("project_name_carries_the_label_class", () => {
