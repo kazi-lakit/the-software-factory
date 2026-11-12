@@ -25,6 +25,7 @@ import { useSettings } from "../settings/useSettings";
 import { AnswerPanel } from "./AnswerPanel";
 import { DocVersions } from "./DocVersions";
 import { GatePanel } from "./GatePanel";
+import { Markdown } from "./Markdown";
 import { QaLog } from "./QaLog";
 import { buildQaLog } from "./qaEntries";
 import { Stepper } from "./Stepper";
@@ -142,7 +143,7 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
             value={selectedTab}
             onChange={setSelectedTab}
             tabs={[
-              { id: "description", label: "Description", content: task.description.trim() ? <pre className="sf-doc-body">{task.description}</pre> : <p className="sf-empty">No description.</p> },
+              { id: "description", label: "Description", content: task.description.trim() ? <Markdown body={task.description} /> : <p className="sf-empty">No description.</p> },
               { id: "spec", label: `Spec (${docs.spec.length})`, keepMounted: true, content: <>{gate === "spec" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : <DocVersions label="Spec" docs={docs.spec} />}</> },
               { id: "plan", label: `Plan (${docs.plan.length})`, keepMounted: true, content: <>{gate === "plan" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : <DocVersions label="Plan" docs={docs.plan} />}</> },
               { id: "qa", label: "Q&A", keepMounted: true, content: <>{blocked ? <AnswerPanel key={task.taskId} task={task} events={events} onReload={reload} onAnswerSent={() => setAnswerSent(true)} /> : null}{earlier.length ? <QaLog entries={earlier} /> : !blocked ? <p className="sf-empty">No questions yet.</p> : null}</> },

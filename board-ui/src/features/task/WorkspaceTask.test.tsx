@@ -30,3 +30,12 @@ it("shows a gate document only once beside its approval controls", async () => {
   expect(screen.getAllByRole("heading", { name: "Distinct spec" })).toHaveLength(1);
   expect(screen.getByRole("button", { name: "Approve spec v1" })).toBeVisible();
 });
+
+it("renders task descriptions as Markdown", async () => {
+  const task = await seedTask({ description: "## Acceptance criteria\n\n- **First** item\n- Second item\n\n[Documentation](https://example.com)" }, "ready");
+  renderWithClient(<TaskView taskId={task.taskId} onNavigate={() => {}} />);
+  expect(await screen.findByRole("heading", { name: "Acceptance criteria", level: 2 })).toBeVisible();
+  expect(screen.getByText("First").tagName).toBe("STRONG");
+  expect(screen.getAllByRole("listitem").some((item) => item.textContent === "Second item")).toBe(true);
+  expect(screen.getByRole("link", { name: "Documentation" })).toHaveAttribute("href", "https://example.com");
+});
