@@ -83,10 +83,10 @@ describe("the stylesheets", () => {
 describe("Breakwater component system", () => {
   const css = read("board.css");
   const t = (selector: string) => tokens(css, selector);
-  it("uses the supplied display and operational typefaces with square surfaces", () => {
+  it("uses the supplied display and operational typefaces with subtly rounded surfaces", () => {
     expect(t(":root")["--sf-display"]).toContain("Instrument Serif");
     expect(t(":root")["--sf-mono"]).toContain("DM Mono");
-    expect(t(":root")["--sf-radius"]).toBe("0px");
+    expect(t(":root")["--sf-radius"]).toBe("6px");
     expect(t(":root")["--sf-label-tracking"]).toBe("2.2px");
     expect(t(".sf-label")["font-weight"]).toBe("500");
     expect(t(":root")["--sf-accent"]).toBe("#4693c3");

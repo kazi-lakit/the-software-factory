@@ -39,7 +39,9 @@
   --sf-label-size: 11px;
   --sf-label-line: 16px;
   --sf-label-tracking: 2.2px;
-  --sf-radius: 0px;
+  --sf-radius: 6px;
+  --sf-radius-small: 4px;
+  --sf-radius-surface: 8px;
   --sf-bar-height: 72px;
   --sf-tabbar-height: 56px;
   --sf-actionbar-button: 48px;
@@ -228,12 +230,12 @@ body {
   white-space: nowrap;
 }
 
-/* Square account control and initials follow the Breakwater geometry. */
+/* Account controls use the same subtle corners as other controls. */
 .sf-account {
   align-items: center;
   background: var(--sf-surface-sunk);
   border: 1px solid var(--sf-border);
-  border-radius: 0;
+  border-radius: var(--sf-radius);
   color: var(--sf-text);
   display: inline-flex;
   font-family: var(--sf-mono);
@@ -255,7 +257,7 @@ body {
 .sf-avatar {
   align-items: center;
   background: var(--sf-primary-soft);
-  border-radius: 0;
+  border-radius: var(--sf-radius-small);
   color: var(--sf-on-primary-soft);
   display: inline-flex;
   flex: none;
@@ -924,7 +926,7 @@ textarea.sf-input {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: var(--sf-radius);
+  border-radius: 3px;
   color: var(--sf-text);
   display: inline-flex;
   font-family: var(--sf-mono);
@@ -3140,6 +3142,18 @@ textarea.sf-input {
   .sf-board-page .sf-board-view-label { display: none; }
   .sf-board-page .sf-board-result-count { white-space: nowrap; }
 }
+
+
+.sf-panel, .sf-card, .sf-factory-row, .sf-table-wrap, .sf-dialog { border-radius: var(--sf-radius-surface); }
+.sf-chip, .sf-badge { border-radius: var(--sf-radius-small); }
+.sf-switch input { border-radius: var(--sf-radius); }
+.sf-switch input::before { border-radius: var(--sf-radius-small); }
+
+
+.sf-factory-summary { width: 100%; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; text-align: left; padding: 14px; color: var(--sf-text); background: var(--sf-surface); border: 1px solid var(--sf-border); border-radius: var(--sf-radius); cursor: pointer; }
+.sf-factory-summary:focus-visible { outline: 2px solid var(--sf-focus); outline-offset: 2px; }
+.sf-factory-row { overflow-wrap: anywhere; }
+.sf-factory-row li.sf-actions > div { width: 100%; min-width: 0; }
 
 @media (max-width: 639px) {
   .sf-card .sf-button,

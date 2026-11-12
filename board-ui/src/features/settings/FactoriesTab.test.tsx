@@ -11,6 +11,8 @@ async function openFactoriesSection() {
   const view = renderWithClient(<SettingsView />);
   fireEvent.click(screen.getByRole("tab", { name: "Manage factories" }));
   await screen.findByRole("link", { name: "Add factory" });
+  const delta = await screen.findByRole("button", { name: /Delta delta/ }).catch(() => null);
+  if (delta) fireEvent.click(delta);
   return view;
 }
 
@@ -276,4 +278,24 @@ describe("Factories tab restyle", () => {
     const primary = within(form).getAllByRole("button").filter((b) => b.classList.contains("sf-button-primary")).map((b) => b.textContent);
     expect(primary.sort()).toEqual(["Confirm change", "Save repo"]);
   });
+});
+
+it("preserves a dirty factory form when switching editors is declined", async () => {
+  await openFactoriesSection();
+  fireEvent.click(await screen.findByRole("button", { name: "Edit factory delta" }));
+  changeField("Name", "Unfinished name");
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+  fireEvent.click(screen.getByRole("button", { name: "Add repo to delta" }));
+  expect(confirm).toHaveBeenCalled();
+  expect(screen.getByLabelText("Name")).toHaveValue("Unfinished name");
+  expect(screen.queryByRole("form", { name: "Add repo to delta" })).toBeNull();
+});
+
+it("filters factories by id and clears the search", async () => {
+  await openFactoriesSection();
+  fireEvent.change(screen.getByLabelText("Search factories"), { target: { value: "blocks" } });
+  expect(screen.getByRole("region", { name: "Factory blocks" })).toBeInTheDocument();
+  expect(screen.queryByRole("region", { name: "Factory delta" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
+  expect(screen.getByRole("region", { name: "Factory delta" })).toBeInTheDocument();
 });

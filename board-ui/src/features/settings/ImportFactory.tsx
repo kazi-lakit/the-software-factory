@@ -19,7 +19,7 @@ const OUTCOME_TEXT = { already: "already there", created: "created", kept: "kept
  * Imports the JSON `factory migrate --export` wrote: pick or paste it, review what it creates, confirm. The owner's
  * session does the writes (repos, then the definition, then the legacy settings move). Repeating it is safe.
  */
-export function ImportFactory({ heading = true, onClose }: { heading?: boolean; onClose: () => void }) {
+export function ImportFactory({ heading = true, onClose, onDone = onClose }: { heading?: boolean; onClose: () => void; onDone?: () => void }) {
   const ids = useId();
   const client = useQueryClient();
   const [text, setText] = useState("");
@@ -98,7 +98,7 @@ export function ImportFactory({ heading = true, onClose }: { heading?: boolean; 
           <li>Legacy settings left: {result.remaining.join(", ") || "none"}.</li>
         </ul>
         {result.remaining.length > 0 ? <p className="sf-hint">Left rows have no value under the new scopes yet. Import again after fixing the factory.</p> : null}
-        <div className="sf-actions"><button type="button" className="sf-button" onClick={onClose}>Done</button></div>
+        <div className="sf-actions"><button type="button" className="sf-button" onClick={onDone}>Done</button></div>
       </section>
     );
   }

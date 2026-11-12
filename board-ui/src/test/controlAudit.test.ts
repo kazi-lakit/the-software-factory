@@ -17,8 +17,8 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
  *  -1 / +1 file: DependsOnPicker dropdown, New task page (T-26).
  *  -2: History drops Mode, Kind, From and To and adds the search and When (T-28).
  *  +4 / +1 file: New factory page's text field, Factory id, Active switch and Add a branch (T-32). */
-const EXPECTED_CONTROLS = 47;
-const EXPECTED_FILES = 14;
+const EXPECTED_CONTROLS = 48;
+const EXPECTED_FILES = 15;
 
 type Control = { file: string; tag: string; text: string };
 

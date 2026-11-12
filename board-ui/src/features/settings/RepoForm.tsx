@@ -88,6 +88,7 @@ export function RepoForm({ before, def, onCancel, onReload, onSaved }: Props) {
 
   return (
     <form className="sf-panel sf-form" aria-label={before ? `Edit repo ${before.repoId}` : `Add repo to ${def.factoryId}`} noValidate onSubmit={submit}>
+      <fieldset className="sf-fieldset"><legend>Repository details</legend>
       <div className="sf-field">
         <label className="sf-field-label" htmlFor={`${ids}-id`}>Repo id</label>
         <input id={`${ids}-id`} className="sf-input sf-mono" value={draft.repoId} readOnly={before !== null} onChange={(event) => set("repoId", event.target.value)} aria-describedby={`${ids}-id-hint`} />
@@ -102,10 +103,14 @@ export function RepoForm({ before, def, onCancel, onReload, onSaved }: Props) {
         <input id={`${ids}-base`} className="sf-input sf-mono" value={draft.baseBranch} onChange={(event) => set("baseBranch", event.target.value)} />
         <span className="sf-hint">The factory never uses main as a base.</span>
       </div>
+      </fieldset>
+      <fieldset className="sf-fieldset"><legend>Checks</legend>
       <div className="sf-field">
         <label className="sf-field-label" htmlFor={`${ids}-checks`}>Checks (JSON)</label>
         <textarea id={`${ids}-checks`} className="sf-input sf-mono" rows={12} value={draft.checks} onChange={(event) => set("checks", event.target.value)} />
       </div>
+      <span className="sf-hint">These commands run when the factory checks this repository.</span>
+      </fieldset>
       {invalidText ? <p className="sf-problem" role="alert">{invalidText}</p> : null}
       {review && base ? (
         <section className="sf-panel sf-checks-review" aria-label="Checks change">

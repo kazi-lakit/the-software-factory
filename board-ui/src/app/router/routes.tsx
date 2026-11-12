@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
+import { allowNavigation } from "../../lib/navigationGuard";
 import { AppShell } from "../AppShell";
 import { RedirectIfAuthenticated, RequireAuth, RequireOwner } from "./guards";
 import { ErrorPage } from "../../features/auth/ErrorPage";
@@ -28,9 +29,15 @@ const protectedRoutes: Record<string, ComponentType<PageProps>> = {
 export function AppRouter() {
   const [path, setPath] = useState(() => window.location.pathname);
   const [search, setSearch] = useState(() => window.location.search);
+  const route = useRef({ path, search });
+  route.current = { path, search };
 
   useEffect(() => {
     const onPopState = () => {
+      if (window.location.pathname !== route.current.path && !allowNavigation()) {
+        window.history.pushState({}, "", `${route.current.path}${route.current.search}#settings-factories`);
+        return;
+      }
       setPath(window.location.pathname);
       setSearch(window.location.search);
     };
@@ -42,6 +49,7 @@ export function AppRouter() {
     // A #fragment is the browser's (an anchor on the page), never part of the route.
     const [beforeHash = "/"] = nextPath.split("#");
     const [nextPathname = "/", queryString = ""] = beforeHash.split("?");
+    if (nextPathname !== path && !allowNavigation()) return;
     window.history.pushState({}, "", nextPath);
     setPath(nextPathname);
     setSearch(queryString ? `?${queryString}` : "");

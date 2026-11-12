@@ -52,6 +52,7 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
 
   return (
     <form className="sf-panel sf-form" aria-label={`Edit factory ${before.factoryId}`} noValidate onSubmit={(event) => { event.preventDefault(); void saving.save(draft); }}>
+      <fieldset className="sf-fieldset"><legend>Identity</legend>
       <div className="sf-field">
         <label className="sf-field-label" htmlFor={`${ids}-id`}>Factory id</label>
         <input
@@ -68,6 +69,11 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
         <input type="checkbox" role="switch" checked={draft.active} onChange={(event) => set("active", event.target.checked)} />
         <span>Active</span>
       </label>
+      {text("gitName", "Git name")}
+      {text("gitEmail", "Git email")}
+      {text("docsPath", "Docs path")}
+      {text("ghUser", "GitHub login", `The gh CLI account the factory opens PRs with (gh auth login on this Mac). Empty uses ${DEFAULT_GH_USER}.`)}
+      </fieldset>
       <fieldset className="sf-fieldset">
         <legend>Protected branches</legend>
         <ul className="sf-chips" aria-label="Protected branches">
@@ -99,10 +105,6 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
         </div>
         <span className="sf-hint">The factory never pushes to a protected branch.</span>
       </fieldset>
-      {text("gitName", "Git name")}
-      {text("gitEmail", "Git email")}
-      {text("docsPath", "Docs path")}
-      {text("ghUser", "GitHub login", `The gh CLI account the factory opens PRs with (gh auth login on this Mac). Empty uses ${DEFAULT_GH_USER}.`)}
       <fieldset className="sf-fieldset">
         <legend>Agent models</legend>
         {AGENT_STEPS.map((s) => (

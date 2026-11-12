@@ -107,7 +107,7 @@ describe("phone pills and lanes", () => {
   it("pill style", () => {
     const pill = phone(".sf-pill");
     expect(pill).toMatchObject({ "min-height": "44px", flex: "0 0 auto", border: "1px solid var(--sf-border)", "border-radius": "var(--sf-radius)", background: "transparent" });
-    expect(tokens(css, ":root")["--sf-radius"]).toBe("0px");
+    expect(tokens(css, ":root")["--sf-radius"]).toBe("6px");
   });
 
   it("selected pill uses primary-soft", () => {

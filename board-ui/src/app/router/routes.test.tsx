@@ -390,3 +390,13 @@ describe("the landing page", () => {
     await waitFor(() => expect(startLogin).toHaveBeenCalledWith("/tasks/T-12"));
   });
 });
+
+it("keeps the current route when a navigation guard rejects browser Back", async () => {
+  const { setNavigationGuard } = await import("../../lib/navigationGuard");
+  claims.mockResolvedValue(undefined);
+  renderAt("/login");
+  setNavigationGuard(() => false);
+  act(() => { window.history.pushState({}, "", "/profile"); window.dispatchEvent(new PopStateEvent("popstate")); });
+  expect(window.location.pathname).toBe("/login");
+  setNavigationGuard(undefined);
+});
