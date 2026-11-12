@@ -144,8 +144,8 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
           </div>
         </div>
         <button type="button" className="sf-button sf-filter-toggle" aria-expanded={filtersOpen} aria-controls={`${filterId}-options`} onClick={() => setFiltersOpen((open) => !open)}><SlidersHorizontal size={14} aria-hidden="true" />Filters{repo || showTest || factory !== "all" ? " (active)" : ""}</button>
+        <span className="sf-board-result-count">{board.isPending ? "Loading your workspace…" : `${visible.length} ${visible.length === 1 ? "task" : "tasks"} in view`}</span>{query || repo || showTest || factory !== "all" ? <button type="button" className="sf-button" onClick={() => { setQuery(""); setRepo(""); setShowTest(false); setPicked("all"); }}>Reset filters</button> : null}
         </div>
-        <div className="sf-board-results"><span>{board.isPending ? "Loading your workspace…" : `${visible.length} ${visible.length === 1 ? "task" : "tasks"} in view`}</span>{query || repo || showTest || factory !== "all" ? <button type="button" className="sf-button" onClick={() => { setQuery(""); setRepo(""); setShowTest(false); setPicked("all"); }}>Reset filters</button> : null}</div>
       </div>
       {board.data && visible.length === 0 && (query || repo) ? (
         <div className="sf-filter-empty">

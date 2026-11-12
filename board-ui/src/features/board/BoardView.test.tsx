@@ -921,3 +921,13 @@ describe("Board mobile filters", () => {
     expect(repo).toHaveValue("blocks/data");
   });
 });
+
+it("keeps the result count in the toolbar and resets active filters", async () => {
+  await seedTask({ title: "Searchable work" });
+  const { container } = renderBoard();
+  await screen.findByText("Searchable work");
+  fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Searchable" } });
+  expect(container.querySelector(".sf-board-filters")).toContainElement(screen.getByText("1 task in view"));
+  fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
+  expect(screen.getByRole("searchbox")).toHaveValue("");
+});

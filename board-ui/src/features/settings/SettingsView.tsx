@@ -39,6 +39,8 @@ function describeSettingsError(error: unknown): WriteProblem {
 
 /** Blank is not zero: an empty limit is refused by the range check, not saved as 0. */
 const parseNumber = (text: string): number => (text.trim() === "" ? Number.NaN : Number(text.trim()));
+const fieldProblem = (problem: WriteProblem | undefined, key: LimitKey): string | undefined =>
+  problem?.kind === "message" && problem.message.startsWith(`${key} must `) ? problem.message : undefined;
 
 /** After a save: the shell's pause state, this view and the History all read the new settings. */
 function useSaved(onNotice: (text: string) => void) {
@@ -262,6 +264,7 @@ function PauseControl({ factoryId, onNotice, onReload, paused }: ScopeProps & { 
 
   return (
     <>
+      <p className="sf-hint">Status: <strong>{paused ? "Paused" : "Running"}</strong></p>
       <label className="sf-switch">
         <input type="checkbox" role="switch" checked={paused} disabled={busy} onChange={() => void toggle()} aria-describedby={`${ids}-hint`} />
         <span>Pause the factory</span>
@@ -307,6 +310,7 @@ function GlobalForm({
 
   function edit(key: GlobalKey, text: string) {
     draft.set(key, text);
+    if (key in SETTING_RANGES && fieldProblem(problem, key as LimitKey)) setProblem(undefined);
     setDone(false);
   }
 
@@ -362,13 +366,15 @@ function GlobalForm({
               inputMode={SETTING_RANGES[key].integer ? "numeric" : "decimal"}
               value={draft.value(key)}
               onChange={(event) => edit(key, event.target.value)}
-              aria-describedby={`${ids}-${key}-hint`}
+              aria-describedby={`${ids}-${key}-hint${fieldProblem(problem, key) ? ` ${ids}-${key}-error` : ""}`}
+              aria-invalid={fieldProblem(problem, key) ? true : undefined}
             />
             <span id={`${ids}-${key}-hint`} className="sf-hint">{hint}</span>
+            {fieldProblem(problem, key) ? <span id={`${ids}-${key}-error`} className="sf-problem" role="alert">{fieldProblem(problem, key)}</span> : null}
           </div>
         ))}
       </div>
-      <WriteProblemNotice problem={problem} onReload={() => { setProblem(undefined); void onReload(); }} />
+      <WriteProblemNotice problem={LIMITS.some(({ key }) => fieldProblem(problem, key)) ? undefined : problem} onReload={() => { setProblem(undefined); void onReload(); }} />
       <div className="sf-actions">
         <button type="submit" className="sf-button sf-button-primary" disabled={busy}>Save gates and limits</button>
         {done && draft.changed.length === 0 ? <span className="sf-muted">Saved.</span> : null}
@@ -484,6 +490,7 @@ function RepoRow({ mounted, open, onToggle, repo, ...rest }: RepoRowProps & { mo
 
 /** One repo's gate and limit overrides; Inherit and an empty limit save as null. */
 function RepoOverrideForm({ factoryId, global, noteId, onClose, onNotice, onReload, onUnsavedChange, repo, stored }: RepoRowProps & { onClose: () => void; onUnsavedChange: (unsaved: boolean) => void; repo: string }) {
+  const ids = useId();
   const draft = useScopeDraft(REPO_KEYS, repoDraft(stored));
   const unsaved = draft.changed.length > 0;
   useEffect(() => { onUnsavedChange(unsaved); }, [onUnsavedChange, unsaved]);
@@ -494,6 +501,7 @@ function RepoOverrideForm({ factoryId, global, noteId, onClose, onNotice, onRelo
 
   function edit(key: RepoKey, text: string) {
     draft.set(key, text);
+    if (key in SETTING_RANGES && fieldProblem(problem, key as LimitKey)) setProblem(undefined);
     setDone(false);
   }
 
@@ -548,13 +556,16 @@ function RepoOverrideForm({ factoryId, global, noteId, onClose, onNotice, onRelo
               inputMode={SETTING_RANGES[key].integer ? "numeric" : "decimal"}
               aria-label={`${repo} ${repoLabel}`}
               placeholder={`Inherit (${global[key]})`}
+              aria-invalid={fieldProblem(problem, key) ? true : undefined}
+              aria-describedby={fieldProblem(problem, key) ? `${ids}-${key}-error` : undefined}
               value={draft.value(key)}
               onChange={(event) => edit(key, event.target.value)}
             />
+            {fieldProblem(problem, key) ? <span id={`${ids}-${key}-error`} className="sf-problem" role="alert">{fieldProblem(problem, key)}</span> : null}
           </label>
         ))}
       </div>
-      <WriteProblemNotice problem={problem} onReload={() => { setProblem(undefined); void onReload(); }} />
+      <WriteProblemNotice problem={REPO_LIMITS.some(({ key }) => fieldProblem(problem, key)) ? undefined : problem} onReload={() => { setProblem(undefined); void onReload(); }} />
       <div className="sf-actions">
         <button type="submit" className="sf-button" aria-label={`Save ${repo}`} disabled={busy}>Save</button>
         <button type="button" className="sf-button" onClick={onClose}>Close</button>

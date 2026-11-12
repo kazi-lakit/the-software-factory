@@ -31,8 +31,9 @@ function QaItem({ entry, nowMs }: { entry: QaEntry; nowMs: number }) {
           {entry.options.length > 0 ? <span className="sf-chip">{entry.options.length} options offered</span> : null}
         </div>
       ) : null}
+      <details open={entry.open || undefined}>
+      <summary className="sf-qa-question">{entry.question}</summary>
       <p className="sf-qa-label">{qaLabelLine(entry, nowMs)}</p>
-      <p className="sf-qa-question">{entry.question}</p>
       {entry.options.length > 0 ? (
         <ul className="sf-qa-options">
           {entry.options.map((option) => (
@@ -55,6 +56,7 @@ function QaItem({ entry, nowMs }: { entry: QaEntry; nowMs: number }) {
       ) : entry.open ? null : (
         <p className="sf-muted">No answer recorded</p>
       )}
+      </details>
     </li>
   );
 }

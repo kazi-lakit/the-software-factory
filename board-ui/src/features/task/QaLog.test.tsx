@@ -131,3 +131,11 @@ describe("EarlierQuestions", () => {
     expect(container).toBeEmptyDOMElement();
   });
 });
+
+it("collapses earlier questions under their question text", () => {
+  const { container } = render(<QaLog nowMs={NOW} entries={[entry({ question: "Which branch?", options: OPTIONS })]} />);
+  const details = container.querySelector("details")!;
+  expect(details).not.toHaveAttribute("open");
+  expect(details.querySelector("summary")).toHaveTextContent("Which branch?");
+  expect(within(details).getByText("Recommended")).toBeInTheDocument();
+});

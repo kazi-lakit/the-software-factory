@@ -27,3 +27,15 @@ it("opens legacy settings fragments", async () => {
   renderWithClient(<SettingsView />);
   expect(await screen.findByRole("table", { name: "Repos" })).toBeVisible();
 });
+
+it("shows factory state and places a validation error beside its field", async () => {
+  renderWithClient(<SettingsView />);
+  expect(await screen.findByText("Running")).toBeVisible();
+  fireEvent.click(screen.getByRole("tab", { name: "Gates & limits" }));
+  const field = await screen.findByLabelText("Tasks at once");
+  fireEvent.change(field, { target: { value: "0" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save gates and limits" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("maxParallel must");
+  expect(field).toHaveAttribute("aria-invalid", "true");
+  expect(field.parentElement).toContainElement(screen.getByRole("alert"));
+});

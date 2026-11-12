@@ -3115,6 +3115,28 @@ textarea.sf-input {
 :where(.sf-board-page) .sf-board-results { padding: 4px 12px; align-items: center; }
 :where(.sf-board-page .sf-board-results) .sf-button { min-height: 44px; }
 
+
+.sf-qa-question { cursor: pointer; overflow-wrap: anywhere; }
+.sf-board-result-count { color: var(--sf-muted); font-size: 11px; }
+
+@media (min-width: 1000px) {
+  .sf-main:has(.sf-board-page) { padding-top: 16px; }
+  .sf-board-page .sf-page-heading { margin-bottom: 6px; }
+  .sf-board-page .sf-page-title { font-size: 40px; line-height: 1; }
+  .sf-board-page .sf-queue-summary { margin-bottom: 6px; }
+  .sf-board-page .sf-queue-stat { padding: 5px 10px; }
+  .sf-board-page .sf-board-controls { margin-bottom: 8px; }
+  .sf-board-page .sf-board-filters { flex-wrap: nowrap; align-items: center; padding: 6px 8px; }
+  .sf-board-page .sf-board-filters:has(input[type="checkbox"]) { flex-wrap: wrap; }
+  .sf-board-page .sf-board-filter-fields > .sf-inline-field:not(:has(input)) { flex: 0 1 170px; min-width: 0; }
+  .sf-board-page .sf-board-filter-fields > .sf-inline-field:not(:has(input)) > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .sf-board-page .sf-board-filter-fields .sf-select { width: 100%; min-width: 0; }
+  .sf-board-page .sf-board-search { flex: 1 1 180px; min-width: 120px; }
+  .sf-board-page .sf-board-view { margin-left: 0; flex: none; }
+  .sf-board-page .sf-board-view-label { display: none; }
+  .sf-board-page .sf-board-result-count { white-space: nowrap; }
+}
+
 @media (max-width: 639px) {
   .sf-card .sf-button,
   .sf-card .sf-card-cta {
@@ -3550,6 +3572,8 @@ textarea.sf-input {
   .sf-repo-table tr.sf-repo-edit-row[hidden] { display: none; }
   .sf-repo-table .sf-field-row { display: flex; flex-direction: column; }
 
-  .sf-board-page .sf-board-results:has(> span:only-child) { display: none; }
+  .sf-board-page .sf-board-result-count { display: none; }
+
+  .sf-board-page .sf-lane-hint { min-height: 0; margin-bottom: 10px; }
 
 }
