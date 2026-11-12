@@ -3220,6 +3220,12 @@ textarea.sf-input {
   .sf-settings .sf-page-heading {
     flex-direction: column;
     align-items: stretch;
+    margin-bottom: 0;
+  }
+
+  .sf-settings .sf-page-heading > div,
+  .sf-settings .sf-page-heading .sf-inline-field {
+    flex-basis: auto;
   }
 
   .sf-settings .sf-page-heading .sf-inline-field,

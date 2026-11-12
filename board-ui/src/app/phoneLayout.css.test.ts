@@ -314,3 +314,8 @@ describe("settings factory picker on phones", () => {
     expect(phone(".sf-settings .sf-page-heading .sf-select")).toMatchObject({ "min-width": "0", width: "100%" });
   });
 });
+
+it("settings heading and factory picker do not reserve desktop flex heights on phones", () => {
+  expect(phone(".sf-settings .sf-page-heading > div")["flex-basis"]).toBe("auto");
+  expect(phone(".sf-settings .sf-page-heading .sf-inline-field")["flex-basis"]).toBe("auto");
+});
