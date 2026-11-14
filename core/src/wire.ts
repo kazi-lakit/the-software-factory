@@ -10,6 +10,8 @@ import { Engine } from './engine.js';
 import { LocalGitRepos } from './git.js';
 import { OctokitGitHub, type GitHub, type GitHubFor } from './github.js';
 import { FactoryConfig } from './factories.js';
+import { OctokitGitHubBoard, type GitHubBoard, type GitHubBoardFor, type ProjectInfo, type RepoRef } from './githubBoard.js';
+import type { ProjectRef } from './githubConfig.js';
 import { GhLoginMissingError, readGhToken, realExecFile, SecretMissingError, type ExecFile } from './secrets.js';
 import { FileStore, type BoardStore } from './store.js';
 import type { Mode } from './types.js';
@@ -44,15 +46,15 @@ export function findRoot(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = p
   }
 }
 
-/** One GitHub client per gh login, each created on its first call, so commands that never touch GitHub read no token. A failed read is not cached. */
-class LazyGitHub implements GitHub {
-  private inner: Promise<GitHub> | undefined;
+/** Builds a gh login's client from its token on the first use (one read, a failed read is not cached); a missing login becomes GhLoginMissingError. */
+class LoadOnce<T> {
+  private inner: Promise<T> | undefined;
   constructor(
     private readonly user: string,
     private readonly read: (user: string) => Promise<string>,
-    private readonly make: (token: string) => GitHub,
+    private readonly make: (token: string) => T,
   ) {}
-  private get gh(): Promise<GitHub> {
+  get(): Promise<T> {
     if (!this.inner) {
       const loading = this.read(this.user).then(
         (token) => this.make(token),
@@ -62,6 +64,17 @@ class LazyGitHub implements GitHub {
       this.inner = loading;
     }
     return this.inner;
+  }
+}
+
+/** One GitHub client per gh login, each created on its first call, so commands that never touch GitHub read no token. A failed read is not cached. */
+class LazyGitHub implements GitHub {
+  private readonly loader: LoadOnce<GitHub>;
+  constructor(user: string, read: (user: string) => Promise<string>, make: (token: string) => GitHub) {
+    this.loader = new LoadOnce(user, read, make);
+  }
+  private get gh(): Promise<GitHub> {
+    return this.loader.get();
   }
   async ensureReady() {
     await this.gh;
@@ -91,6 +104,74 @@ export function lazyGitHubFor(
   return (user) => {
     let c = clients.get(user);
     if (!c) clients.set(user, (c = new LazyGitHub(user, readToken, make)));
+    return c;
+  };
+}
+
+/** The GitHubBoard of one gh login, created on its first call like LazyGitHub. */
+class LazyGitHubBoard implements GitHubBoard {
+  private readonly loader: LoadOnce<GitHubBoard>;
+  constructor(user: string, read: (user: string) => Promise<string>, make: (token: string) => GitHubBoard) {
+    this.loader = new LoadOnce(user, read, make);
+  }
+  private get b(): Promise<GitHubBoard> {
+    return this.loader.get();
+  }
+  async ensureReady() {
+    await this.b;
+  }
+  async tokenScopes() {
+    return (await this.b).tokenScopes();
+  }
+  async project(p: ProjectRef) {
+    return (await this.b).project(p);
+  }
+  async listItems(p: ProjectInfo) {
+    return (await this.b).listItems(p);
+  }
+  async createIssue(r: RepoRef, i: Parameters<GitHubBoard['createIssue']>[1]) {
+    return (await this.b).createIssue(r, i);
+  }
+  async updateIssue(r: RepoRef, number: number, patch: Parameters<GitHubBoard['updateIssue']>[2]) {
+    return (await this.b).updateIssue(r, number, patch);
+  }
+  async closeIssue(r: RepoRef, number: number, reason: 'completed' | 'not_planned') {
+    return (await this.b).closeIssue(r, number, reason);
+  }
+  async addToProject(p: ProjectInfo, issueNodeId: string) {
+    return (await this.b).addToProject(p, issueNodeId);
+  }
+  async setStatus(p: ProjectInfo, itemId: string, option: string) {
+    return (await this.b).setStatus(p, itemId, option);
+  }
+  async listComments(r: RepoRef, number: number, since?: string) {
+    return (await this.b).listComments(r, number, since);
+  }
+  async addComment(r: RepoRef, number: number, body: string) {
+    return (await this.b).addComment(r, number, body);
+  }
+  async reactToComment(r: RepoRef, commentId: number, content: '+1') {
+    return (await this.b).reactToComment(r, commentId, content);
+  }
+  async labelExists(r: RepoRef, name: string) {
+    return (await this.b).labelExists(r, name);
+  }
+  async createLabel(r: RepoRef, name: string) {
+    return (await this.b).createLabel(r, name);
+  }
+}
+
+/** `GitHubBoardFor` over the gh CLI logins: lazy, and one client per login. */
+export function lazyGitHubBoardFor(
+  read?: (user: string) => Promise<string>,
+  make: (token: string) => GitHubBoard = (token) => new OctokitGitHubBoard(token),
+  exec: ExecFile = realExecFile,
+): GitHubBoardFor {
+  const readToken = read ?? ((user: string) => readGhToken(user, exec));
+  const clients = new Map<string, GitHubBoard>();
+  return (user) => {
+    let c = clients.get(user);
+    if (!c) clients.set(user, (c = new LazyGitHubBoard(user, readToken, make)));
     return c;
   };
 }

@@ -3,7 +3,8 @@ import { describe, expect, test, vi } from 'vitest';
 import type { BlocksCredential } from '../src/blocks/credential.js';
 import { GhLoginMissingError, SecretMissingError, type ExecFile } from '../src/secrets.js';
 import { FakeGitHub } from '../src/github.js';
-import { lazyGitHubFor, LazyBlocksStore, wire } from '../src/wire.js';
+import { FakeGitHubBoard } from '../src/githubBoard.js';
+import { lazyGitHubBoardFor, lazyGitHubFor, LazyBlocksStore, wire } from '../src/wire.js';
 import { MemoryStore, type BoardStore } from '../src/store.js';
 
 const cred: BlocksCredential = { clientId: 'i', clientSecret: 's', projectKey: 'p', apiUrl: 'u' };
@@ -145,6 +146,32 @@ describe('lazyGitHubFor', () => {
     const a = lazyGitHubFor(read, () => new FakeGitHub())('x');
     await expect(a.prState('https://github.com/o/r/pull/1')).rejects.toThrow('missing');
     await expect(a.prState('https://github.com/o/r/pull/1')).rejects.toThrow('unknown pull request');
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('lazyGitHubBoardFor', () => {
+  test('reads the token once per login, on the first call, with one client per login', async () => {
+    const reads: string[] = [];
+    const made: string[] = [];
+    const boardFor = lazyGitHubBoardFor(async (u) => { reads.push(u); return `tok-${u}`; }, (tok) => { made.push(tok); return new FakeGitHubBoard(); });
+    const a = boardFor('user-a');
+    expect(boardFor('user-a')).toBe(a);
+    expect(boardFor('user-b')).not.toBe(a);
+    expect(reads).toEqual([]);
+    await Promise.all([a.tokenScopes(), a.tokenScopes()]);
+    await a.labelExists({ owner: 'o', repo: 'r' }, 'factory');
+    expect(reads).toEqual(['user-a']);
+    expect(made).toEqual(['tok-user-a']);
+  });
+
+  test('a missing login rejects with GhLoginMissingError and is read again on the next call', async () => {
+    const read = vi.fn<(u: string) => Promise<string>>().mockRejectedValueOnce(new SecretMissingError('x not found')).mockResolvedValue('t');
+    const b = lazyGitHubBoardFor(read, () => new FakeGitHubBoard())('user-a');
+    const err = await b.tokenScopes().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GhLoginMissingError);
+    expect(err).toMatchObject({ user: 'user-a' });
+    await expect(b.tokenScopes()).resolves.toEqual(['repo', 'project']);
     expect(read).toHaveBeenCalledTimes(2);
   });
 });
