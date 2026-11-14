@@ -7,6 +7,8 @@ export { assertMove, canMove, IllegalMoveError, STEP_STATUS, TERMINAL } from './
 export { isMainRef, isProtected } from './branches.js';
 export { AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, ensureMain, validateFactoryDef, validateFactoryRepo, FactoryConfig } from './factories.js';
 export type { AgentModel, AgentModels, FactoryDef, FactoryRepo, FactoryHealth } from './factories.js';
+export { DEFAULT_LABEL, parseProjectRef, validateGitHubSettings } from './githubConfig.js';
+export type { GitHubMode, GitHubSettings, ProjectRef } from './githubConfig.js';
 export { IMPORT_FORMAT, validateImportFile } from './importFile.js';
 export type { ImportFile } from './importFile.js';
 export { GATE_DOC, resolveSettings, resolveGates, validApproval, shouldMerge } from './gates.js';

@@ -1,7 +1,11 @@
 // Pure (no Node API): the browser entry validates factory definitions with it.
 import { isMainRef } from './branches.js';
 import { ChecksSchema, type Checks } from './checksSchema.js';
+import { validateGitHubSettings, type GitHubSettings } from './githubConfig.js';
 import type { AgentStep } from './types.js';
+import { GH_USER_PATTERN, type Validated } from './validated.js';
+
+export { GH_USER_PATTERN, type Validated };
 
 /** The stages whose agent a factory can set a model for. */
 export const AGENT_STEPS: readonly AgentStep[] = ['spec', 'plan', 'build', 'verify', 'review'];
@@ -22,6 +26,8 @@ export interface FactoryDef {
   active: boolean;
   /** Model per stage agent; a stage left out runs on the session's model. */
   agentModels?: AgentModels;
+  /** GitHub Issues and Projects integration; absent = the factory does not use GitHub. */
+  github?: GitHubSettings;
   version: number;
 }
 
@@ -41,16 +47,12 @@ export interface FactoryHealth {
   checkedAt: string;
 }
 
-export type Validated<T> = { ok: true; value: T } | { ok: false; error: string };
-
 export const ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 export const ID_MAX = 40;
 /** The settings scope of the whole Board; no factory may take it. */
 export const RESERVED_ID = 'global';
 /** The gh login a factory uses when its definition leaves `ghUser` empty. */
 export const DEFAULT_GH_USER = 'kazi-lakit';
-/** A GitHub login: letters, digits and single inner hyphens, at most 39 characters. */
-export const GH_USER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 export const isValidId = (v: unknown): v is string => typeof v === 'string' && v.length <= ID_MAX && ID_PATTERN.test(v);
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -111,11 +113,13 @@ export function validateFactoryDef(input: unknown): Validated<FactoryDef> {
   if (typeof version !== 'number' || !Number.isInteger(version) || version < 0) return fail('version must be a whole number');
   const models = agentModelsOf(input.agentModels);
   if (!models.ok) return models;
+  const github = validateGitHubSettings(input.github, ghUser);
+  if (!github.ok) return github;
   return {
     ok: true,
     value: {
       factoryId, name, protectedBranches: ensureMain(rawBranches as string[]), gitName, gitEmail, docsPath,
-      ghUser, active, ...(models.value ? { agentModels: models.value } : {}), version,
+      ghUser, active, ...(models.value ? { agentModels: models.value } : {}), ...(github.value ? { github: github.value } : {}), version,
     },
   };
 }

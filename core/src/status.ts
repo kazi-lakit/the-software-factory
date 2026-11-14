@@ -15,11 +15,11 @@ export class IllegalMoveError extends Error {
 
 export const TERMINAL: ReadonlySet<Status> = new Set<Status>(['done', 'cancelled']);
 
-const ALL: Status[] = [
+export const ALL_STATUSES: readonly Status[] = [
   'inbox', 'ready', 'spec', 'spec_review', 'plan', 'plan_review', 'build',
   'verify', 'review', 'pr_open', 'done', 'blocked', 'cancelled',
 ];
-const NON_TERMINAL = ALL.filter((s) => !TERMINAL.has(s));
+const NON_TERMINAL = ALL_STATUSES.filter((s) => !TERMINAL.has(s));
 
 const CORE_PAIRS: ReadonlyArray<readonly [Status, Status]> = [
   ['ready', 'spec'],

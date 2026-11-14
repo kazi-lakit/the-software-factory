@@ -107,6 +107,24 @@ describe('validateFactoryDef', () => {
   });
 });
 
+describe('validateFactoryDef github block', () => {
+  const statusMap = { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress',
+    plan_review: 'In progress', build: 'In progress', verify: 'In progress', review: 'In progress',
+    pr_open: 'In review', done: 'Merged', blocked: 'In progress', cancelled: 'Backlog' };
+  const block = (over = {}) => ({ mode: 'github-only', project: 'kazi-lakit/3', statusMap, ...over });
+  test('a def without github has no github key', () => {
+    const r = validateFactoryDef(defInput());
+    expect(r.ok && 'github' in r.value).toBe(false);
+  });
+  test('a valid block is carried', () => {
+    const r = validateFactoryDef(defInput({ github: block() }));
+    expect(r).toMatchObject({ ok: true, value: { github: { mode: 'github-only', project: { owner: 'kazi-lakit', number: 3 }, approvers: ['kazi-lakit'] } } });
+  });
+  test('a bad block fails with its error', () => {
+    expect(validateFactoryDef(defInput({ github: block({ mode: 'mirror' }) }))).toEqual({ ok: false, error: 'github.mode must be github-only or connected' });
+  });
+});
+
 describe('validateFactoryRepo', () => {
   const def = defOf('delta');
   test.each(['main', 'refs/heads/main', 'origin/main', ' Main '])('main is never a base (%j)', (baseBranch) => {
