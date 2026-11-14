@@ -105,10 +105,10 @@ describe('doctor', () => {
 
   test('a client error fails the check with its first line and the next factory is still checked', async () => {
     const bad: GitHubBoard = Object.assign(Object.create(setup()) as GitHubBoard, {
-      tokenScopes: async () => { throw new Error('boom gho_secret\nsecond line'); },
+      tokenScopes: async () => { throw new Error('boom gho_secret123\nsecond line'); },
     });
     const out = await doctor({ defs: [def('a', gh()), def('b')], repos: [], store: 'file', loggedIn: LOGGED, boardFor: () => bad });
-    expect(out.find((c) => c.check === 'scope')).toMatchObject({ ok: false, detail: 'boom gho_secret' });
+    expect(out.find((c) => c.check === 'scope')).toMatchObject({ ok: false, detail: 'boom [redacted]' });
     expect(out.at(-1)).toMatchObject({ factoryId: 'b', check: 'gh login' });
   });
 
@@ -120,7 +120,23 @@ describe('doctor', () => {
   });
 
   test('no detail carries a token', async () => {
-    const out = await run(setup(), [def('a', gh())]);
-    expect(out.some((c) => c.detail.includes('gho_'))).toBe(false);
+    const board = setup();
+    board.project = async () => { throw new Error('Bad credentials for github_pat_ABC_123'); };
+    const out = await run(board, [def('a', gh())]);
+    expect(out.find((c) => c.check === 'project')).toMatchObject({ ok: false, detail: 'Bad credentials for [redacted]' });
+    expect(out.some((c) => /\b(?:gh[opsur]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)\b/.test(c.detail))).toBe(false);
+  });
+
+  test('an empty label makes no labelExists call', async () => {
+    const board = setup();
+    let calls = 0;
+    board.labelExists = async () => { calls++; return true; };
+    await run(board, [def('a', gh({ label: '' }))]);
+    expect(calls).toBe(0);
+  });
+
+  test('a repo with a non-GitHub remote gets no label check', async () => {
+    const out = await run(setup(), [def('a', gh())], [repoFixture('a', 'api', { remote: 'git@example.com:org/api.git' })]);
+    expect(names(out).some((n) => n.startsWith('label'))).toBe(false);
   });
 });
