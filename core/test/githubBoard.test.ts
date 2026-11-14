@@ -22,8 +22,13 @@ describe('OctokitGitHubBoard', () => {
     expect(urlOf((fetchStub.mock.calls[0] as unknown as Call)[0])).toMatch(/\/user$/);
   });
 
-  test('tokenScopes is empty without the header', async () => {
+  test('tokenScopes is null without the header', async () => {
     const fetchStub = vi.fn(async () => json({ login: 'u' }));
+    expect(await board(fetchStub).tokenScopes()).toBeNull();
+  });
+
+  test('tokenScopes is empty for an empty header', async () => {
+    const fetchStub = vi.fn(async () => json({ login: 'u' }, 200, { 'x-oauth-scopes': '' }));
     expect(await board(fetchStub).tokenScopes()).toEqual([]);
   });
 
@@ -77,6 +82,15 @@ describe('OctokitGitHubBoard', () => {
     expect(fetchStub).toHaveBeenCalledTimes(2);
     expect(bodyOf(fetchStub.mock.calls[0]).variables).toMatchObject({ id: 'P1', after: null });
     expect(bodyOf(fetchStub.mock.calls[1]).variables).toMatchObject({ id: 'P1', after: 'c1' });
+    expect(bodyOf(fetchStub.mock.calls[0]).query).toContain('labels(first: 100)');
+  });
+
+  test('listItems maps an unknown stateReason such as DUPLICATE to null', async () => {
+    const page = { nodes: [{ id: 'IT1', fieldValueByName: null, content: { ...issueNode(1), state: 'CLOSED', stateReason: 'DUPLICATE' } }],
+      pageInfo: { hasNextPage: false, endCursor: null } };
+    const fetchStub = vi.fn(async () => json({ data: { node: { items: page } } }));
+    const [item] = await board(fetchStub).listItems(info);
+    expect(item!.issue).toMatchObject({ state: 'closed', stateReason: null });
   });
 
   test('setStatus with an unknown option rejects before any network call', async () => {

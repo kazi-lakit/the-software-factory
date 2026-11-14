@@ -38,14 +38,16 @@ export async function doctor(o: {
 
     const mine = problems.filter((p) => p.factoryId === factoryId);
     if (mine.length === 0) add('config', true, 'ok');
-    for (const p of mine) add('config', false, p.message);
+    for (const p of mine) add(p.repoId ? `config ${p.repoId}` : 'config', false, p.message);
 
     const board = await attempt('scope', async () => o.boardFor(def.ghUser));
     if (!board) continue;
     const scopes = await attempt('scope', () => board.tokenScopes());
-    const scopeOk = scopes !== undefined && (scopes.includes('project')
-      ? add('scope', true, 'project scope present')
-      : add('scope', false, 'the gh login needs the project scope (run: gh auth refresh -s project)'));
+    const scopeOk = scopes !== undefined && (scopes === null
+      ? add('scope', false, 'the gh login token has no OAuth scopes (fine-grained or app token); log in with gh auth login to get a token with the project scope')
+      : scopes.includes('project')
+        ? add('scope', true, 'project scope present')
+        : add('scope', false, 'the gh login needs the project scope (run: gh auth refresh -s project)'));
     if (scopeOk) {
       const ref = github.project;
       const info: ProjectInfo | null | undefined = await attempt('project', () => board.project(ref));

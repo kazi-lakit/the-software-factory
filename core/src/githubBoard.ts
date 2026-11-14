@@ -24,8 +24,8 @@ export class UnknownStatusOptionError extends Error {
 export interface GitHubBoard {
   /** Resolves the credential up front; rejects with GhLoginMissingError when the gh login is not logged in. Clients without a lazy credential omit it. */
   ensureReady?(): Promise<void>;
-  /** The token's scopes, from the x-oauth-scopes header of GET /user. */
-  tokenScopes(): Promise<string[]>;
+  /** The token's scopes, from the x-oauth-scopes header of GET /user; null when the header is absent (fine-grained or app tokens). */
+  tokenScopes(): Promise<string[] | null>;
   /** A user's or an org's Project with its single select field named "Status"; null when absent. */
   project(p: ProjectRef): Promise<ProjectInfo | null>;
   /** Every issue item on the Project (all pages, 100 per page). */
@@ -72,7 +72,7 @@ const ITEMS_QUERY = `query($id: ID!, $after: String) {
             __typename
             ... on Issue {
               number id title body state stateReason updatedAt
-              labels(first: 50) { nodes { name } }
+              labels(first: 100) { nodes { name } }
               repository { owner { login } name }
             }
           }
@@ -101,6 +101,10 @@ interface ItemsPage {
   pageInfo: { hasNextPage: boolean; endCursor: string | null };
 }
 
+const STATE_REASONS = new Map<string, BoardIssue['stateReason']>([['COMPLETED', 'completed'], ['NOT_PLANNED', 'not_planned'], ['REOPENED', 'reopened']]);
+/** Reasons the board does not model (such as DUPLICATE) read as null. */
+const stateReasonOf = (r: string | null): BoardIssue['stateReason'] => (r ? STATE_REASONS.get(r) ?? null : null);
+
 type RestComment = { id: number; user?: { login: string } | null; body?: string; created_at: string };
 const toComment = (c: RestComment): IssueComment => ({ id: c.id, author: c.user?.login ?? '', body: c.body ?? '', createdAt: c.created_at });
 
@@ -111,10 +115,10 @@ export class OctokitGitHubBoard implements GitHubBoard {
     this.octokit = new Octokit({ auth: token, ...(opts?.fetch ? { request: { fetch: opts.fetch } } : {}) });
   }
 
-  async tokenScopes(): Promise<string[]> {
+  async tokenScopes(): Promise<string[] | null> {
     const { headers } = await this.octokit.rest.users.getAuthenticated();
     const raw = headers['x-oauth-scopes'];
-    return typeof raw === 'string' ? raw.split(',').map((s) => s.trim()).filter(Boolean) : [];
+    return typeof raw === 'string' ? raw.split(',').map((s) => s.trim()).filter(Boolean) : null;
   }
 
   async project(p: ProjectRef): Promise<ProjectInfo | null> {
@@ -146,7 +150,7 @@ export class OctokitGitHubBoard implements GitHubBoard {
           issue: {
             repo: { owner: c.repository.owner.login, repo: c.repository.name }, number: c.number, nodeId: c.id, title: c.title, body: c.body,
             state: c.state === 'CLOSED' ? 'closed' : 'open',
-            stateReason: c.stateReason ? (c.stateReason.toLowerCase() as BoardIssue['stateReason']) : null,
+            stateReason: stateReasonOf(c.stateReason),
             labels: c.labels.nodes.map((l) => l.name), updatedAt: c.updatedAt,
           },
         });
@@ -215,7 +219,8 @@ type FakeIssue = BoardIssue & { comments: IssueComment[]; itemStatus?: string | 
 
 /** In-memory GitHubBoard for tests. Repos and Project owners compare case-insensitively. */
 export class FakeGitHubBoard implements GitHubBoard {
-  scopes: string[] = ['repo', 'project'];
+  /** null: the token has no x-oauth-scopes header. */
+  scopes: string[] | null = ['repo', 'project'];
   /** Key `${owner}/${repo}` lower-cased. */
   labels = new Map<string, Set<string>>();
   readonly reactions: { commentId: number; content: string }[] = [];
@@ -249,8 +254,8 @@ export class FakeGitHubBoard implements GitHubBoard {
     return i;
   }
 
-  async tokenScopes(): Promise<string[]> {
-    return [...this.scopes];
+  async tokenScopes(): Promise<string[] | null> {
+    return this.scopes ? [...this.scopes] : null;
   }
 
   async project(p: ProjectRef): Promise<ProjectInfo | null> {

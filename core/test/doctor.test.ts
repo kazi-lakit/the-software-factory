@@ -54,6 +54,17 @@ describe('doctor', () => {
     expect(out[2]).toMatchObject({ ok: false, detail: 'the gh login needs the project scope (run: gh auth refresh -s project)' });
   });
 
+  test('a token without OAuth scopes fails the scope check with its own detail', async () => {
+    const board = setup();
+    board.scopes = null;
+    const out = await run(board, [def('a', gh())]);
+    expect(out.find((c) => c.check === 'scope')).toMatchObject({
+      ok: false,
+      detail: 'the gh login token has no OAuth scopes (fine-grained or app token); log in with gh auth login to get a token with the project scope',
+    });
+    expect(names(out)).not.toContain('project');
+  });
+
   test('project not found', async () => {
     const out = await run(setup(null), [def('a', gh())]);
     expect(out.find((c) => c.check === 'project')).toMatchObject({ ok: false, detail: 'project kazi-lakit/3 not found or not visible to kazi-lakit' });
@@ -89,10 +100,17 @@ describe('doctor', () => {
     const a = def('a', gh());
     const b = def('b', gh());
     const out = await run(setup(), [a, b], [repoFixture('a', 'api'), repoFixture('b', 'api')]);
-    expect(out.filter((c) => c.check === 'config')).toEqual([
+    expect(out.filter((c) => c.check.startsWith('config'))).toEqual([
       { factoryId: 'a', check: 'config', ok: true, detail: 'ok' },
-      { factoryId: 'b', check: 'config', ok: false, detail: 'org/api is already used by a/api; a GitHub repo can belong to only one factory repo' },
+      { factoryId: 'b', check: 'config api', ok: false, detail: 'org/api is already used by a/api; a GitHub repo can belong to only one factory repo' },
     ]);
+  });
+
+  test('a config problem without a repo is named config', async () => {
+    const out = await doctor({ defs: [def('a', gh())], repos: [], store: 'blocks', loggedIn: LOGGED, boardFor: () => setup() });
+    expect(out.find((c) => c.check.startsWith('config'))).toEqual(
+      { factoryId: 'a', check: 'config', ok: false, detail: 'github mode github-only needs the file store' },
+    );
   });
 
   test('only limits the factories checked but duplicates are still found', async () => {
@@ -100,7 +118,7 @@ describe('doctor', () => {
     const b = def('b', gh());
     const out = await run(setup(), [a, b], [repoFixture('a', 'api'), repoFixture('b', 'api')], { only: ['b'] });
     expect(new Set(out.map((c) => c.factoryId))).toEqual(new Set(['b']));
-    expect(out.some((c) => c.check === 'config' && !c.ok)).toBe(true);
+    expect(out.some((c) => c.check.startsWith('config') && !c.ok)).toBe(true);
   });
 
   test('a client error fails the check with its first line and the next factory is still checked', async () => {
