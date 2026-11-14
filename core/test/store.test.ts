@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
@@ -138,6 +138,57 @@ describe('FileStore factories', () => {
     await s.listFactoryDefs();
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain('broken');
+  });
+
+  test('the github block comes from factory.yaml on every load, also after the definitions were seeded', async () => {
+    const root = dir();
+    mkdirSync(join(root, 'factories', 'delta'), { recursive: true });
+    const yaml = join(root, 'factories', 'delta', 'factory.yaml');
+    const plain = 'factoryId: delta\nname: Delta\n';
+    const github = 'github:\n  mode: github-only\n  project: kazi-lakit/3\n  statusMap:\n    inbox: Backlog\n    ready: Todo\n'
+      + '    spec: In progress\n    spec_review: In progress\n    plan: In progress\n    plan_review: In progress\n    build: In progress\n'
+      + '    verify: In progress\n    review: In progress\n    pr_open: In review\n    done: Done\n    blocked: In progress\n    cancelled: Done\n';
+    writeFileSync(yaml, plain);
+    const board = join(root, 'board.json');
+    const opts = { factoriesDir: join(root, 'factories') };
+    const s = new FileStore(board, opts);
+    const [def] = await s.listFactoryDefs();
+    await s.saveFactoryDef(def!, { ...def!, name: 'Delta 2' });
+
+    writeFileSync(yaml, plain + github);
+    const [withGh] = await new FileStore(board, opts).listFactoryDefs();
+    expect(withGh).toMatchObject({ name: 'Delta 2', github: { mode: 'github-only', project: { owner: 'kazi-lakit', number: 3 }, label: 'factory' } });
+
+    writeFileSync(yaml, plain);
+    expect((await new FileStore(board, opts).listFactoryDefs())[0]).not.toHaveProperty('github');
+
+    // A github hand-edited into board.json without YAML support is dropped.
+    const raw = JSON.parse(readFileSync(board, 'utf8')) as { factoryDefs: Record<string, unknown>[] };
+    raw.factoryDefs[0]!.github = withGh!.github;
+    writeFileSync(board, JSON.stringify(raw));
+    expect((await new FileStore(board, opts).listFactoryDefs())[0]).not.toHaveProperty('github');
+  });
+
+  test('a factory.yaml that fails validation is skipped and leaves the stored def without github', async () => {
+    const root = dir();
+    mkdirSync(join(root, 'factories', 'delta'), { recursive: true });
+    const yaml = join(root, 'factories', 'delta', 'factory.yaml');
+    writeFileSync(yaml, 'factoryId: delta\nname: Delta\n');
+    const board = join(root, 'board.json');
+    const opts = { factoriesDir: join(root, 'factories') };
+    const [def] = await new FileStore(board, opts).listFactoryDefs();
+    await new FileStore(board, opts).saveFactoryDef(def!, { ...def!, name: 'Delta 2' });
+    const raw = JSON.parse(readFileSync(board, 'utf8')) as { factoryDefs: Record<string, unknown>[] };
+    raw.factoryDefs[0]!.github = { mode: 'github-only' };
+    writeFileSync(board, JSON.stringify(raw));
+    writeFileSync(yaml, 'factoryId: delta\nname: Delta\ngithub:\n  mode: mirror\n');
+    const lines: string[] = [];
+    const defs = await new FileStore(board, { ...opts, log: (l) => lines.push(l) }).listFactoryDefs();
+    expect(defs).toHaveLength(1);
+    expect(defs[0]).toMatchObject({ name: 'Delta 2' });
+    expect(defs[0]).not.toHaveProperty('github');
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('github.mode must be github-only or connected');
   });
 
   test('without factoriesDir nothing is seeded', async () => {

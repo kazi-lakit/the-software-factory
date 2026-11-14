@@ -377,7 +377,8 @@ export class FileStore extends MemoryStore {
 
   /**
    * A file written before factories: its tasks and events belong to factory `blocks`, and its `{ global, repos }`
-   * settings are that factory's. Definitions the file lacks are seeded from `factoriesDir` (see loadFactoriesFromDir).
+   * settings are that factory's. Definitions the file lacks are seeded from `factoriesDir` (see loadFactoriesFromDir), and
+   * each stored definition's `github` block is taken from its valid `factory.yaml` (read once per instance), or removed.
    */
   private upgrade(raw: Record<string, unknown>): State {
     const state = { ...emptyState(), ...raw } as State;
@@ -387,11 +388,18 @@ export class FileStore extends MemoryStore {
     if (legacy && 'global' in legacy) {
       state.settings = { factories: { [LEGACY_FACTORY]: { factory: legacy.global ?? clone(DEFAULT_SETTINGS), repos: legacy.repos ?? {} } } };
     }
-    if (this.factoriesDir !== undefined && state.factoryDefs.length === 0 && state.factoryRepos.length === 0) {
-      this.seeded ??= loadFactoriesFromDir(this.factoriesDir, (file, reason) => this.log?.(`skipped ${file}: ${reason}`));
+    if (this.factoriesDir === undefined) return state;
+    this.seeded ??= loadFactoriesFromDir(this.factoriesDir, (file, reason) => this.log?.(`skipped ${file}: ${reason}`));
+    if (state.factoryDefs.length === 0 && state.factoryRepos.length === 0) {
       state.factoryDefs = clone(this.seeded.defs);
       state.factoryRepos = clone(this.seeded.repos);
     }
+    // factory.yaml is the source of truth for `github`: a stored def takes the valid YAML's block, or none.
+    const yaml = new Map(this.seeded.defs.map((d) => [d.factoryId, d]));
+    state.factoryDefs = state.factoryDefs.map(({ github: _stored, ...def }) => {
+      const github = yaml.get(def.factoryId)?.github;
+      return github ? { ...def, github: clone(github) } : def;
+    });
     return state;
   }
 
