@@ -13,7 +13,9 @@ import { buildImport, checkMigration, migrate } from './migrate.js';
 import { ForbiddenError, OwnerOnlyError } from './boardStore.js';
 import type { BoardStore } from './store.js';
 import type { AgentStep, Gate, Mode, RepoId } from './types.js';
-import { findRoot, wire, type WireOptions } from './wire.js';
+import { doctor } from './doctor.js';
+import type { GitHubBoardFor } from './githubBoard.js';
+import { findRoot, lazyGitHubBoardFor, wire, type WireOptions } from './wire.js';
 
 export type { WireOptions } from './wire.js';
 
@@ -72,6 +74,8 @@ export interface CliDeps {
   /** Runs `gh auth status` (the login check of `status` and `migrate`). Tests pass a fake. */
   exec?: ExecFile;
   home?: string;
+  /** GitHub client per gh login (`factory doctor`). Default: the real one over the gh logins. Tests pass a fake. */
+  githubBoardFor?: GitHubBoardFor;
 }
 
 export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) => wire(o), deps: CliDeps = {}): Promise<number> {
@@ -248,6 +252,27 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       for (const f of list) {
         io.out(`${f.factoryId} (${f.name}) ${f.active ? 'active' : 'inactive'}: ${f.repos.map((r) => r.repoId).join(', ') || 'no repos'}`);
       }
+    });
+
+  program
+    .command('doctor')
+    .description('check each factory\'s gh login and GitHub setup (reads only; exit 1 when a check fails)')
+    .option('--factory <id>', 'only this factory (repeat for several)', collect, undefined)
+    .option('--json', 'print JSON')
+    .action(async (o: { json?: boolean; factory?: string[] }, cmd: Command) => {
+      const only = factoryFilter(o.factory);
+      const kind = choice<'file' | 'blocks'>('--store', (cmd.optsWithGlobals() as { store: string }).store, STORES);
+      const { store } = await open(cmd);
+      const [defs, repos] = await Promise.all([store.listFactoryDefs(), store.listFactoryRepos()]);
+      const unknown = (only ?? []).filter((id) => !defs.some((d) => d.factoryId === id));
+      if (unknown.length > 0) throw new CliExit(`unknown factory: ${unknown.join(', ')}`, 1);
+      const checks = await doctor({
+        defs, repos, store: kind, loggedIn: await ghLoggedInUsers(exec), boardFor: deps.githubBoardFor ?? lazyGitHubBoardFor(undefined, undefined, exec),
+        ...(only ? { only } : {}),
+      });
+      if (o.json) printJson({ checks });
+      else for (const c of checks) io.out(`${c.ok ? 'ok' : 'FAIL'} ${c.factoryId} ${c.check}: ${c.detail}`);
+      if (checks.some((c) => !c.ok)) throw new CliExit('', 1, true);
     });
 
   program

@@ -12,6 +12,7 @@ import { Engine } from '../src/engine.js';
 import { FactoryConfig } from '../src/factories.js';
 import type { GitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
+import { FakeGitHubBoard } from '../src/githubBoard.js';
 import { BlocksStore } from '../src/blocks/store.js';
 import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
 import { MemoryStore } from '../src/store.js';
@@ -35,7 +36,7 @@ const fakeGh = (logins: string[] = ['gh-blocks'], gh: { code?: number; stdout?: 
   return { code: gh.code ?? 0, stdout: gh.stdout ?? ghStatusJson(logins), stderr: '' };
 };
 
-function setup(factories = seed(), logins?: string[], ghCalls?: string[][], gh?: { code?: number; stdout?: string }, files?: string[]) {
+function setup(factories = seed(), logins?: string[], ghCalls?: string[][], gh?: { code?: number; stdout?: string }, files?: string[], board?: FakeGitHubBoard) {
   const store = new MemoryStore({ factories });
   const exec: Exec = async () => ({ code: 0, output: '' });
   const engine = new Engine({
@@ -55,7 +56,7 @@ function setup(factories = seed(), logins?: string[], ghCalls?: string[][], gh?:
     files?.push(file);
     return fake(file, args, stdin);
   };
-  const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine, { exec: exec2 });
+  const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine, { exec: exec2, ...(board ? { githubBoardFor: () => board } : {}) });
   return { store, out, err, go, wired };
 }
 
@@ -629,5 +630,52 @@ describe('new', () => {
     expect(await go('--store', 'blocks', 'new', '--repo', 'data', '--title', 'X', '--description', 'd', '--ready')).toBe(0);
     expect(out).toEqual(['T-1 created in ready']);
     expect(await store.listEvents('T-1')).toMatchObject([{ actor: 'core · new' }]);
+  });
+});
+
+describe('factory doctor', () => {
+  const map = { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress',
+    plan_review: 'In progress', build: 'In progress', verify: 'In progress', review: 'In progress',
+    pr_open: 'In review', done: 'Merged', blocked: 'In progress', cancelled: 'Backlog' } as never;
+  const github = { mode: 'github-only' as const, project: { owner: 'kazi-lakit', number: 3 }, label: 'factory', approvers: ['gh-blocks'], statusMap: map };
+  const withGithub = () => ({ defs: [defFixture('blocks', { github })], repos: [repoFixture('blocks', 'data')] });
+  const board = (options: string[]) => {
+    const b = new FakeGitHubBoard();
+    b.addProject({ owner: 'kazi-lakit', number: 3 }, options);
+    b.labels.set('org/data', new Set(['factory']));
+    return b;
+  };
+
+  test('prints a line per check and exits 0 when all pass', async () => {
+    const { out, err, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, board(['Backlog', 'Todo', 'In progress', 'In review', 'Merged']));
+    expect(await go('doctor')).toBe(0);
+    expect(out).toEqual([
+      'ok blocks gh login: gh-blocks logged in',
+      'ok blocks config: ok',
+      'ok blocks scope: project scope present',
+      'ok blocks project: kazi-lakit/3 found',
+      'ok blocks status options: all 13 statuses map to existing options',
+      'ok blocks label data: exists',
+    ]);
+    expect(err).toEqual([]);
+  });
+
+  test('exits 1 on a failing check, with no extra error line', async () => {
+    const { out, err, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, board(['Backlog', 'Todo', 'In progress', 'In review']));
+    expect(await go('doctor')).toBe(1);
+    expect(out).toContain('FAIL blocks status options: missing on the Project: Merged');
+    expect(err).toEqual([]);
+  });
+
+  test('--json prints checks and still exits 1 on failure', async () => {
+    const { out, go } = setup(withGithub(), [], undefined, undefined, undefined, board([]));
+    expect(await go('doctor', '--json')).toBe(1);
+    expect(JSON.parse(out.join('\n'))).toEqual({ checks: [{ factoryId: 'blocks', check: 'gh login', ok: false, detail: 'gh-blocks is not logged in (run: gh auth login --hostname github.com)' }] });
+  });
+
+  test('an unknown --factory exits 1', async () => {
+    const { err, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, board([]));
+    expect(await go('doctor', '--factory', 'nope')).toBe(1);
+    expect(err).toEqual(['error: unknown factory: nope']);
   });
 });
