@@ -16,7 +16,6 @@ The factory takes a task you write on the Board and turns it into a pull request
 - More than one Board user
 - Hosting the Board page anywhere but `localhost`
 - Any change to ACR (Agent Control Room). ACR stays as it is and the factory doesn't use it.
-- GitHub Issues or Projects, or any other tracker besides the Board
 
 ## 2. Ground rules
 
@@ -24,7 +23,7 @@ These come from you and can't be changed through settings.
 
 1. **Protected branches:** nothing reaches `dev`, `stg` or `main` except through a PR that you merge. On any other branch, the factory may push and merge.
 2. **GitHub identity:** the factory uses `kazi-lakit` through a fine-grained PAT stored in the macOS Keychain. There is no bot account.
-3. **Board:** the Board is its own Blocks project in Blocks Data. It does not use GitHub or ACR.
+3. **Board:** the Board is its own Blocks project in Blocks Data. It does not use ACR. GitHub Issues and Projects are used only as described in the GitHub board integration design (docs/superpowers/specs/2026-11-13-github-board-integration-design.md), and only by the core.
 4. **Repos:** the factory works on Blocks OS, IAM, Monitor, Logic, Data, Localization and Release, starting with Data.
 5. **Start and stop:** you start the factory, and it runs until you stop it or switch on pause.
 6. **No keys for agents:** agents never hold a credential. Only the factory core does.
