@@ -62,6 +62,7 @@ export function validateGitHubSettings(input: unknown, ghUser: string): Validate
   let label = DEFAULT_LABEL;
   if (input.label !== undefined && input.label !== null) {
     if (typeof input.label !== 'string') return fail('github.label must be text');
+    if (input.label !== '' && input.label.trim() === '') return fail('github.label must be "" or a label name, not blank space');
     label = input.label.trim();
   }
   let approvers = [ghUser];

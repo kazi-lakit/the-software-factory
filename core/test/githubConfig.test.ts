@@ -34,6 +34,7 @@ test.each([
   [{ statusMap: { ...map, blocked: 'Todo' } }, 'github.statusMap.blocked must not share the ready option (only done and cancelled may)'],
   [{ statusMap: { ...map, spec: 'Backlog' } }, 'github.statusMap.spec must not share the inbox option (only done and cancelled may)'],
   [{ label: 5 }, 'github.label must be text'],
+  [{ label: '  ' }, 'github.label must be "" or a label name, not blank space'],
   [{ project: 5 }, 'github.project must be owner/number'],
   [{ statusMap: 'x' }, 'github.statusMap must map statuses to Project Status options'],
 ])('rejects %j', (over, error) => {
