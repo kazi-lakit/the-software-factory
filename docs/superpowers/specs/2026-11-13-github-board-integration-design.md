@@ -1,6 +1,6 @@
 # GitHub board integration: design
 
-Date: 2026-11-13. Status: draft, waiting for owner approval.
+Date: 2026-11-13. Status: approved by the owner on 2026-11-14.
 
 ## 1. Intent
 
