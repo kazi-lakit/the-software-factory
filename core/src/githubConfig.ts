@@ -1,4 +1,6 @@
 // Pure (no Node API): the browser entry validates the factory's github block with it.
+import type { FactoryDef, FactoryRepo } from './factories.js';
+import { parseRemote } from './remote.js';
 import { ALL_STATUSES } from './status.js';
 import type { Status } from './types.js';
 import { GH_USER_PATTERN, type Validated } from './validated.js';
@@ -73,4 +75,33 @@ export function validateGitHubSettings(input: unknown, ghUser: string): Validate
   const statusMap = statusMapOf(input.statusMap);
   if (!statusMap.ok) return statusMap;
   return { ok: true, value: { mode: input.mode, project, label, approvers, statusMap: statusMap.value } };
+}
+
+export interface GitHubConfigProblem { factoryId: string; repoId?: string; message: string }
+
+const byId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+const parsedRemote = (remote: string): { owner: string; repo: string } | null => {
+  try { return parseRemote(remote); } catch { return null; }
+};
+
+/** Cross-factory checks: the mode fits the store, and each GitHub repo belongs to one factory repo. Factories without `github` are ignored. */
+export function githubConfigProblems(defs: FactoryDef[], repos: FactoryRepo[], store: 'file' | 'blocks'): GitHubConfigProblem[] {
+  const problems: GitHubConfigProblem[] = [];
+  const owners = new Map<string, { id: string; slug: string }>();
+  const sortedRepos = [...repos].sort((a, b) => byId(a.factoryId, b.factoryId) || byId(a.repoId, b.repoId));
+  for (const def of [...defs].sort((a, b) => byId(a.factoryId, b.factoryId))) {
+    const github = def.github;
+    if (!github) continue;
+    if (github.mode === 'github-only' && store !== 'file') problems.push({ factoryId: def.factoryId, message: 'github mode github-only needs the file store' });
+    if (github.mode === 'connected' && store !== 'blocks') problems.push({ factoryId: def.factoryId, message: 'github mode connected needs the Blocks store' });
+    for (const repo of sortedRepos.filter((r) => r.factoryId === def.factoryId)) {
+      const remote = parsedRemote(repo.remote);
+      if (!remote) { problems.push({ factoryId: def.factoryId, repoId: repo.repoId, message: 'remote is not a GitHub repo; GitHub mode needs one' }); continue; }
+      const key = `${remote.owner}/${remote.repo}`.toLowerCase();
+      const first = owners.get(key);
+      if (first) problems.push({ factoryId: def.factoryId, repoId: repo.repoId, message: `${first.slug} is already used by ${first.id}; a GitHub repo can belong to only one factory repo` });
+      else owners.set(key, { id: `${def.factoryId}/${repo.repoId}`, slug: `${remote.owner}/${remote.repo}` });
+    }
+  }
+  return problems;
 }

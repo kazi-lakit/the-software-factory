@@ -1,5 +1,7 @@
 import { Octokit } from '@octokit/rest';
 import { isProtected, ProtectedBranchError } from './branchGuard.js';
+import { parseRemote } from './remote.js';
+export { parseRemote };
 
 /** The client for a factory's gh login (its `ghUser`). */
 export type GitHubFor = (ghUser: string) => GitHub;
@@ -29,13 +31,6 @@ export class PrBaseMismatchError extends Error {
 function assertMergeBase(url: string, actual: string, expected: string, protectedBranches?: readonly string[]): void {
   if (isProtected(actual, protectedBranches)) throw new ProtectedBranchError(actual);
   if (actual !== expected) throw new PrBaseMismatchError(url, actual, expected);
-}
-
-/** Parses `git@github.com:O/R(.git)` and `https://github.com/O/R(.git)`. */
-export function parseRemote(remote: string): { owner: string; repo: string } {
-  const m = /^git@github\.com:([^/\s]+)\/([^/\s]+?)(?:\.git)?$/.exec(remote) ?? /^https:\/\/github\.com\/([^/\s]+)\/([^/\s]+?)(?:\.git)?$/.exec(remote);
-  if (!m) throw new Error(`unsupported remote: ${remote}`);
-  return { owner: m[1]!, repo: m[2]! };
 }
 
 function parsePrUrl(url: string): { owner: string; repo: string; number: number } {
