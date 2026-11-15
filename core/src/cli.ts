@@ -15,8 +15,11 @@ import type { BoardStore } from './store.js';
 import type { AgentStep, Gate, Mode, RepoId } from './types.js';
 import { doctor, redactSecrets } from './doctor.js';
 import { GitHubPusher, type PushResult } from './githubPusher.js';
+import { GitHubPuller, type PullLock, type PullResult, type RebuildResult } from './githubPuller.js';
+import { fileLock } from './pullLock.js';
+import type { GitHubFor } from './github.js';
 import type { GitHubBoardFor } from './githubBoard.js';
-import { findRoot, lazyGitHubBoardFor, wire, type WireOptions } from './wire.js';
+import { findRoot, lazyGitHubBoardFor, lazyGitHubFor, wire, type WireOptions } from './wire.js';
 
 export type { WireOptions } from './wire.js';
 
@@ -77,10 +80,24 @@ export interface CliDeps {
   home?: string;
   /** GitHub client per gh login (`factory doctor`). Default: the real one over the gh logins. Tests pass a fake. */
   githubBoardFor?: GitHubBoardFor;
+  /** GitHub client per login for the pull (reviews, comments, PR state). Default: the real one over the gh logins. Tests pass a fake. */
+  githubFor?: GitHubFor;
+  /** One pull per factory at a time. Default: a lock file under `<root>/.factory/`. Tests pass an in-memory lock. */
+  pullLock?: PullLock;
   /** Waits between `factory sync --watch` passes. Default: a real timer. Tests pass a fake. */
   sleep?: (ms: number) => Promise<void>;
   /** `factory sync --watch` stops after this many passes. Default: run until SIGINT or SIGTERM. Tests set it. */
   watchTicks?: number;
+}
+
+/** The printable lines of one factory's pull: created, applied, not applied and failed items. */
+function pullLines(r: PullResult): string[] {
+  return [
+    ...r.created.map((c) => `${c.taskId} created from ${c.issue} (${c.status})`),
+    ...r.applied.map((a) => `${a.taskId} ${a.issue}: ${a.change}`),
+    ...r.notApplied.map((n) => `NOT APPLIED ${n.taskId ?? '-'} ${n.issue}: ${n.change} (${n.reason})`),
+    ...r.errors.map((e) => `PULL FAIL ${e.taskId ?? '-'} ${e.issue ?? '-'}: ${e.message}`),
+  ];
 }
 
 const firstLine = (e: unknown): string => redactSecrets((e instanceof Error ? e.message : String(e)).split('\n')[0]!);
@@ -111,6 +128,19 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
 
   const boardFor = deps.githubBoardFor ?? lazyGitHubBoardFor(undefined, undefined, exec);
   const pusherFor = (store: BoardStore) => new GitHubPusher({ store, boardFor, now: () => new Date(), claimant: `cli:${hostname()}` });
+  const githubFor = deps.githubFor ?? lazyGitHubFor(undefined, undefined, exec);
+  const pullLock = deps.pullLock ?? fileLock(() => findRoot());
+  const pullerFor = (store: BoardStore) => new GitHubPuller({ store, boardFor, githubFor, now: () => new Date(), lock: pullLock });
+  /** Pulls GitHub changes before `next` (file store only). Never throws and never changes the exit code; lines go to stderr so stdout stays the ticket. */
+  const pullBefore = async (cmd: Command, store: BoardStore, factories: string[] | undefined): Promise<void> => {
+    if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') return;
+    try {
+      for (const r of await pullerFor(store).pull(factories)) for (const l of pullLines(r)) io.err(`github: ${l}`);
+    } catch (e) {
+      io.err(`github: pull failed (${firstLine(e)})`);
+    }
+  };
+
   /** Pushes the touched task to GitHub (file store only). Catches everything: prints one stderr line on failure, never changes the exit code. */
   const pushAfter = async (cmd: Command, store: BoardStore, taskId: string): Promise<PushResult | null> => {
     if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') return null;
@@ -148,6 +178,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .action(async (task: string | undefined, o: { json?: boolean; peek?: boolean; factory?: string[] }, cmd: Command) => {
       if (o.peek && o.json) throw new CliExit('--peek prints one line; leave out --json', 1);
       const { engine, store } = await open(cmd);
+      await pullBefore(cmd, store, factoryFilter(o.factory));
       const outcome = await engine.next(task, factoryFilter(o.factory), { peek: o.peek === true }).catch((e: unknown) => {
         throw e instanceof UnknownFactoryError ? new CliExit(e.message, 1, true) : e;
       });
@@ -367,31 +398,81 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
 
   program
     .command('sync')
-    .description('push every task of the GitHub-only factories to GitHub (file store only; exit 1 when a task fails)')
+    .description('pull GitHub changes, then push every task of the GitHub-only factories (file store only; exit 1 when a pull or push fails)')
     .option('--factory <id>', 'only this factory (repeat for several)', collect, undefined)
-    .option('--watch', 'keep pushing until Ctrl-C')
+    .option('--watch', 'keep pulling and pushing until Ctrl-C')
+    .option('--rebuild', 'restore an empty GitHub-only factory\'s board from its marked issues, then push (runs once)')
     .option('--interval <seconds>', 'seconds between passes with --watch (1 to 3600)', '5')
-    .action(async (o: { factory?: string[]; watch?: boolean; interval: string }, cmd: Command) => {
+    .action(async (o: { factory?: string[]; watch?: boolean; rebuild?: boolean; interval: string }, cmd: Command) => {
       const only = factoryFilter(o.factory);
       if (!/^\d+$/.test(o.interval) || Number(o.interval) < 1 || Number(o.interval) > 3600) throw new CliExit('--interval must be a whole number from 1 to 3600', 1);
       const interval = Number(o.interval);
       if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') throw new CliExit('factory sync needs --store file until connected mode is built', 1);
+      if (o.rebuild && o.watch) throw new CliExit('--rebuild runs once; leave out --watch', 1);
       const { store } = await open(cmd);
       const pusher = pusherFor(store);
+      const puller = pullerFor(store);
+      const printed = new Set<string>();
+      /** One pull. Prints its lines (watch: items only, NOT APPLIED once per process) and returns whether it failed. */
+      const pullPass = async (watching: boolean): Promise<boolean> => {
+        let failed = false;
+        const results = await puller.pull(only);
+        const total = { created: 0, applied: 0, notApplied: 0, failed: 0 };
+        for (const r of results) {
+          if (r.skipped === 'busy') io.out(`github: pull of ${r.factoryId} skipped (another pull is running)`);
+          for (const l of pullLines(r)) {
+            if (watching && l.startsWith('NOT APPLIED')) {
+              if (printed.has(l)) continue;
+              printed.add(l);
+            }
+            io.out(l);
+          }
+          total.created += r.created.length;
+          total.applied += r.applied.length;
+          total.notApplied += r.notApplied.length;
+          total.failed += r.errors.length;
+        }
+        if (total.failed > 0) failed = true;
+        if (!watching) io.out(`pulled: created ${total.created}, applied ${total.applied}, not applied ${total.notApplied}, failed ${total.failed}`);
+        return failed;
+      };
+      const rebuildLines = (results: RebuildResult[]): boolean => {
+        let failed = false;
+        let n = 0;
+        for (const r of results) {
+          for (const b of r.rebuilt) io.out(`${b.taskId} rebuilt from ${b.issue} (${b.status})`);
+          for (const k of r.skipped) io.out(`skipped ${k.issue}: ${k.reason}`);
+          if (r.error !== null) { io.out(`FAIL rebuild ${r.factoryId}: ${r.error}`); failed = true; }
+          n += r.rebuilt.length;
+        }
+        for (const id of only ?? []) {
+          if (!results.some((r) => r.factoryId === id)) { io.out(`FAIL rebuild ${id}: not a GitHub-only factory`); failed = true; }
+        }
+        io.out(`rebuilt ${n}`);
+        return failed;
+      };
       const lines = (results: PushResult[]) => {
         for (const r of results) {
           if (r.done.length > 0) io.out(`${r.taskId} ${r.issue ?? '-'}: ${r.done.join(', ')}`);
           if (r.error !== null) io.out(`FAIL ${r.taskId}: ${r.error}`);
         }
       };
+      if (o.rebuild) {
+        const failed = rebuildLines(await puller.rebuild(only));
+        const pushed = await pusher.pushAll(only, { ignoreBackoff: true });
+        lines(pushed);
+        if (failed || pushed.some((r) => r.error !== null)) throw new CliExit('', 1, true);
+        return;
+      }
       if (!o.watch) {
         const defs = await store.listFactoryDefs();
         if (!defs.some((d) => d.github?.mode === 'github-only' && (!only || only.includes(d.factoryId)))) return io.out('no factory uses GitHub-only mode');
+        const pullFailed = await pullPass(false);
         const results = await pusher.pushAll(only, { ignoreBackoff: true });
         lines(results);
         const failed = results.filter((r) => r.error !== null).length;
         io.out(`pushed ${results.filter((r) => r.done.length > 0).length}, failed ${failed}`);
-        if (failed > 0) throw new CliExit('', 1, true);
+        if (failed > 0 || pullFailed) throw new CliExit('', 1, true);
         return;
       }
       let noticed = false;
@@ -409,6 +490,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
               noticed = true;
               if (!defs.some((d) => d.github?.mode === 'github-only' && (!only || only.includes(d.factoryId)))) io.out('no factory uses GitHub-only mode');
             }
+            await pullPass(true);
             lines(await pusher.pushAll(only));
           } catch (e) {
             io.out(`error: ${firstLine(e)}`);

@@ -9,7 +9,7 @@ import type { ExecFile } from '../src/secrets.js';
 import { buildImport } from '../src/migrate.js';
 import { run, type CliDeps, type WireOptions } from '../src/cli.js';
 import { Engine } from '../src/engine.js';
-import { FactoryConfig } from '../src/factories.js';
+import { FactoryConfig, type FactoryDef } from '../src/factories.js';
 import type { GitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
 import { FakeGitHubBoard, type GitHubBoard } from '../src/githubBoard.js';
@@ -17,6 +17,7 @@ import { BlocksStore } from '../src/blocks/store.js';
 import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
 import { MemoryStore } from '../src/store.js';
 import { emptyPushed } from '../src/githubLink.js';
+import { issueBody } from '../src/githubPush.js';
 import { GhLoginMissingError } from '../src/secrets.js';
 import type { RepoId, Task } from '../src/types.js';
 
@@ -38,11 +39,17 @@ const fakeGh = (logins: string[] = ['gh-blocks'], gh: { code?: number; stdout?: 
   return { code: gh.code ?? 0, stdout: gh.stdout ?? ghStatusJson(logins), stderr: '' };
 };
 
+/** The engine validates the raw definition (project as `owner/number`); the store holds the parsed one. */
+const rawDef = (d: FactoryDef): FactoryDef => {
+  const p = d.github?.project as unknown;
+  return d.github && typeof p === 'object' && p !== null ? { ...d, github: { ...d.github, project: `${(p as { owner: string }).owner}/${(p as { number: number }).number}` as never } } : d;
+};
+
 function setup(factories = seed(), logins?: string[], ghCalls?: string[][], gh?: { code?: number; stdout?: string }, files?: string[], board?: GitHubBoard) {
   const store = new MemoryStore({ factories });
   const exec: Exec = async () => ({ code: 0, output: '' });
   const engine = new Engine({
-    store, git, githubFor: () => new FakeGitHub(), factories: async () => new FactoryConfig(factories.defs, factories.repos),
+    store, git, githubFor: () => new FakeGitHub(), factories: async () => new FactoryConfig(factories.defs.map(rawDef), factories.repos),
     exec, now: () => new Date(), mode: 'session', claimant: 'me',
   });
   const wired: WireOptions[] = [];
@@ -753,7 +760,7 @@ describe('GitHub pushing from the CLI', () => {
     const { out, store, go } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
     await direct(store);
     expect(await go('sync')).toBe(0);
-    expect(out).toEqual(['T-1 o/app#1: created, status Backlog', 'pushed 1, failed 0']);
+    expect(out).toEqual(['pulled: created 0, applied 0, not applied 0, failed 0', 'T-1 o/app#1: created, status Backlog', 'pushed 1, failed 0']);
   });
 
   test('sync exits 1 when a task fails', async () => {
@@ -912,5 +919,175 @@ describe('GitHub pushing from the CLI', () => {
     await store.saveGitHubLink(null, staleLink('boom', '2026-06-01T00:00:10.000Z'));
     await go('status', '--json');
     expect(JSON.parse(out.join('\n')).githubErrors).toHaveLength(1);
+  });
+});
+
+describe('GitHub pulling from the CLI', () => {
+  const map = { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress',
+    plan_review: 'In progress', build: 'In progress', verify: 'In progress', review: 'In progress',
+    pr_open: 'In review', done: 'Merged', blocked: 'In progress', cancelled: 'Backlog' } as never;
+  const github = { mode: 'github-only' as const, project: { owner: 'o', number: 3 }, label: 'factory', approvers: ['gh-blocks'], statusMap: map };
+  const withGithub = () => ({ defs: [defFixture('blocks', { github })], repos: [repoFixture('blocks', 'app', { remote: 'git@github.com:o/app.git' })] });
+  const REPO = { owner: 'o', repo: 'app' };
+  const PROJECT = { owner: 'o', number: 3 };
+  const newBoard = () => {
+    const b = new FakeGitHubBoard();
+    b.addProject(PROJECT, ['Backlog', 'Todo', 'In progress', 'In review', 'Merged']);
+    return b;
+  };
+  /** An issue on the Project in `option`, with the factory label; `body` may carry a marker. */
+  const issue = async (board: FakeGitHubBoard, option: string, title = 'From GitHub', body = 'please') => {
+    const made = await board.createIssue(REPO, { title, body, labels: ['factory'] });
+    const project = (await board.project(PROJECT))!;
+    const item = await board.addToProject(project, made.nodeId);
+    await board.setStatus(project, item, option);
+    return { number: made.number, item, project };
+  };
+  const memLock = () => {
+    const held = new Set<string>();
+    const taken: string[] = [];
+    const lock = async (f: string) => {
+      if (held.has(f)) return null;
+      held.add(f);
+      taken.push(f);
+      return () => { held.delete(f); };
+    };
+    return { held, taken, lock };
+  };
+  const wire = (board: FakeGitHubBoard, extra: CliDeps = {}) => ({ githubFor: () => new FakeGitHub(), pullLock: memLock().lock, githubBoardFor: () => board, ...extra });
+
+  test('next pulls a new Todo issue and hands out its spec ticket', async () => {
+    const board = newBoard();
+    await issue(board, 'Todo');
+    const { out, err, goWith } = setup(withGithub());
+    expect(await goWith(wire(board), '--store', 'file', 'next')).toBe(0);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatch(/^T-1 spec \(worktree /);
+    expect(err).toContain('github: T-1 created from o/app#1 (ready)');
+  });
+
+  test('next --peek pulls too', async () => {
+    const board = newBoard();
+    await issue(board, 'Todo');
+    const { out, goWith } = setup(withGithub());
+    expect(await goWith(wire(board), '--store', 'file', 'next', '--peek')).toBe(0);
+    expect(out).toEqual(['work T-1']);
+  });
+
+  test('next still works when the pull fails', async () => {
+    const board = newBoard();
+    board.project = async () => { throw new GhLoginMissingError('kazi-lakit'); };
+    const plain = setup(withGithub());
+    const plainCode = await plain.goWith({ githubBoardFor: () => newBoard() }, '--store', 'file', 'next');
+    const { out, err, goWith } = setup(withGithub());
+    expect(await goWith(wire(board), '--store', 'file', 'next')).toBe(plainCode);
+    expect(out).toEqual(plain.out);
+    expect(err.join('\n')).toContain('github: PULL FAIL');
+  });
+
+  test('next pulls while the lock is free and skips when held', async () => {
+    const board = newBoard();
+    await issue(board, 'Todo');
+    const lock = memLock();
+    const { goWith, err, store } = setup(withGithub());
+    lock.held.add('blocks');
+    await goWith(wire(board, { pullLock: lock.lock }), '--store', 'file', 'next', '--peek');
+    expect(await store.listTasks()).toHaveLength(0);
+    expect(err.join('\n')).not.toContain('github:');
+    lock.held.clear();
+    await goWith(wire(board, { pullLock: lock.lock }), '--store', 'file', 'next', '--peek');
+    expect(lock.taken).toEqual(['blocks']);
+    expect(lock.held.size).toBe(0);
+    expect(await store.listTasks()).toHaveLength(1);
+  });
+
+  test('next on a factory without github makes no board call', async () => {
+    let calls = 0;
+    const board = newBoard();
+    const counting = new Proxy(board, { get: (t, p) => { if (typeof (t as never)[p] === 'function') calls++; return Reflect.get(t, p).bind?.(t) ?? Reflect.get(t, p); } });
+    const { err, goWith } = setup(seed());
+    await goWith(wire(counting), '--store', 'file', 'next');
+    expect(calls).toBe(0);
+    expect(err).toEqual([]);
+  });
+
+  test('no pulling on the blocks store', async () => {
+    const board = newBoard();
+    await issue(board, 'Todo');
+    const { err, goWith, store } = setup(withGithub());
+    await goWith(wire(board), '--store', 'blocks', 'next', '--peek');
+    expect(err).toEqual([]);
+    expect(await store.listTasks()).toHaveLength(0);
+  });
+
+  test('sync prints pull lines and the pulled summary before the push', async () => {
+    const board = newBoard();
+    await issue(board, 'Todo');
+    const { out, goWith } = setup(withGithub());
+    expect(await goWith(wire(board), '--store', 'file', 'sync')).toBe(0);
+    expect(out[0]).toBe('T-1 created from o/app#1 (ready)');
+    expect(out[1]).toBe('pulled: created 1, applied 0, not applied 0, failed 0');
+    expect(out.slice(2).at(-1)).toBe('pushed 1, failed 0');
+  });
+
+  test('sync reports a busy factory and exits 1 when the pull fails', async () => {
+    const board = newBoard();
+    const lock = memLock();
+    lock.held.add('blocks');
+    const busy = setup(withGithub());
+    expect(await busy.goWith(wire(board, { pullLock: lock.lock }), '--store', 'file', 'sync')).toBe(0);
+    expect(busy.out).toContain('github: pull of blocks skipped (another pull is running)');
+    const bad = newBoard();
+    bad.project = async () => { throw new Error('boom'); };
+    const failing = setup(withGithub());
+    expect(await failing.goWith(wire(bad), '--store', 'file', 'sync')).toBe(1);
+    expect(failing.out.join('\n')).toContain('PULL FAIL');
+    expect(failing.out.join('\n')).toContain('failed 1');
+  });
+
+  test('sync --watch prints a NOT APPLIED line once across ticks', async () => {
+    const board = newBoard();
+    const { out, store, goWith } = setup(withGithub());
+    const { item, project } = await issue(board, 'Todo');
+    await goWith(wire(board), '--store', 'file', 'sync');
+    expect((await store.listTasks())).toHaveLength(1);
+    out.length = 0;
+    const move = () => board.setStatus(project, item, 'In review');
+    await move();
+    expect(await goWith(wire(board, { watchTicks: 2, sleep: async () => { await move(); } }), '--store', 'file', 'sync', '--watch')).toBe(0);
+    const notApplied = out.filter((l) => l.startsWith('NOT APPLIED'));
+    expect(notApplied).toHaveLength(1);
+    expect(out.some((l) => l.startsWith('pulled:'))).toBe(false);
+  });
+
+  test('sync --rebuild restores and pushes', async () => {
+    const b2 = newBoard();
+    await issue(b2, 'Todo', 'One', issueBody('d1', 'T-1', 'blocks'));
+    await issue(b2, 'Todo', 'Two', issueBody('d2', 'T-2', 'blocks'));
+    const { out, store, goWith } = setup(withGithub());
+    expect(await goWith(wire(b2), '--store', 'file', 'sync', '--rebuild')).toBe(0);
+    expect(out).toContain('T-1 rebuilt from o/app#1 (ready)');
+    expect(out).toContain('rebuilt 2');
+    expect(await store.listTasks()).toHaveLength(2);
+  });
+
+  test('sync --rebuild on a factory with tasks exits 1', async () => {
+    const board = newBoard();
+    const { out, store, goWith } = setup(withGithub());
+    await store.createTask({ factoryId: 'blocks', title: 'x', description: 'd', repo: 'app' });
+    expect(await goWith(wire(board), '--store', 'file', 'sync', '--rebuild')).toBe(1);
+    expect(out.join('\n')).toContain('FAIL rebuild blocks: the board already has tasks');
+  });
+
+  test('sync --rebuild names a requested factory that is not github-only', async () => {
+    const { out, goWith } = setup(seed());
+    expect(await goWith(wire(newBoard()), '--store', 'file', 'sync', '--rebuild', '--factory', 'blocks')).toBe(1);
+    expect(out.join('\n')).toContain('FAIL rebuild blocks: not a GitHub-only factory');
+  });
+
+  test('sync --rebuild --watch is refused', async () => {
+    const { err, goWith } = setup(withGithub());
+    expect(await goWith(wire(newBoard()), '--store', 'file', 'sync', '--rebuild', '--watch')).toBe(1);
+    expect(err).toEqual(['error: --rebuild runs once; leave out --watch']);
   });
 });
