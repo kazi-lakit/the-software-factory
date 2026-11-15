@@ -39,14 +39,15 @@ export class GitHubPuller {
       .sort((a, b) => a.factoryId.localeCompare(b.factoryId, undefined, { numeric: true }));
     const out: PullResult[] = [];
     for (const def of picked) {
-      const release = await (this.d.lock ?? noLock)(def.factoryId);
-      if (!release) { out.push(empty(def.factoryId, 'busy')); continue; }
+      let release: (() => void) | null = null;
       try {
+        release = await (this.d.lock ?? noLock)(def.factoryId);
+        if (!release) { out.push(empty(def.factoryId, 'busy')); continue; }
         out.push(await this.pullFactory(def, defs, repos));
       } catch (e) {
         out.push({ ...empty(def.factoryId), errors: [{ taskId: null, issue: null, message: this.firstLine(e) }] });
       } finally {
-        release();
+        release?.();
       }
     }
     return out;
@@ -160,6 +161,7 @@ export class GitHubPuller {
     }
     for (const [taskId, p] of patches) {
       const build = (cur: GitHubLink | null): GitHubLink | null => {
+        if (cur && p.create) throw new Error(`a link already exists for the new task ${cur.taskId}`);
         const base = cur ?? p.create;
         return base ? p.steps.reduce((l, s) => s(l), structuredClone(base)) : null;
       };
@@ -176,7 +178,8 @@ export class GitHubPuller {
     for (let attempt = 0; ; attempt++) {
       const cur = (await store.getGitHubLink(taskId)) ?? null;
       const next = build(cur);
-      if (!next) return;
+      // A live lease belongs to a pusher whose next save would conflict with ours: leave the link, the next pull plans again.
+      if (!next || (cur?.lease && Date.parse(cur.lease.until) > this.d.now().getTime()) || (cur && JSON.stringify(cur) === JSON.stringify(next))) return;
       try {
         await store.saveGitHubLink(cur, next);
         return;

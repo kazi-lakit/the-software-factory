@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'vitest';
+import { VersionConflictError } from '../src/boardStore.js';
+import type { GitHubLink } from '../src/githubLink.js';
 import { MemoryStore } from '../src/store.js';
 import { FakeGitHubBoard, type GitHubBoard } from '../src/githubBoard.js';
 import { FakeGitHub } from '../src/github.js';
@@ -15,18 +17,19 @@ const NOW = new Date('2026-06-01T00:00:00Z');
 const REPO = { owner: 'o', repo: 'app' };
 const PROJECT = { owner: 'o', number: 3 };
 
-function setup(opts: { github?: boolean; lock?: PullLock; board?: (b: FakeGitHubBoard) => GitHubBoard } = {}) {
-  const store = new MemoryStore({
+function setup(opts: { github?: boolean; lock?: PullLock; board?: (b: FakeGitHubBoard) => GitHubBoard; wrap?: (st: MemoryStore) => MemoryStore } = {}) {
+  const base = new MemoryStore({
     factories: {
       defs: [defFixture('f', opts.github === false ? {} : { github: hub() })],
       repos: [repoFixture('f', 'app', { remote: 'git@github.com:o/app.git' })],
     },
   });
+  const store = opts.wrap ? opts.wrap(base) : base;
   const board = new FakeGitHubBoard();
   board.addProject(PROJECT, OPTIONS);
   const gh = new FakeGitHub();
   const seen = opts.board ? opts.board(board) : board;
-  const pusher = new GitHubPusher({ store, boardFor: () => board, now: () => NOW, claimant: 'x' });
+  const pusher = new GitHubPusher({ store: base, boardFor: () => board, now: () => NOW, claimant: 'x' });
   const puller = new GitHubPuller({ store, boardFor: () => seen, githubFor: () => gh, now: () => NOW, ...(opts.lock ? { lock: opts.lock } : {}) });
   return { store, board, gh, pusher, puller };
 }
@@ -146,5 +149,92 @@ describe('GitHubPuller', () => {
   test('factory without github is not pulled', async () => {
     const s = setup({ github: false });
     expect(await s.puller.pull()).toEqual([]);
+  });
+});
+
+/** A ready task pushed to GitHub whose card was then moved, so the pull plans an `option` link patch. */
+async function movedCard(s: S) {
+  const t = await add(s);
+  await s.store.updateTask(t.taskId, 1, { status: 'ready' });
+  await s.pusher.pushTask(t.taskId);
+  const item = (await s.board.listItems(await project(s)))[0]!;
+  await s.board.setStatus(await project(s), item.itemId, 'In review');
+  return t;
+}
+/** The store, but `saveGitHubLink` runs `before` and throws a conflict on its first `times` calls. */
+const conflicting = (times: number, before: (inner: MemoryStore) => Promise<void> = async () => undefined) => (st: MemoryStore): MemoryStore => {
+  let n = times;
+  return new Proxy(st, { get(t, p, r) {
+    const v = Reflect.get(t, p, r);
+    if (typeof v !== 'function') return v;
+    if (p !== 'saveGitHubLink') return v.bind(t);
+    return async (...a: unknown[]) => {
+      if (n-- > 0) { await before(t); throw new VersionConflictError('link', 1, 2); }
+      return (v as (...x: unknown[]) => unknown).apply(t, a);
+    };
+  } });
+};
+
+describe('GitHubPuller link writes', () => {
+  test('a conflict is retried once on a fresh read and keeps a concurrent change', async () => {
+    let taskId = '';
+    const s = setup({ wrap: conflicting(1, async (inner) => {
+      const l = (await inner.getGitHubLink(taskId))!;
+      await inner.saveGitHubLink(l, { ...l, pushed: { ...l.pushed, docAt: { spec: 'T1', plan: null } } });
+    }) });
+    taskId = (await movedCard(s)).taskId;
+    const [r] = await s.puller.pull();
+    expect(r!.errors).toEqual([]);
+    const l = (await s.store.getGitHubLink(taskId))!;
+    expect(l.pushed.option).toBe('In review');
+    expect(l.pushed.docAt.spec).toBe('T1');
+  });
+
+  test('a second conflict is an error for that task', async () => {
+    const s = setup({ wrap: conflicting(2) });
+    const t = await movedCard(s);
+    const [r] = await s.puller.pull();
+    expect(r!.errors).toMatchObject([{ taskId: t.taskId }]);
+  });
+
+  test('a link with a live lease gets no puller write', async () => {
+    const s = setup();
+    const t = await movedCard(s);
+    const l = (await s.store.getGitHubLink(t.taskId))!;
+    const leased = await s.store.saveGitHubLink(l, { ...l, lease: { by: 'x', until: new Date(NOW.getTime() + 60_000).toISOString() } });
+    const [r] = await s.puller.pull();
+    expect(r!.errors).toEqual([]);
+    expect(await s.store.getGitHubLink(t.taskId)).toEqual(leased);
+  });
+
+  test('a patch that changes nothing writes nothing', async () => {
+    const s = setup();
+    const t = await movedCard(s);
+    await s.puller.pull();
+    const after = (await s.store.getGitHubLink(t.taskId))!;
+    await s.puller.pull();
+    expect((await s.store.getGitHubLink(t.taskId))!.version).toBe(after.version);
+  });
+
+  test('an existing link for a new task is not overwritten', async () => {
+    const stub = (id: string): GitHubLink => ({ taskId: id, factoryId: 'f', repo: 'o/app', issueNumber: null, issueNodeId: null, project: null, itemId: null,
+      pushed: { status: null, option: null, title: null, bodyHash: null, label: null, docs: { spec: 0, plan: 0 }, blocked: null, closed: false, docAt: { spec: null, plan: null }, blockedAt: null },
+      error: null, lease: null, reported: [], version: 1 });
+    const s = setup({ wrap: (st) => new Proxy(st, { get(t, p, r) {
+      const v = Reflect.get(t, p, r);
+      if (p === 'getGitHubLink') return async (id: string) => stub(id);
+      return typeof v === 'function' ? v.bind(t) : v;
+    } }) });
+    const made = await s.board.createIssue(REPO, { title: 'New', body: '', labels: ['factory'] });
+    await s.board.addToProject(await project(s), made.nodeId);
+    const [r] = await s.puller.pull();
+    expect(r!.created).toHaveLength(1);
+    expect(r!.errors).toMatchObject([{ taskId: r!.created[0]!.taskId }]);
+  });
+
+  test('a throwing lock is an error for that factory only', async () => {
+    const s = setup({ lock: async () => { throw new Error('lock broke'); } });
+    const [r] = await s.puller.pull();
+    expect(r!.errors).toMatchObject([{ taskId: null, message: 'lock broke' }]);
   });
 });
