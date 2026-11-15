@@ -3,7 +3,9 @@ import { useEffect, useId, useLayoutEffect, useState } from "react";
 import { unfinishedDeps, type FactoryRepo, type Status, type Task } from "@factory/core";
 import { useFactories, useSelectedFactory } from "../factories/useFactories";
 import { cardGitHub } from "../github/githubCard";
+import { SyncButton } from "../github/SyncButton";
 import { useGitHubLinks } from "../github/useGitHub";
+import { usePendingSyncs } from "../github/usePendingSyncs";
 import { FactoryPicker } from "./FactoryPicker";
 import { byAge, laneOf, LANES, type LaneId } from "./lanes";
 import { COLUMNS, isTestTask, MUTED, NEEDS_YOU, STATUS_LABEL } from "./status";
@@ -72,6 +74,9 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const allTasks = board.data ?? [];
   const anyConnected = factories.defs.some((def) => def.github?.mode === "connected");
   const links = useGitHubLinks(anyConnected);
+  // Change sets are applied while the Board page is open, for every connected factory.
+  const syncs = usePendingSyncs(factories.defs.filter((def) => def.github?.mode === "connected").map((def) => def.factoryId));
+  const showSync = !all && factories.byId.get(factory)?.def.github?.mode === "connected";
   const linkById = new Map((links.data ?? []).map((link) => [link.taskId, link]));
   const githubOf = (task: Task) => cardGitHub(task, linkById.get(task.taskId), factories.byId.get(task.factoryId)?.def);
   const waitingOn = (task: Task): string[] => (task.status === "ready" ? unfinishedDeps(task, allTasks) : []);
@@ -99,6 +104,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
         <div><h1 className="sf-page-title">Board</h1></div>
         <a href={NEW_TASK_PATH} className="sf-button sf-button-primary" onClick={(event) => followInApp(event, NEW_TASK_PATH, onNavigate)}><Plus size={16} aria-hidden="true" />New task</a>
       </header>
+      {showSync ? <SyncButton factoryId={factory} latest={syncs.get(factory)} /> : null}
       <div className="sf-queue-summary" role="group" aria-label="Queue summary">
         {LANES.filter((lane) => lane.id !== "stopped").map((lane) => (
           <div key={lane.id} className={`sf-queue-stat sf-queue-stat-${lane.id}`}>

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { latestSync, type SyncRequest } from "@factory/core";
 import { boardStore } from "../../lib/board";
 
@@ -18,15 +18,17 @@ export function useGitHubLinks(enabled: boolean) {
 
 const BUSY = new Set(["queued", "planned", "applying"]);
 
-/** A factory's Sync requests: every 2 s while the latest is in flight, else every 30 s. */
-export function useSyncRequests(factoryId: string | null) {
-  return useQuery({
+/** The query of a factory's Sync requests: every 2 s while the latest is in flight, else every 30 s. */
+export const syncRequestsQuery = (factoryId: string | null) => queryOptions({
     enabled: factoryId !== null,
     queryFn: () => boardStore.listSyncRequests(factoryId ?? undefined),
     queryKey: syncKey(factoryId),
     refetchInterval: (query) => {
-      const latest = latestSync((query.state.data ?? []) as SyncRequest[]);
+      const latest = latestSync(query.state.data ?? []);
       return latest && BUSY.has(latest.state) ? 2_000 : 30_000;
     }
-  });
+});
+
+export function useSyncRequests(factoryId: string | null) {
+  return useQuery(syncRequestsQuery(factoryId));
 }
