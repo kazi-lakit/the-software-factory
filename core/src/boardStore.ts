@@ -1,5 +1,6 @@
 import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
 import type { GitHubLink } from './githubLink.js';
+import type { SyncRequest } from './githubSync.js';
 import type { Approval, Doc, DocKind, FactoryEvent, Mode, RepoId, RepoSettings, Run, Settings, Step, Task } from './types.js';
 
 // The store contract, its errors and updateHeld. Pure (no Node API), so the browser entry can import it; store.ts re-exports it.
@@ -133,6 +134,14 @@ export interface BoardStore {
   getGitHubLink(taskId: string): Promise<GitHubLink | undefined>;
   /** Core only. Compare-and-set on `version` as saveFactoryDef, keyed by task id. Returns the stored link. */
   saveGitHubLink(before: GitHubLink | null, after: GitHubLink): Promise<GitHubLink>;
+  /** False while the Blocks schema change is not applied (always true on Memory and File stores). */
+  githubSchemaReady(): Promise<boolean>;
+  /** One factory's sync requests, or all, by requestedAt ascending. */
+  listSyncRequests(factoryId?: string): Promise<SyncRequest[]>;
+  /** Owner only. A new `queued` row with a random requestId and requestedAt = now. */
+  requestSync(factoryId: string, requestedBy: string): Promise<SyncRequest>;
+  /** CAS on version; after.state must differ from before.state and canSyncMove for the store's identity, else ForbiddenError. */
+  saveSyncRequest(before: SyncRequest, after: SyncRequest): Promise<SyncRequest>;
   listFactoryHealth(): Promise<FactoryHealth[]>;
   /** Core only: the owner reads health, the core writes it. */
   setFactoryHealth(h: FactoryHealth): Promise<void>;

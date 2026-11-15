@@ -8,7 +8,7 @@ import { defFixture, repoFixture } from './factoryFixtures.js';
  * `make(identity)` builds a store for the owner or the core; with none, one that checks nothing.
  */
 export function runStoreContract(
-  name: string, make: (identity?: StoreIdentity) => BoardStore | Promise<BoardStore>,
+  name: string, make: (identity?: StoreIdentity) => BoardStore | Promise<BoardStore>, opts: { github?: boolean } = {},
 ): void {
   const mk = (s: BoardStore, title = 'a') => s.createTask({ factoryId: 'blocks', title, description: '', repo: 'data' });
 
@@ -287,6 +287,51 @@ export function runStoreContract(
         const e = { taskId: '-', factoryId: 'delta', actor: 'you', action: 'set' as const, field: 'def.name', from: 'a', to: 'b', reason: '', at: 't' };
         await s.addEvents([e]);
         expect(await s.listEvents()).toEqual([e]);
+      });
+    });
+
+    describe.skipIf(opts.github === false)('sync requests', () => {
+      test('the owner requests, the core plans, the owner claims and finishes', async () => {
+        const dir = await make();
+        const owner = dir;
+        const q = await owner.requestSync('delta', 'kazi');
+        expect(q).toMatchObject({ factoryId: 'delta', requestedBy: 'kazi', state: 'queued', version: 1, plan: null });
+        expect(q.requestId).toMatch(/\S/);
+        const plan = { actions: [], notApplied: [], done: [], errors: [] };
+        const planned = await dir.saveSyncRequest(q, { ...q, state: 'planned', plan, plannedAt: 'p' });
+        expect(planned.version).toBe(2);
+        const applying = await owner.saveSyncRequest(planned, { ...planned, state: 'applying', applyingSince: 'a' });
+        expect(applying.version).toBe(3);
+        const result = { created: [], applied: [], notApplied: [], errors: [] };
+        const applied = await owner.saveSyncRequest(applying, { ...applying, state: 'applied', result, appliedAt: 'z' });
+        expect(applied).toMatchObject({ version: 4, state: 'applied', result });
+        expect((await dir.listSyncRequests('delta')).map((r) => r.state)).toEqual(['applied']);
+        expect(await dir.listSyncRequests('other')).toEqual([]);
+      });
+      test('a stale before is a VersionConflictError', async () => {
+        const s = await make();
+        const q = await s.requestSync('delta', 'kazi');
+        await s.saveSyncRequest(q, { ...q, state: 'failed', error: 'x' });
+        await expect(s.saveSyncRequest(q, { ...q, state: 'planned' })).rejects.toBeInstanceOf(VersionConflictError);
+      });
+      test('the core may not request; the owner may not plan; the same state twice is forbidden', async () => {
+        const core = await make('core');
+        await expect(core.requestSync('delta', 'x')).rejects.toBeInstanceOf(OwnerOnlyError);
+        const owner = await make('owner');
+        const q = await owner.requestSync('delta', 'kazi');
+        await expect(owner.saveSyncRequest(q, { ...q, state: 'planned' })).rejects.toBeInstanceOf(ForbiddenError);
+        const any = await make();
+        const q2 = await any.requestSync('delta', 'kazi');
+        await expect(any.saveSyncRequest(q2, { ...q2 })).rejects.toBeInstanceOf(ForbiddenError);
+      });
+      test('githubSchemaReady is true', async () => {
+        expect(await (await make()).githubSchemaReady()).toBe(true);
+      });
+      test('health keeps watcher fields when status writes without them', async () => {
+        const s = await make('core');
+        await s.setFactoryHealth({ factoryId: 'delta', ghLoggedIn: true, checkedAt: 't1', watcherSeenAt: 'w', githubProblems: ['p'] });
+        await s.setFactoryHealth({ factoryId: 'delta', ghLoggedIn: false, checkedAt: 't2' });
+        expect(await s.listFactoryHealth()).toEqual([{ factoryId: 'delta', ghLoggedIn: false, checkedAt: 't2', watcherSeenAt: 'w', githubProblems: ['p'] }]);
       });
     });
   });

@@ -45,6 +45,10 @@ export interface FactoryHealth {
   /** Whether the factory's gh login was found (`gh auth status`) when last checked. */
   ghLoggedIn: boolean;
   checkedAt: string;
+  /** When the sync watcher last ran for this factory (connected mode); ISO text. */
+  watcherSeenAt?: string | null;
+  /** What the watcher found wrong with the Project setup. */
+  githubProblems?: string[];
 }
 
 export const ID_PATTERN = /^[a-z][a-z0-9-]*$/;

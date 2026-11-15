@@ -4,6 +4,7 @@ import { DocTooLargeError, MAX_DOC_BYTES } from '../limits.js';
 import { DEFAULT_SETTINGS } from '../defaults.js';
 import type { FactoryDef, FactoryHealth, FactoryRepo } from '../factories.js';
 import type { GitHubLink } from '../githubLink.js';
+import { GITHUB_SCHEMA_MISSING, type SyncRequest } from '../githubSync.js';
 import {
   assertNewStatus, canonicalJson, parseScope, CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval,
   settingsConflict, VersionConflictError, type BoardStore, type NewApproval, type NewTask, type StoredSettings,
@@ -461,6 +462,22 @@ export class BlocksStore implements BoardStore {
 
   async getGitHubLink(_taskId: string): Promise<GitHubLink | undefined> {
     return undefined;
+  }
+
+  async githubSchemaReady(): Promise<boolean> {
+    return false;
+  }
+
+  async listSyncRequests(_factoryId?: string): Promise<SyncRequest[]> {
+    return [];
+  }
+
+  async requestSync(_factoryId: string, _requestedBy: string): Promise<SyncRequest> {
+    throw new ForbiddenError(GITHUB_SCHEMA_MISSING);
+  }
+
+  async saveSyncRequest(_before: SyncRequest, _after: SyncRequest): Promise<SyncRequest> {
+    throw new ForbiddenError(GITHUB_SCHEMA_MISSING);
   }
 
   async restoreTask(_t: Task): Promise<Task> {

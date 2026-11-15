@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { DEFAULT_SETTINGS } from './defaults.js';
 import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
 import { loadFactoriesFromDir } from './factoriesFs.js';
+import { canSyncMove, type SyncRequest } from './githubSync.js';
 import { withLinkDefaults, type GitHubLink } from './githubLink.js';
 import type {
   Approval, Doc, DocKind, FactoryEvent, Mode, RepoSettings, Run, Settings, Step, Task,
@@ -32,10 +33,11 @@ interface State {
   factoryRepos: FactoryRepo[];
   health: FactoryHealth[];
   githubLinks: GitHubLink[];
+  syncRequests: SyncRequest[];
 }
 
 const emptyState = (): State => ({
-  tasks: [], docs: [], approvals: [], settings: null, runs: [], events: [], factoryDefs: [], factoryRepos: [], health: [], githubLinks: [],
+  tasks: [], docs: [], approvals: [], settings: null, runs: [], events: [], factoryDefs: [], factoryRepos: [], health: [], githubLinks: [], syncRequests: [],
 });
 const clone = <T>(v: T): T => structuredClone(v);
 const num = (id: string) => Number(id.slice(id.indexOf('-') + 1)) || 0;
@@ -52,6 +54,13 @@ function versionedSave<T extends { version: number }>(what: string, current: T |
   }
   return { ...clone(after), version: current.version + 1 };
 }
+const byRequested = (a: SyncRequest, b: SyncRequest) =>
+  a.requestedAt < b.requestedAt ? -1 : a.requestedAt > b.requestedAt ? 1 : a.requestId < b.requestId ? -1 : a.requestId > b.requestId ? 1 : 0;
+/** The watcher fields a status write (which leaves them out) must not wipe. */
+const keepWatcher = (old: FactoryHealth, h: FactoryHealth): Partial<FactoryHealth> => ({
+  ...(h.watcherSeenAt === undefined ? (old.watcherSeenAt === undefined ? {} : { watcherSeenAt: old.watcherSeenAt }) : {}),
+  ...(h.githubProblems === undefined ? (old.githubProblems === undefined ? {} : { githubProblems: old.githubProblems }) : {}),
+});
 const nextId = (prefix: string, ids: string[]) => `${prefix}-${1 + Math.max(0, ...ids.map(num))}`;
 
 export interface MemoryStoreOptions {
@@ -252,6 +261,38 @@ export class MemoryStore implements BoardStore {
     });
   }
 
+  async githubSchemaReady() {
+    return true;
+  }
+
+  listSyncRequests(factoryId?: string) {
+    return this.read(() => clone(this.state.syncRequests.filter((r) => factoryId === undefined || r.factoryId === factoryId).sort(byRequested)));
+  }
+
+  async requestSync(factoryId: string, requestedBy: string) {
+    this.ownerOnly('requestSync');
+    return this.write(() => {
+      const r: SyncRequest = {
+        requestId: randomBytes(8).toString('hex'), factoryId, requestedAt: new Date().toISOString(), requestedBy, state: 'queued',
+        plan: null, plannedAt: null, applyingSince: null, result: null, appliedAt: null, error: null, version: 1,
+      };
+      this.state.syncRequests.push(r);
+      return clone(r);
+    });
+  }
+
+  async saveSyncRequest(before: SyncRequest, after: SyncRequest) {
+    const ok = this.identity ? canSyncMove(before.state, after.state, this.identity) : canSyncMove(before.state, after.state, 'core') || canSyncMove(before.state, after.state, 'owner');
+    if (!ok) throw new ForbiddenError(`a sync request may not move from ${before.state} to ${after.state}${this.identity ? ` as ${this.identity}` : ''}`);
+    return this.write(() => {
+      const rows = this.state.syncRequests;
+      const i = rows.findIndex((r) => r.requestId === before.requestId);
+      const stored = versionedSave(`sync request ${before.requestId}`, rows[i], before, after);
+      rows[i] = stored;
+      return clone(stored);
+    });
+  }
+
   listFactoryHealth() {
     return this.read(() => clone(this.state.health));
   }
@@ -261,7 +302,7 @@ export class MemoryStore implements BoardStore {
     return this.write(() => {
       const i = this.state.health.findIndex((x) => x.factoryId === h.factoryId);
       if (i < 0) this.state.health.push(clone(h));
-      else this.state.health[i] = clone(h);
+      else this.state.health[i] = { ...clone(h), ...keepWatcher(this.state.health[i]!, h) };
     });
   }
 

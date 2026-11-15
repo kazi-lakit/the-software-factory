@@ -20,6 +20,13 @@ export interface GitHubSettings {
 
 export const DEFAULT_LABEL = 'factory';
 
+/** The status map of the design spec, section 5. */
+export const DEFAULT_STATUS_MAP: Record<Status, string> = {
+  inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress', plan_review: 'In progress',
+  build: 'In progress', verify: 'In progress', review: 'In progress', pr_open: 'In review', done: 'Merged', blocked: 'In progress',
+  cancelled: 'Backlog',
+};
+
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
 

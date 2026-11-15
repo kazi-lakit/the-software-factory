@@ -13,7 +13,7 @@ import { runStoreContract } from '../storeContract.js';
 import { emptyPushed } from '../../src/githubLink.js';
 
 // R1: the contract suite runs on role 'any' (owner identity, no access checks).
-runStoreContract('BlocksStore', (identity) => new BlocksStore(new FakeBlocksData('any'), identity ?? 'owner'));
+runStoreContract('BlocksStore', (identity) => new BlocksStore(new FakeBlocksData('any'), identity ?? 'owner'), { github: false });
 
 /** Counts every BlocksData call, and updates on their own. */
 function counting(inner: BlocksData): BlocksData & { calls: number; updates: number } {
