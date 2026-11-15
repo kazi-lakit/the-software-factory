@@ -321,6 +321,11 @@ describe('BlocksStore', () => {
     expect(data.calls).toBe(0);
   });
 
+  it('restoreTask is forbidden', async () => {
+    const s = new BlocksStore(new FakeBlocksData('factory-core'), 'core');
+    await expect(s.restoreTask({} as never)).rejects.toThrow('tasks are restored only on the file store');
+  });
+
   it('core identity: createTask inserts (the rules allow a core insert) as inbox or ready', async () => {
     const storage = newFakeStorage();
     const s = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core');

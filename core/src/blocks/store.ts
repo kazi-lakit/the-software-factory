@@ -463,6 +463,10 @@ export class BlocksStore implements BoardStore {
     return undefined;
   }
 
+  async restoreTask(_t: Task): Promise<Task> {
+    throw new ForbiddenError('tasks are restored only on the file store');
+  }
+
   async saveGitHubLink(_before: GitHubLink | null, _after: GitHubLink): Promise<GitHubLink> {
     throw new ForbiddenError('GitHub links are not stored in Blocks yet (connected mode)');
   }

@@ -282,3 +282,25 @@ describe('FileStore GitHub links and factory.yaml', () => {
     expect((await s.listFactoryDefs())[0]!.github!.statusMap.ready).toBe('Ready');
   });
 });
+
+describe.each([
+  ['MemoryStore', (identity?: 'core' | 'owner') => new MemoryStore({ identity })],
+  ['FileStore', (identity?: 'core' | 'owner') => new FileStore(join(mkdtempSync(join(tmpdir(), 'fs-restore-')), 'board.json'), { identity })],
+])('%s restoreTask', (_n, make) => {
+  const task = (taskId: string) => ({
+    taskId, factoryId: 'blocks', title: 't', description: 'd', repo: 'data', baseBranch: 'dev', status: 'blocked' as const, stage: null, branch: null,
+    prUrl: null, attempt: 0, blockedReason: 'r', question: null, answer: null, gateOverrides: {}, dependsOn: [], claimBy: null, claimUntil: null, costUsd: 0, version: 7,
+  });
+
+  test('restoreTask keeps the id; a second restore conflicts; createTask continues after the highest id', async () => {
+    const s = make('core');
+    expect(await s.restoreTask(task('T-5'))).toMatchObject({ taskId: 'T-5', version: 1, status: 'blocked' });
+    expect(await s.getTask('T-5')).toMatchObject({ version: 1 });
+    await expect(s.restoreTask(task('T-5'))).rejects.toBeInstanceOf(VersionConflictError);
+    expect((await s.createTask({ factoryId: 'blocks', title: 'n', description: '', repo: 'data' })).taskId).toBe('T-6');
+  });
+
+  test('restoreTask is core only', async () => {
+    await expect(make('owner').restoreTask(task('T-1'))).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});

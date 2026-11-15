@@ -132,6 +132,17 @@ export class MemoryStore implements BoardStore {
     });
   }
 
+  async restoreTask(t: Task) {
+    this.coreOnly('restoreTask');
+    return this.write(() => {
+      const existing = this.state.tasks.find((x) => x.taskId === t.taskId);
+      if (existing) throw new VersionConflictError(t.taskId, 0, existing.version);
+      const task: Task = { ...clone(t), version: 1 };
+      this.state.tasks.push(task);
+      return clone(task);
+    });
+  }
+
   async updateTask(id: string, expectedVersion: number, patch: Partial<Task>) {
     if ('taskId' in patch || 'version' in patch) throw new Error('patch must not change taskId or version');
     return this.write(() => {

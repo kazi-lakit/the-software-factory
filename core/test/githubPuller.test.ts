@@ -6,27 +6,28 @@ import { FakeGitHubBoard, type GitHubBoard } from '../src/githubBoard.js';
 import { FakeGitHub } from '../src/github.js';
 import { GitHubPuller, type PullLock } from '../src/githubPuller.js';
 import { GitHubPusher } from '../src/githubPusher.js';
+import { issueBody } from '../src/githubPush.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
 
 const map = { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress',
   plan_review: 'In progress', build: 'In progress', verify: 'In progress', review: 'In progress',
   pr_open: 'In review', done: 'Merged', blocked: 'In progress', cancelled: 'Backlog' } as const;
 const OPTIONS = ['Backlog', 'Todo', 'In progress', 'In review', 'Merged'];
-const hub = (number = 3) => ({ mode: 'github-only' as const, project: { owner: 'o', number }, label: 'factory', approvers: ['kazi-lakit'], statusMap: map as never });
+const hub = (number = 3, statusMap: Record<string, string> = map) => ({ mode: 'github-only' as const, project: { owner: 'o', number }, label: 'factory', approvers: ['kazi-lakit'], statusMap: statusMap as never });
 const NOW = new Date('2026-06-01T00:00:00Z');
 const REPO = { owner: 'o', repo: 'app' };
 const PROJECT = { owner: 'o', number: 3 };
 
-function setup(opts: { github?: boolean; lock?: PullLock; board?: (b: FakeGitHubBoard) => GitHubBoard; wrap?: (st: MemoryStore) => MemoryStore } = {}) {
+function setup(opts: { statusMap?: Record<string, string>; options?: string[]; github?: boolean; lock?: PullLock; board?: (b: FakeGitHubBoard) => GitHubBoard; wrap?: (st: MemoryStore) => MemoryStore } = {}) {
   const base = new MemoryStore({
     factories: {
-      defs: [defFixture('f', opts.github === false ? {} : { github: hub() })],
+      defs: [defFixture('f', opts.github === false ? {} : { github: hub(3, opts.statusMap) })],
       repos: [repoFixture('f', 'app', { remote: 'git@github.com:o/app.git' })],
     },
   });
   const store = opts.wrap ? opts.wrap(base) : base;
   const board = new FakeGitHubBoard();
-  board.addProject(PROJECT, OPTIONS);
+  board.addProject(PROJECT, opts.options ?? OPTIONS);
   const gh = new FakeGitHub();
   const seen = opts.board ? opts.board(board) : board;
   const pusher = new GitHubPusher({ store: base, boardFor: () => board, now: () => NOW, claimant: 'x' });
@@ -236,5 +237,88 @@ describe('GitHubPuller link writes', () => {
     const s = setup({ lock: async () => { throw new Error('lock broke'); } });
     const [r] = await s.puller.pull();
     expect(r!.errors).toMatchObject([{ taskId: null, message: 'lock broke' }]);
+  });
+  describe('rebuild', () => {
+    const marked = async (s: S, id: string, option: string, factory = 'f', title = `Title ${id}`) => {
+      const made = await s.board.createIssue(REPO, { title, body: issueBody(`desc ${id}`, id, factory), labels: ['factory'] });
+      const item = await s.board.addToProject(await project(s), made.nodeId);
+      await s.board.setStatus(await project(s), item, option);
+      return made.number;
+    };
+
+    test('rebuild restores marked issues', async () => {
+      const s = setup();
+      await marked(s, 'T-2', 'Todo');
+      const n3 = await marked(s, 'T-3', 'In progress');
+      await marked(s, 'T-5', 'In review');
+      await marked(s, 'T-9', 'Todo', 'other');
+      await s.board.addComment(REPO, n3, '## Spec v1\n\nS1', 'bot');
+      await s.board.addComment(REPO, n3, '## Spec v2\n\nS2\n\n---\nReply `/approve` to approve, or `/changes <what to change>` to send it back.', 'bot');
+      await s.board.addComment(REPO, n3, '## Plan v1\n\nP', 'bot');
+      const [r] = await s.puller.rebuild();
+      expect(r!.error).toBeNull();
+      expect(r!.rebuilt.map((x) => [x.taskId, x.status])).toEqual([['T-2', 'ready'], ['T-3', 'blocked'], ['T-5', 'blocked']]);
+      expect(await s.store.getTask('T-2')).toMatchObject({ status: 'ready', title: 'Title T-2', description: 'desc T-2', repo: 'app', stage: null, version: 1 });
+      expect(await s.store.getTask('T-3')).toMatchObject({ status: 'blocked', blockedReason: 'rebuilt from GitHub, check status' });
+      expect(await s.store.currentDoc('T-3', 'spec')).toMatchObject({ version: 1, body: 'S2', author: 'github · rebuilt' });
+      expect(await s.store.currentDoc('T-3', 'plan')).toMatchObject({ body: 'P' });
+      expect(await s.store.getTask('T-5')).toMatchObject({ status: 'blocked' });
+      await expect(s.store.getTask('T-9')).rejects.toThrow();
+      const link = (await s.store.getGitHubLink('T-3'))!;
+      expect(link).toMatchObject({ repo: 'o/app', issueNumber: n3, project: 'o/3' });
+      expect(link.pushed).toMatchObject({ status: 'blocked', option: 'In progress', docs: { spec: 1, plan: 1 }, blocked: null, closed: false });
+      expect(link.pushed.docAt.spec).not.toBeNull();
+      expect((await s.store.listEvents('T-3'))[0]).toMatchObject({ actor: 'github', action: 'create', reason: `rebuilt from GitHub issue o/app#${n3}` });
+    });
+
+    test('a duplicate marker is skipped', async () => {
+      const s = setup();
+      await marked(s, 'T-2', 'Todo');
+      await marked(s, 'T-2', 'Todo');
+      const [r] = await s.puller.rebuild();
+      expect(r!.rebuilt).toHaveLength(1);
+      expect(r!.skipped).toEqual([{ issue: 'o/app#2', reason: 'duplicate marker for T-2' }]);
+    });
+
+    test('rebuild spec_review with a spec comment is restored and accepts /approve', async () => {
+      const statusMap = { ...map, spec_review: 'Spec review' };
+      const s = setup({ statusMap, options: [...OPTIONS, 'Spec review'] });
+      const n = await marked(s, 'T-4', 'Spec review');
+      await s.board.addComment(REPO, n, '## Spec v1\n\nthe spec', 'bot');
+      const [r] = await s.puller.rebuild();
+      expect(r!.rebuilt).toMatchObject([{ taskId: 'T-4', status: 'spec_review' }]);
+      await s.board.addComment(REPO, n, '/approve', 'kazi-lakit');
+      const [p] = await s.puller.pull();
+      expect(p!.errors).toEqual([]);
+      expect(await s.store.listApprovals('T-4')).toMatchObject([{ gate: 'spec', docVersion: 1, decision: 'approve' }]);
+    });
+
+    test('spec_review without a spec comment is blocked', async () => {
+      const s = setup({ statusMap: { ...map, spec_review: 'Spec review' }, options: [...OPTIONS, 'Spec review'] });
+      await marked(s, 'T-4', 'Spec review');
+      const [r] = await s.puller.rebuild();
+      expect(r!.rebuilt).toMatchObject([{ status: 'blocked' }]);
+    });
+
+    test('rebuild refuses a factory that has tasks', async () => {
+      const s = setup();
+      await add(s);
+      await marked(s, 'T-2', 'Todo');
+      const [r] = await s.puller.rebuild();
+      expect(r!.error).toBe('the board already has tasks for factory f; --rebuild only fills an empty board');
+      expect(r!.rebuilt).toEqual([]);
+      expect(await s.store.listTasks()).toHaveLength(1);
+    });
+
+    test('after rebuild a push posts the blocked comment with /unblock and nothing else', async () => {
+      const s = setup();
+      const n = await marked(s, 'T-3', 'In progress');
+      await s.board.addComment(REPO, n, '## Spec v1\n\nS1', 'bot');
+      await s.puller.rebuild();
+      await s.pusher.pushTask('T-3');
+      const comments = await s.board.listComments(REPO, n);
+      expect(comments).toHaveLength(2);
+      expect(comments[1]!.body).toContain('/unblock');
+    });
   });
 });

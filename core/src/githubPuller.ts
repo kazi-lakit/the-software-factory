@@ -2,14 +2,14 @@ import { VersionConflictError, type BoardStore } from './boardStore.js';
 import { redactSecrets } from './doctor.js';
 import type { FactoryDef, FactoryRepo } from './factories.js';
 import type { GitHubFor } from './github.js';
-import type { GitHubBoard, GitHubBoardFor, ProjectItem, RepoRef } from './githubBoard.js';
+import type { GitHubBoard, GitHubBoardFor, IssueComment, ProjectItem, RepoRef } from './githubBoard.js';
 import { githubConfigProblems } from './githubConfig.js';
 import { emptyPushed, type GitHubLink, type PushedState } from './githubLink.js';
 import { issueName, planPull, pullNeeds, type PullInput, type PullPlan, type PullTaskView } from './githubPull.js';
 import { applyPull, type ApplyResult } from './githubPullApply.js';
-import { projectKey } from './githubPush.js';
+import { bodyHash, markerIn, projectKey, stripMarker } from './githubPush.js';
 import { parseRemote } from './remote.js';
-import type { Task } from './types.js';
+import type { DocKind, Status, Task } from './types.js';
 
 // Node side of pull: reads GitHub, runs the pure planner and applier, saves the link records, and reacts to the comments it used.
 
@@ -17,6 +17,27 @@ export interface PullResult extends ApplyResult { factoryId: string; skipped: 'b
 /** Takes the factory's pull lock: a release function, or null when another pull holds it. */
 export type PullLock = (factoryId: string) => Promise<(() => void) | null>;
 export interface PullerDeps { store: BoardStore; boardFor: GitHubBoardFor; githubFor: GitHubFor; now: () => Date; lock?: PullLock }
+
+export interface RebuildResult {
+  factoryId: string;
+  rebuilt: { taskId: string; issue: string; status: Status }[];
+  skipped: { issue: string; reason: string }[];
+  error: string | null;
+}
+
+/** The newest `## <Heading> v<N>` comment: its number, text without the reply footer, and creation time. */
+function latestDoc(comments: IssueComment[], heading: string): { n: number; body: string; at: string } | null {
+  const head = `## ${heading} v`;
+  let best: { n: number; body: string; at: string } | null = null;
+  for (const c of comments) {
+    const m = c.body.startsWith(head) ? /^(\d+)\n\n/.exec(c.body.slice(head.length)) : null;
+    if (!m) continue;
+    const n = Number(m[1]);
+    if (best && n <= best.n) continue;
+    best = { n, body: c.body.slice(head.length + m[0].length).replace(/\n\n---\nReply [\s\S]*$/, ''), at: c.createdAt };
+  }
+  return best;
+}
 
 type Fail = (taskId: string | null, issue: string | null, e: unknown, prefix?: string) => void;
 
@@ -51,6 +72,107 @@ export class GitHubPuller {
       }
     }
     return out;
+  }
+
+  /** Restores an empty github-only factory's board from its marked issues. Never throws for a GitHub error. */
+  async rebuild(factoryIds?: string[]): Promise<RebuildResult[]> {
+    const { store } = this.d;
+    const defs = await store.listFactoryDefs();
+    const repos = await store.listFactoryRepos();
+    const picked = defs.filter((f) => f.github?.mode === 'github-only' && (!factoryIds || factoryIds.includes(f.factoryId)))
+      .sort((a, b) => a.factoryId.localeCompare(b.factoryId, undefined, { numeric: true }));
+    const out: RebuildResult[] = [];
+    for (const def of picked) {
+      const res: RebuildResult = { factoryId: def.factoryId, rebuilt: [], skipped: [], error: null };
+      let release: (() => void) | null = null;
+      try {
+        release = await (this.d.lock ?? noLock)(def.factoryId);
+        if (!release) res.error = 'another pull is running';
+        else await this.rebuildFactory(def, defs, repos, res);
+      } catch (e) {
+        res.error = this.firstLine(e);
+      } finally {
+        release?.();
+      }
+      out.push(res);
+    }
+    return out;
+  }
+
+  private async rebuildFactory(def: FactoryDef, defs: FactoryDef[], allRepos: FactoryRepo[], res: RebuildResult): Promise<void> {
+    const { store } = this.d;
+    const f = def.factoryId;
+    const settings = def.github!;
+    if ((await store.listTasks()).some((t) => t.factoryId === f) || (await store.listGitHubLinks(f)).length > 0) {
+      res.error = `the board already has tasks for factory ${f}; --rebuild only fills an empty board`;
+      return;
+    }
+    const problem = githubConfigProblems(defs, allRepos, 'file').find((p) => p.factoryId === f);
+    if (problem) { res.error = problem.message; return; }
+    const board = this.d.boardFor(def.ghUser);
+    const project = await board.project(settings.project);
+    if (!project) { res.error = `Project ${projectKey(settings.project)} not found`; return; }
+    const items = await board.listItems(project);
+    const mine = allRepos.filter((r) => r.factoryId === f);
+    const repoOf = (item: ProjectItem): FactoryRepo | undefined => mine.find((r) => slugOf(r).toLowerCase() === `${item.issue.repo.owner}/${item.issue.repo.repo}`.toLowerCase());
+    const byOption = new Map<string, Status[]>();
+    for (const [st, option] of Object.entries(settings.statusMap) as [Status, string][]) {
+      if (st === 'done' || st === 'cancelled') continue;
+      byOption.set(option, [...(byOption.get(option) ?? []), st]);
+    }
+    const seen = new Set<string>();
+    const open = items.filter((i) => i.issue.state === 'open')
+      .sort((a, b) => `${a.issue.repo.owner}/${a.issue.repo.repo}`.localeCompare(`${b.issue.repo.owner}/${b.issue.repo.repo}`) || a.issue.number - b.issue.number);
+    for (const item of open) {
+      const mark = markerIn(item.issue.body);
+      const repo = repoOf(item);
+      if (!mark || mark.factoryId !== f || !repo) continue;
+      const issue = issueName({ repo: slugOf(repo), number: item.issue.number });
+      if (!/^T-\d+$/.test(mark.taskId)) { res.skipped.push({ issue, reason: `marker id ${mark.taskId} is not a task id` }); continue; }
+      if (seen.has(mark.taskId)) { res.skipped.push({ issue, reason: `duplicate marker for ${mark.taskId}` }); continue; }
+      seen.add(mark.taskId);
+      try {
+        const status = await this.restoreOne(def, repo, item, mark.taskId, byOption, issue, board);
+        res.rebuilt.push({ taskId: mark.taskId, issue, status });
+      } catch (e) {
+        res.skipped.push({ issue, reason: this.firstLine(e) });
+      }
+    }
+  }
+
+  private async restoreOne(
+    def: FactoryDef, repo: FactoryRepo, item: ProjectItem, taskId: string, byOption: Map<string, Status[]>, issue: string, board: GitHubBoard,
+  ): Promise<Status> {
+    const { store } = this.d;
+    const settings = def.github!;
+    const { issue: gi } = item;
+    const comments = await board.listComments(gi.repo, gi.number);
+    const spec = latestDoc(comments, 'Spec');
+    const plan = latestDoc(comments, 'Plan');
+    const unique = item.status === null ? undefined : byOption.get(item.status);
+    const only = unique?.length === 1 ? unique[0]! : undefined;
+    const restorable = only === 'inbox' || only === 'ready' || (only === 'spec_review' && spec !== null) || (only === 'plan_review' && plan !== null);
+    const status: Status = restorable ? only! : 'blocked';
+    const description = stripMarker(gi.body);
+    const at = this.d.now().toISOString();
+    await store.restoreTask({
+      taskId, factoryId: def.factoryId, title: gi.title.trim(), description, repo: repo.repoId, baseBranch: repo.baseBranch, status, stage: null,
+      branch: null, prUrl: null, attempt: 0, blockedReason: status === 'blocked' ? 'rebuilt from GitHub, check status' : null, question: null, answer: null,
+      gateOverrides: {}, dependsOn: [], claimBy: null, claimUntil: null, costUsd: 0, version: 1,
+    });
+    for (const [kind, d] of [['spec', spec], ['plan', plan]] as [DocKind, typeof spec][]) if (d) await store.addDoc(taskId, kind, d.body, 'github · rebuilt');
+    await store.addEvents([{ taskId, factoryId: def.factoryId, actor: 'github', action: 'create', field: null, from: null, to: status, reason: `rebuilt from GitHub issue ${issue}`, at }]);
+    const labelled = gi.labels.includes(settings.label);
+    await store.saveGitHubLink(null, {
+      taskId, factoryId: def.factoryId, repo: `${gi.repo.owner}/${gi.repo.repo}`, issueNumber: gi.number, issueNodeId: gi.nodeId,
+      project: projectKey(settings.project), itemId: item.itemId,
+      pushed: {
+        ...emptyPushed(), status, option: item.status, title: gi.title, bodyHash: bodyHash(description), label: labelled ? settings.label : null,
+        docs: { spec: spec ? 1 : 0, plan: plan ? 1 : 0 }, docAt: { spec: spec?.at ?? null, plan: plan?.at ?? null },
+      },
+      error: null, lease: null, reported: [], version: 0,
+    });
+    return status;
   }
 
   private firstLine(e: unknown): string {

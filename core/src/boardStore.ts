@@ -108,6 +108,8 @@ export interface BoardStore {
   createTask(t: NewTask): Promise<Task>;
   /** Throws VersionConflictError; returns the stored task with version + 1. */
   updateTask(id: string, expectedVersion: number, patch: Partial<Task>): Promise<Task>;
+  /** Core only. Inserts the task as given, at version 1 (a rebuild keeps the task's id); VersionConflictError when the id exists. */
+  restoreTask(t: Task): Promise<Task>;
   addDoc(taskId: string, kind: DocKind, body: string, author: string): Promise<Doc>;
   currentDoc(taskId: string, kind: DocKind): Promise<Doc | undefined>;
   /** Every version of a task's doc, ascending; the highest is 'current', the rest 'superseded'. */
