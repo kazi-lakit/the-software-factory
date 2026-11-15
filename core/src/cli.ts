@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
+import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Command, CommanderError } from 'commander';
 import { parseAgentReply } from './agentReply.js';
@@ -21,6 +22,7 @@ import { GitHubWatcher, type SyncHandled, type WatchTick } from './githubWatcher
 import { GITHUB_SCHEMA_MISSING } from './githubSync.js';
 import type { GitHubFor } from './github.js';
 import type { GitHubBoardFor } from './githubBoard.js';
+import { localStoreDir, parseStoreKind, storeForFactories, type StoreKind } from './storeSelect.js';
 import { findRoot, lazyGitHubBoardFor, lazyGitHubFor, wire, type WireOptions } from './wire.js';
 
 export type { WireOptions } from './wire.js';
@@ -44,7 +46,6 @@ class CliExit extends Error {
 
 const STEPS = ['spec', 'plan', 'build', 'verify', 'review'];
 const MODES = ['sdk', 'loop', 'session'];
-const STORES = ['file', 'blocks'];
 
 function choice<T extends string>(what: string, value: string, allowed: readonly string[]): T {
   if (!allowed.includes(value)) throw new CliExit(`${what} must be one of ${allowed.join(', ')}`, 1);
@@ -121,24 +122,28 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .name('factory')
     .description('Drive the software factory engine')
     .option('--mode <mode>', 'sdk | loop | session', 'session')
-    .option('--store <store>', 'file | blocks', process.env.FACTORY_STORE || 'file')
+    .option('--store <store>', 'local | factory-app (aliases file, blocks)', process.env.FACTORY_STORE || 'local')
     .exitOverride()
     .configureOutput({ writeOut: (s) => io.out(s.replace(/\n$/, '')), writeErr: (s) => io.err(s.replace(/\n$/, '')) });
 
   const open = async (cmd: Command) => {
     const g = cmd.optsWithGlobals() as { mode: string; store: string };
     const mode = choice<Mode>('--mode', g.mode, MODES);
-    const kind = choice<'file' | 'blocks'>('--store', g.store, STORES);
-    return makeEngine({ root: findRoot(), mode, store: kind, log: io.err });
+    return makeEngine({ root: findRoot(), mode, store: storeKindOf(cmd), log: io.err });
   };
 
   const boardFor = deps.githubBoardFor ?? lazyGitHubBoardFor(undefined, undefined, exec);
-  const lockFile = fileLock(() => findRoot());
+  const lockFile = fileLock(() => localStoreDir(findRoot()));
   const pullLock = deps.pullLock ?? lockFile;
   const pullBusy = deps.pullBusy ?? (deps.pullLock ? undefined : lockFile.held);
   const pusherFor = (store: BoardStore, storeKind: 'file' | 'blocks' = 'file') =>
     new GitHubPusher({ store, boardFor, now: () => new Date(), claimant: `cli:${hostname()}`, storeKind, ...(pullBusy ? { pullBusy } : {}) });
-  const storeKindOf = (cmd: Command): 'file' | 'blocks' => ((cmd.optsWithGlobals() as { store: string }).store === 'blocks' ? 'blocks' : 'file');
+  /** The store this command uses: `--store` / FACTORY_STORE, except that named local factories always use the file store. */
+  function storeKindOf(cmd: Command): StoreKind {
+    const o = cmd.optsWithGlobals() as { store: string; factory?: string | string[] };
+    const named = o.factory === undefined ? undefined : [o.factory].flat();
+    return storeForFactories(parseStoreKind(o.store), named, join(findRoot(), 'factories'));
+  }
   /** False on Blocks until the GitHub tables exist or while no factory is connected: the push then does nothing, quietly, and reads nothing more. */
   const pushable = async (kind: 'file' | 'blocks', store: BoardStore): Promise<boolean> =>
     kind === 'file' || ((await store.githubSchemaReady()) && (await store.listFactoryDefs()).some((f) => f.github?.mode === 'connected'));
@@ -146,7 +151,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   const pullerFor = (store: BoardStore) => new GitHubPuller({ store, boardFor, githubFor, now: () => new Date(), lock: pullLock });
   /** Pulls GitHub changes before `next` (file store only). Never throws and never changes the exit code; lines go to stderr so stdout stays the ticket. */
   const pullBefore = async (cmd: Command, store: BoardStore, factories: string[] | undefined): Promise<void> => {
-    if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') return;
+    if (storeKindOf(cmd) !== 'file') return;
     try {
       for (const r of await pullerFor(store).pull(factories)) for (const l of pullLines(r)) io.err(`github: ${l}`);
     } catch (e) {
@@ -361,7 +366,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .option('--json', 'print JSON')
     .action(async (o: { json?: boolean; factory?: string[] }, cmd: Command) => {
       const only = factoryFilter(o.factory);
-      const kind = choice<'file' | 'blocks'>('--store', (cmd.optsWithGlobals() as { store: string }).store, STORES);
+      const kind = storeKindOf(cmd);
       const { store } = await open(cmd);
       const [defs, repos] = await Promise.all([store.listFactoryDefs(), store.listFactoryRepos()]);
       const unknown = (only ?? []).filter((id) => !defs.some((d) => d.factoryId === id));
@@ -389,7 +394,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
         return io.out(`wrote ${o.export}`);
       }
       if (o.check !== true && o.dryRun !== true && o.yes !== true) throw new CliExit('migrate changes the Board: pass --check or --dry-run to preview, --yes to run, or --export <file>', 1);
-      const onBlocks = (cmd.optsWithGlobals() as { store: string }).store === 'blocks';
+      const onBlocks = storeKindOf(cmd) === 'blocks';
       if (onBlocks && o.check !== true) return io.out('nothing for the core to do on the Blocks store; import on the Board, then run factory migrate --check');
       const { store } = await open(cmd);
       const line = (s: { name: string; done: string; detail: string }) => io.out(`${s.name}: ${s.done} - ${s.detail}`);
@@ -595,7 +600,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
 
   const dev = program.command('dev').description('stand-ins for the Board page (file store only)');
   const openDev = async (cmd: Command): Promise<BoardStore> => {
-    if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') throw new CliExit('dev commands need --store file', 1);
+    if (storeKindOf(cmd) !== 'file') throw new CliExit('dev commands need --store file', 1);
     return (await open(cmd)).store;
   };
   const now = () => new Date();

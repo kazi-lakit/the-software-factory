@@ -9,7 +9,7 @@ describe('fileLock', () => {
 
   test('acquires, is held for a second taker, and is free after release', async () => {
     const root = dir();
-    const lock = fileLock(() => root);
+    const lock = fileLock(() => join(root, '.factory'));
     const release = await lock('f');
     expect(release).not.toBeNull();
     expect(existsSync(join(root, '.factory', 'pull-f.lock'))).toBe(true);
@@ -22,7 +22,7 @@ describe('fileLock', () => {
 
   test('takes a lock older than 120 s', async () => {
     const root = dir();
-    const lock = fileLock(() => root);
+    const lock = fileLock(() => join(root, '.factory'));
     await lock('f');
     const old = new Date(Date.now() - 121_000);
     utimesSync(join(root, '.factory', 'pull-f.lock'), old, old);
@@ -31,7 +31,7 @@ describe('fileLock', () => {
 
   test('a fresh lock is not stale', async () => {
     const root = dir();
-    const lock = fileLock(() => root);
+    const lock = fileLock(() => join(root, '.factory'));
     await lock('f');
     const recent = new Date(Date.now() - 100_000);
     utimesSync(join(root, '.factory', 'pull-f.lock'), recent, recent);
@@ -45,7 +45,7 @@ describe('fileLock races', () => {
 
   test('two takers on one stale lock: exactly one gets it', async () => {
     const root = dir();
-    const lock = fileLock(() => root);
+    const lock = fileLock(() => join(root, '.factory'));
     await lock('f');
     aged(root);
     const got = await Promise.all([lock('f'), lock('f')]);
@@ -54,7 +54,7 @@ describe('fileLock races', () => {
 
   test('release after another holder took over does not delete the new lock', async () => {
     const root = dir();
-    const lock = fileLock(() => root);
+    const lock = fileLock(() => join(root, '.factory'));
     const first = await lock('f');
     aged(root);
     const second = await lock('f');
@@ -68,7 +68,7 @@ describe('fileLock races', () => {
 
   test('a takeover leaves no stray files behind', async () => {
     const root = dir();
-    const lock = fileLock(() => root);
+    const lock = fileLock(() => join(root, '.factory'));
     await lock('f');
     aged(root);
     (await lock('f'))!();
@@ -83,7 +83,7 @@ describe('fileLock held probe and heartbeat', () => {
 
   test('held is true only while a non-stale lock file exists, and never takes the lock', async () => {
     const root = dir();
-    const lock = fileLock(() => root);
+    const lock = fileLock(() => join(root, '.factory'));
     expect(lock.held('f')).toBe(false);
     const release = await lock('f');
     expect(lock.held('f')).toBe(true);
@@ -99,7 +99,7 @@ describe('fileLock held probe and heartbeat', () => {
 
   test('touch refreshes the lock so a long pull is not taken over as stale', async () => {
     const root = dir();
-    const lock = fileLock(() => root);
+    const lock = fileLock(() => join(root, '.factory'));
     const release = await lock('f');
     age(root, 100_000);
     expect(release!.touch!()).toBe(true);
@@ -109,7 +109,7 @@ describe('fileLock held probe and heartbeat', () => {
 
   test('touch after another holder took over leaves the new lock alone', async () => {
     const root = dir();
-    const lock = fileLock(() => root);
+    const lock = fileLock(() => join(root, '.factory'));
     const first = await lock('f');
     age(root, 121_000);
     const second = await lock('f');
@@ -118,5 +118,17 @@ describe('fileLock held probe and heartbeat', () => {
     const before = statSync(file(root)).mtimeMs;
     expect(first!.touch!()).toBe(false);
     expect(statSync(file(root)).mtimeMs).toBe(before);
+  });
+});
+
+describe('fileLock store dir', () => {
+  test('the pull lock lives in the store dir', async () => {
+    const storeDir = join(mkdtempSync(join(tmpdir(), 'factory-lock-')), 'custom', 'store');
+    const lock = fileLock(() => storeDir);
+    const release = await lock('f');
+    expect(existsSync(join(storeDir, 'pull-f.lock'))).toBe(true);
+    expect(lock.held('f')).toBe(true);
+    release!();
+    expect(existsSync(join(storeDir, 'pull-f.lock'))).toBe(false);
   });
 });

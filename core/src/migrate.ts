@@ -8,6 +8,7 @@ import { validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryR
 import { IMPORT_FORMAT, validateImportFile, type ImportFile } from './importFile.js';
 import { loadRepoConfig } from './repoConfig.js';
 import { ghLoggedInUsers, isGhLoggedIn, type ExecFile } from './secrets.js';
+import { localStoreDir } from './storeSelect.js';
 
 export const LEGACY_FACTORY_ID = 'blocks';
 
@@ -31,7 +32,7 @@ export interface MigrateOptions {
 /** What the stored board looked like before this run wrote anything (a FileStore converts the old shape on load). */
 function readLegacyFlags(root: string): { settings: boolean; untaggedTasks: number; untaggedEvents: number } {
   try {
-    const raw = JSON.parse(readFileSync(join(root, '.factory', 'board.json'), 'utf8')) as Record<string, unknown>;
+    const raw = JSON.parse(readFileSync(join(localStoreDir(root), 'board.json'), 'utf8')) as Record<string, unknown>;
     const missing = (list: unknown) => (Array.isArray(list) ? list.filter((x) => (x as { factoryId?: unknown } | null)?.factoryId == null).length : 0);
     const settings = raw.settings as { global?: unknown } | null | undefined;
     return { settings: settings != null && typeof settings === 'object' && 'global' in settings, untaggedTasks: missing(raw.tasks), untaggedEvents: missing(raw.events) };

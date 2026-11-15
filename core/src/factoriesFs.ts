@@ -29,7 +29,7 @@ const dirs = (p: string) => readdirSync(p, { withFileTypes: true }).filter((e) =
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
 /** Whether a parsed (perhaps invalid) factory.yaml says it is an app-mode factory, in either shape. */
-function saysFactoryApp(raw: unknown): boolean {
+export function saysFactoryApp(raw: unknown): boolean {
   if (!isObject(raw)) return false;
   if (isObject(raw.factory)) return raw.factory.source === 'factory-app';
   return isObject(raw.github) && raw.github.mode === 'connected';

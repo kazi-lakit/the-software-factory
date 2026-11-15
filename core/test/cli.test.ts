@@ -171,26 +171,45 @@ describe('factory cli', () => {
       delete process.env.FACTORY_STORE;
     });
 
-    test('is the default store, and an explicit --store wins', async () => {
+    test('FACTORY_STORE defaults to local; factory-app and blocks open the Blocks store', async () => {
       const { go, wired } = setup();
+      await go('status');
+      process.env.FACTORY_STORE = 'factory-app';
+      await go('status');
       process.env.FACTORY_STORE = 'blocks';
       await go('status');
-      await go('--store', 'file', 'status');
-      expect(wired.map((w) => w.store)).toEqual(['blocks', 'file']);
-    });
-
-    test('an empty value defaults to the file store', async () => {
-      const { go, wired } = setup();
       process.env.FACTORY_STORE = '';
-      expect(await go('status')).toBe(0);
-      expect(wired.map((w) => w.store)).toEqual(['file']);
+      await go('status');
+      await go('--store', 'file', 'status');
+      expect(wired.map((w) => w.store)).toEqual(['file', 'blocks', 'blocks', 'file', 'file']);
     });
 
     test('an invalid value exits 1', async () => {
       const { err, go } = setup();
       process.env.FACTORY_STORE = 'nope';
       expect(await go('status')).toBe(1);
-      expect(err).toEqual(['error: --store must be one of file, blocks']);
+      expect(err).toEqual(['error: --store must be one of local, factory-app (or file, blocks)']);
+    });
+
+    test('next --factory <local yaml factory> opens the file store under FACTORY_STORE=blocks', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'cli-root-'));
+      mkdirSync(join(root, 'factories', 'loc'), { recursive: true });
+      mkdirSync(join(root, 'factories', 'app'), { recursive: true });
+      writeFileSync(join(root, 'factories', 'loc', 'factory.yaml'), 'factory:\n  id: loc\n  name: Loc\n  source: local\n');
+      writeFileSync(join(root, 'factories', 'app', 'factory.yaml'), 'factory:\n  id: app\n  name: App\n  source: factory-app\nboard:\n  source: factory-app\n');
+      process.env.FACTORY_ROOT = root;
+      process.env.FACTORY_STORE = 'blocks';
+      try {
+        const { go, wired, err } = setup();
+        await go('next', '--peek', '--factory', 'loc');
+        await go('next', '--peek', '--factory', 'app');
+        await go('next', '--peek', '--factory', 'nope');
+        expect(wired.map((w) => w.store)).toEqual(['file', 'blocks', 'blocks']);
+        expect(await go('next', '--peek', '--factory', 'loc', '--factory', 'app')).toBe(1);
+        expect(err.at(-1)).toBe('error: factories loc (local) and app cannot run in one command');
+      } finally {
+        delete process.env.FACTORY_ROOT;
+      }
     });
   });
 

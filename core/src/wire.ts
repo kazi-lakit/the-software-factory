@@ -6,6 +6,7 @@ import { loadBlocksCredential, type BlocksCredential } from './blocks/credential
 import { SdkBlocksData } from './blocks/data.js';
 import { BlocksStore } from './blocks/store.js';
 import { shellExec } from './checks.js';
+import { localStoreDir } from './storeSelect.js';
 import { Engine } from './engine.js';
 import { LocalGitRepos } from './git.js';
 import { OctokitGitHub, type GitHub, type GitHubFor } from './github.js';
@@ -253,7 +254,7 @@ export class LazyBlocksStore implements BoardStore {
 }
 
 export async function wire(o: WireOptions): Promise<{ engine: Engine; store: BoardStore }> {
-  const store: BoardStore = o.store === 'blocks' ? new LazyBlocksStore(o.loadCredential) : new FileStore(join(o.root, '.factory', 'board.json'), { factoriesDir: join(o.root, 'factories'), ...(o.log ? { log: o.log } : {}) });
+  const store: BoardStore = o.store === 'blocks' ? new LazyBlocksStore(o.loadCredential) : new FileStore(join(localStoreDir(o.root), 'board.json'), { factoriesDir: join(o.root, 'factories'), ...(o.log ? { log: o.log } : {}) });
   const engine = new Engine({
     store,
     git: new LocalGitRepos(o.root),

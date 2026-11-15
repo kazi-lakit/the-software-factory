@@ -10,13 +10,13 @@ const missing = (e: unknown): boolean => (e as NodeJS.ErrnoException).code === '
 export type FileLock = PullLock & { held: (factoryId: string) => boolean };
 
 /**
- * One pull per factory at a time: an exclusive lock file `<root>/.factory/pull-<factoryId>.lock`, stale after 120 s.
+ * One pull per factory at a time: an exclusive lock file `<storeDir>/pull-<factoryId>.lock`, stale after 120 s.
  * The file holds a unique token; release removes it only while it still holds that token. A stale lock is taken over by
  * renaming it away first (only one renamer wins). A held lock gives null; other fs errors throw. The release handle's
  * `touch` refreshes the file's time while it still holds this token, so a long pull is not taken over as stale.
  */
-export function fileLock(root: () => string, now: () => number = Date.now): FileLock {
-  const pathOf = (factoryId: string): string => join(root(), '.factory', `pull-${factoryId}.lock`);
+export function fileLock(storeDir: () => string, now: () => number = Date.now): FileLock {
+  const pathOf = (factoryId: string): string => join(storeDir(), `pull-${factoryId}.lock`);
   const held = (factoryId: string): boolean => {
     try {
       return now() - statSync(pathOf(factoryId)).mtimeMs <= STALE_MS;
@@ -27,7 +27,7 @@ export function fileLock(root: () => string, now: () => number = Date.now): File
   };
   const take = async (factoryId: string): Promise<PullRelease | null> => {
     const path = pathOf(factoryId);
-    mkdirSync(join(root(), '.factory'), { recursive: true });
+    mkdirSync(storeDir(), { recursive: true });
     const token = `${process.pid}-${randomBytes(8).toString('hex')}`;
     const create = (): boolean => {
       try {

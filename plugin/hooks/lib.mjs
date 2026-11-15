@@ -1,5 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// The clone that holds this plugin: two levels above plugin/hooks.
+const PLUGIN_CLONE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 export async function readHookInput() {
   let data = '';
@@ -23,17 +27,18 @@ export function isFactoryRoot(dir, exists = fs.existsSync, read = (p) => fs.read
 
 /**
  * Finds the factory root: FACTORY_ROOT if set (null when it is not a factory root), else
- * CLAUDE_PROJECT_DIR, else <home>/scratchpad/selise/the-software-factory. projectMode is true
+ * CLAUDE_PROJECT_DIR, else the clone that holds the plugin (pluginRoot), else
+ * <home>/scratchpad/selise/the-software-factory. projectMode is true
  * when the root is the session's project dir, that is, the session started in the factory folder.
  */
-export function resolveFactoryRoot(env, home, exists = fs.existsSync, read) {
+export function resolveFactoryRoot(env, home, exists = fs.existsSync, read, pluginRoot = PLUGIN_CLONE) {
   const project = env.CLAUDE_PROJECT_DIR ? path.resolve(env.CLAUDE_PROJECT_DIR) : null;
   const found = (dir) => ({ root: dir, projectMode: dir === project });
   if (env.FACTORY_ROOT) {
     const dir = path.resolve(env.FACTORY_ROOT);
     return isFactoryRoot(dir, exists, read) ? found(dir) : null;
   }
-  for (const dir of [project, home && path.join(home, 'scratchpad', 'selise', 'the-software-factory')]) {
+  for (const dir of [project, pluginRoot && path.resolve(pluginRoot), home && path.join(home, 'scratchpad', 'selise', 'the-software-factory')]) {
     if (dir && isFactoryRoot(dir, exists, read)) return found(dir);
   }
   return null;
@@ -89,11 +94,11 @@ export function renewFile(root, sessionId) {
   return path.join(root, 'runs', '.sessions', `${sessionId}.renew`);
 }
 
-// The store comes from the hook's own environment (the launch shell's FACTORY_STORE, default blocks, as session-start
-// does), never from the session file the model writes. Null when it is neither file nor blocks.
+// The store comes from the hook's own environment (the launch shell's FACTORY_STORE, default local, as session-start
+// does), never from the session file the model writes. Null unless it is local, factory-app, file or blocks.
 export function renewCommand({ root, session, sessionId, host, node = process.execPath, env = process.env }) {
-  const store = env.FACTORY_STORE || 'blocks';
-  if (store !== 'file' && store !== 'blocks') return null;
+  const store = env.FACTORY_STORE || 'local';
+  if (!['local', 'factory-app', 'file', 'blocks'].includes(store)) return null;
   return {
     file: node,
     args: [path.join(root, 'core', 'dist', 'cli.js'), '--mode', session.mode, '--store', store, 'renew', session.taskId],

@@ -19,7 +19,7 @@ try {
       const lines = [
         `export FACTORY_ROOT="${shellQuoted(found.root)}"`,
         `export FACTORY_CLAIMANT=${claimantFor(input.session_id, os.hostname())}`,
-        'export FACTORY_STORE="${FACTORY_STORE:-blocks}"',
+        'export FACTORY_STORE="${FACTORY_STORE:-local}"',
       ];
       if (found.projectMode) lines.push('export HUSKY=0');
       fs.appendFileSync(envFile, lines.join('\n') + '\n');
