@@ -1,6 +1,7 @@
+import { VersionConflictError, type BoardStore } from './boardStore.js';
 import type { FactoryHealth } from './factories.js';
 import type { PullAction, NotApplied } from './githubPull.js';
-import type { PullError } from './githubPullApply.js';
+import { applyPull, firstLine, type ApplyResult, type PullError } from './githubPullApply.js';
 import { MAX_DOC_BYTES } from './limits.js';
 
 // Pure (no Node API, no credential): the sync request the Board queues, the factory machine plans and the Board applies.
@@ -70,3 +71,53 @@ export function watcherState(h: FactoryHealth | undefined, now: Date): 'seen' | 
 
 export const syncSummary = (r: SyncResult): string =>
   `created ${r.created.length}, applied ${r.applied.length}, not applied ${r.notApplied.length}, failed ${r.errors.length}`;
+
+/** The plan's own `done`/`errors` lead; `action`, `onApplied` and not-applied `link` patches (core-only) are dropped. */
+export function toSyncResult(plan: SyncPlan, r: ApplyResult): SyncResult {
+  return {
+    created: r.created.map(({ taskId, issue, status }) => ({ taskId, issue, status })),
+    applied: [...plan.done, ...r.applied.map(({ taskId, issue, change }) => ({ taskId, issue, change }))],
+    notApplied: r.notApplied.map(({ link: _link, ...n }) => n),
+    errors: [...plan.errors, ...r.errors],
+  };
+}
+
+const conflictOrThrow = (e: unknown): null => {
+  if (e instanceof VersionConflictError) return null;
+  throw e;
+};
+
+/** Claims the planned row (planned→applying), applies its actions as the caller (the owner), stores the result (applied). Null when another applier holds it. */
+export async function applySyncRequest(store: BoardStore, now: () => Date, row: SyncRequest): Promise<SyncRequest | null> {
+  if (row.state !== 'planned' || !row.plan) return null;
+  let claimed: SyncRequest;
+  try {
+    claimed = await store.saveSyncRequest(row, { ...row, state: 'applying', applyingSince: now().toISOString() });
+  } catch (e) {
+    return conflictOrThrow(e);
+  }
+  const plan = row.plan;
+  const blocks = plan.actions.filter((a) => a.kind === 'block');
+  const refused: NotApplied[] = blocks.map((a) => ({
+    taskId: 'taskId' in a ? a.taskId : null, issue: `${a.issue.repo}#${a.issue.number}`, change: 'block', reason: 'the factory machine applies this',
+  }));
+  try {
+    const r = await applyPull(store, now, { factoryId: claimed.factoryId, actions: plan.actions.filter((a) => a.kind !== 'block'), notApplied: plan.notApplied });
+    r.notApplied.push(...refused);
+    return await store.saveSyncRequest(claimed, { ...claimed, state: 'applied', result: toSyncResult(plan, r), appliedAt: now().toISOString() });
+  } catch (e) {
+    try { await store.saveSyncRequest(claimed, { ...claimed, state: 'failed', error: firstLine(e) }); } catch { /* the first error is the one to report */ }
+    throw e;
+  }
+}
+
+/** An applying row whose claim is older than SYNC_APPLY_MS: applying→failed with `interrupted while applying; click Sync again`. Null when it is not stale or the save conflicts. */
+export async function failStaleSync(store: BoardStore, now: () => Date, row: SyncRequest): Promise<SyncRequest | null> {
+  const since = row.applyingSince ? Date.parse(row.applyingSince) : NaN;
+  if (row.state !== 'applying' || now().getTime() - since < SYNC_APPLY_MS) return null;
+  try {
+    return await store.saveSyncRequest(row, { ...row, state: 'failed', error: 'interrupted while applying; click Sync again' });
+  } catch (e) {
+    return conflictOrThrow(e);
+  }
+}
