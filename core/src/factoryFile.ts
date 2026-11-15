@@ -8,7 +8,7 @@ import { Document, isMap, isNode, isPair, isScalar, isSeq, parse, parseDocument,
 import { VersionConflictError, type BoardStore } from './boardStore.js';
 import type { Check } from './checksSchema.js';
 import { DEFAULT_SETTINGS } from './defaults.js';
-import { validateFactoryRepo, type AgentModels, type FactoryDef, type FactoryRepo } from './factories.js';
+import { DEFAULT_GH_USER, validateFactoryRepo, type AgentModels, type FactoryDef, type FactoryRepo } from './factories.js';
 import { yamlVersion } from './factoriesFs.js';
 import { normaliseFactoryYaml, type FactoryYaml } from './factoryYaml.js';
 import { DEFAULT_STATUS_MAP } from './githubConfig.js';
@@ -30,6 +30,8 @@ export interface FactoryFile {
   legacyRepoFiles: Record<string, string>;
   /** Files the save deletes (repo files moved into `repos.list`). */
   removedFiles: string[];
+  /** The yamlVersion each removed file had when it was read: the save refuses to delete a file that changed since. */
+  removedVersions: Record<string, number>;
   config: FactoryYaml;
 }
 
@@ -47,7 +49,8 @@ export type ConfigChange =
   | { kind: 'addRepo'; repo: RepoEntry }
   | { kind: 'updateRepo'; repoId: string; patch: Partial<Omit<RepoEntry, 'id' | 'protectedBranches'>> & { protectedBranches?: string[] | null } }
   | { kind: 'removeRepo'; repoId: string }
-  | { kind: 'convert' };
+  /** `githubLogin` fills `accounts.github` when the old file has no `ghUser` (its fallback login is never written). */
+  | { kind: 'convert'; githubLogin?: string };
 
 export interface NewFactory {
   id: string; name: string; accounts: Record<string, string>;
@@ -166,11 +169,28 @@ function legacyOf(file: FactoryFile, files: Record<string, string>): Record<stri
   return out;
 }
 
-function build(dir: string, doc: Document, version: number, legacy: Record<string, LegacyRepo>, removedFiles: string[]): Validated<FactoryFile> {
+function build(dir: string, doc: Document, version: number, legacy: Record<string, LegacyRepo>, removed: Record<string, number>): Validated<FactoryFile> {
   const config = normalise(dir, doc, version, legacy);
   if (!config.ok) return config;
   const legacyRepoFiles = Object.fromEntries(Object.entries(legacy).map(([id, l]) => [id, l.file]));
-  return { ok: true, value: { dir, path: fileOf(dir), doc, version, shape: config.value.shape, legacyRepoFiles, removedFiles, config: config.value } };
+  return {
+    ok: true,
+    value: {
+      dir, path: fileOf(dir), doc, version, shape: config.value.shape, legacyRepoFiles,
+      removedFiles: Object.keys(removed), removedVersions: removed, config: config.value,
+    },
+  };
+}
+
+/** What uses the GitHub account (every repo host is github in v1), as the normaliser names it. */
+function loginUses(board: string, mirror: string, hasRepos: boolean): string[] {
+  return [board === 'github' && 'board', mirror === 'github' && 'board.mirror', hasRepos && 'repos'].filter((x): x is string => typeof x === 'string');
+}
+
+/** `accounts` for a file written from a source without a login of its own; an error when something needs one. */
+function accountsFor(login: string | undefined, uses: string[]): Validated<Record<string, string>> {
+  if (login) return { ok: true, value: { github: login } };
+  return uses.length > 0 ? fail(`accounts.github is required (used by: ${uses.join(', ')})`) : { ok: true, value: {} };
 }
 
 /** Reads `<dir>/repos/*.yaml`. */
@@ -203,25 +223,25 @@ export function loadFactoryFile(dir: string): Validated<FactoryFile> {
   if (doc.errors.length > 0) return fail(`${path}: ${doc.errors[0]!.message}`);
   const repos = readRepoFiles(dir);
   if (!repos.ok) return repos;
-  return build(dir, doc, yamlVersion(text), repos.value, []);
+  return build(dir, doc, yamlVersion(text), repos.value, {});
 }
 
 // --- Changes ---
 
 /** Applies one named change to a copy of the document and re-validates. The given file is not changed. */
 export function applyChange(file: FactoryFile, change: ConfigChange): Validated<FactoryFile> {
-  if (change.kind === 'convert') return convert(file);
+  if (change.kind === 'convert') return convert(file, change.githubLogin);
   if (file.shape === 'legacy') return fail(oldFormat(file.path));
   const doc = file.doc.clone();
   const legacy = { ...file.legacyRepoFiles };
-  const removed = [...file.removedFiles];
+  const removed = { ...file.removedVersions };
   const error = edit(doc, file, change, legacy, removed);
   if (error) return fail(`${file.path}: ${error}`);
   return build(file.dir, doc, file.version, legacyOf(file, legacy), removed);
 }
 
 /** Edits `doc` (and the old repo files and removed lists) for one change; returns an error, or null. */
-function edit(doc: Document, file: FactoryFile, change: Exclude<ConfigChange, { kind: 'convert' }>, legacy: Record<string, string>, removed: string[]): string | null {
+function edit(doc: Document, file: FactoryFile, change: Exclude<ConfigChange, { kind: 'convert' }>, legacy: Record<string, string>, removed: Record<string, number>): string | null {
   switch (change.kind) {
     case 'setFactory': {
       const { name, docsPath, git, active } = change;
@@ -252,9 +272,11 @@ function edit(doc: Document, file: FactoryFile, change: Exclude<ConfigChange, { 
       }
       return null;
     case 'setApprovers':
+      if (file.config.board.source === 'none') return 'board.approvers: set the board first';
       setSeq(doc, ['board', 'approvers'], change.approvers);
       return null;
     case 'setStatusMap':
+      if (file.config.board.source === 'none') return 'board.statusMap: set the board first';
       if (change.statusMap === null) del(doc, ['board', 'statusMap']);
       else setMap(doc, ['board', 'statusMap'], change.statusMap);
       return null;
@@ -270,19 +292,20 @@ function edit(doc: Document, file: FactoryFile, change: Exclude<ConfigChange, { 
     case 'removeRepo': {
       const i = listIndex(doc, change.repoId);
       if (i >= 0) doc.deleteIn(['repos', 'list', i]);
-      else if (Object.hasOwn(legacy, change.repoId)) moveOut(change.repoId, legacy, removed);
+      else if (Object.hasOwn(legacy, change.repoId)) moveOut(file, change.repoId, legacy, removed);
       else return `repos: no repo ${change.repoId}`;
       return null;
     }
   }
 }
 
-function moveOut(repoId: string, legacy: Record<string, string>, removed: string[]): void {
-  removed.push(legacy[repoId]!);
+/** Marks a repo file for deletion, with the version it was read at. */
+function moveOut(file: FactoryFile, repoId: string, legacy: Record<string, string>, removed: Record<string, number>): void {
+  removed[legacy[repoId]!] = file.config.repos.find((r) => r.repoId === repoId)!.version;
   delete legacy[repoId];
 }
 
-function updateRepo(doc: Document, file: FactoryFile, change: Extract<ConfigChange, { kind: 'updateRepo' }>, legacy: Record<string, string>, removed: string[]): string | null {
+function updateRepo(doc: Document, file: FactoryFile, change: Extract<ConfigChange, { kind: 'updateRepo' }>, legacy: Record<string, string>, removed: Record<string, number>): string | null {
   const { repoId, patch } = change;
   const i = listIndex(doc, repoId);
   if (i < 0) {
@@ -293,7 +316,7 @@ function updateRepo(doc: Document, file: FactoryFile, change: Extract<ConfigChan
     if (protectedBranches === null) delete entry.protectedBranches;
     else if (protectedBranches !== undefined) entry.protectedBranches = protectedBranches;
     appendRepo(doc, repoNode(doc, entry));
-    moveOut(repoId, legacy, removed);
+    moveOut(file, repoId, legacy, removed);
     return null;
   }
   const item = doc.getIn(['repos', 'list', i], true) as YAMLMap;
@@ -325,11 +348,18 @@ const CARRIED: [Path, Path][] = [
  * on save). Keeps the top-of-file comment and, best effort, the comments on the keys it carries over. On a new-shape
  * file it only moves the repo files into the list.
  */
-function convert(file: FactoryFile): Validated<FactoryFile> {
+function convert(file: FactoryFile, githubLogin: string | undefined): Validated<FactoryFile> {
   const legacyIds = Object.keys(file.legacyRepoFiles);
-  const removed = [...file.removedFiles, ...legacyIds.map((id) => file.legacyRepoFiles[id]!)];
+  const legacy = { ...file.legacyRepoFiles };
+  const removed = { ...file.removedVersions };
+  for (const id of legacyIds) moveOut(file, id, legacy, removed);
   const repoComment = (id: string): string | undefined => repoFileComment(file.legacyRepoFiles[id]!);
-  const doc = file.shape === 'legacy' ? newShapeDoc(file) : file.doc.clone();
+  let doc: Document;
+  if (file.shape === 'legacy') {
+    const d = newShapeDoc(file, githubLogin);
+    if (!d.ok) return fail(`${file.path}: ${d.error}`);
+    doc = d.value;
+  } else doc = file.doc.clone();
   for (const id of legacyIds) {
     const node = repoNode(doc, entryOf(file.config.repos.find((r) => r.repoId === id)!));
     const comment = repoComment(id);
@@ -350,7 +380,7 @@ function repoFileComment(file: string): string | undefined {
 }
 
 /** The legacy document as a new-shape document, without the repo files. */
-function newShapeDoc(file: FactoryFile): Document {
+function newShapeDoc(file: FactoryFile, githubLogin: string | undefined): Validated<Document> {
   const raw = file.doc.toJS() as Record<string, unknown>;
   const { config } = file;
   const git = { ...(raw.gitName !== undefined ? { name: raw.gitName } : {}), ...(raw.gitEmail !== undefined ? { email: raw.gitEmail } : {}) };
@@ -359,16 +389,17 @@ function newShapeDoc(file: FactoryFile): Document {
     ...(raw.docsPath !== undefined ? { docsPath: raw.docsPath } : {}), ...(Object.keys(git).length > 0 ? { git } : {}),
     ...(raw.active !== undefined ? { active: raw.active } : {}), ...(config.def.agentModels ? { agents: raw.agentModels } : {}),
   };
-  // The new shape needs the GitHub login whenever repos or the board use it; the old file fell back to a default.
-  const needsLogin = config.repos.length > 0 || config.board.source !== 'none';
-  const accounts = needsLogin ? { github: config.def.ghUser } : config.accounts;
+  // The old file's own ghUser, else the given login; never the fallback login an old file without one ran on.
+  const own = typeof raw.ghUser === 'string' && raw.ghUser.trim() !== '' ? raw.ghUser.trim() : undefined;
+  const accounts = accountsFor(own ?? githubLogin, loginUses(config.board.source, config.board.mirror, config.repos.length > 0));
+  if (!accounts.ok) return accounts;
   const github = raw.github as Record<string, unknown> | undefined;
   const { mode: _mode, ...boardRest } = github ?? {};
   const board = { source: config.board.source, ...(config.board.mirror !== 'none' ? { mirror: config.board.mirror } : {}), ...boardRest };
   const repos = raw.protectedBranches !== undefined ? { protectedBranches: raw.protectedBranches } : undefined;
-  const doc = new Document({ factory, ...(Object.keys(accounts).length > 0 ? { accounts } : {}), board, ...(repos ? { repos } : {}) });
+  const doc = new Document({ factory, ...(Object.keys(accounts.value).length > 0 ? { accounts: accounts.value } : {}), board, ...(repos ? { repos } : {}) });
   carryComments(file.doc, doc);
-  return doc;
+  return { ok: true, value: doc };
 }
 
 function pairAt(doc: Document, path: Path): Pair | undefined {
@@ -436,9 +467,13 @@ function lcsMatches(a: string[], b: string[]): Map<number, number> {
   return out;
 }
 
+const changed = (file: string, expected: number, actual: number): VersionConflictError =>
+  new VersionConflictError(file, expected, actual, `${file} changed since it was read; reload and save again`);
+
 /**
  * Saves the file: refuses an old-format file; throws VersionConflictError when the file on disk is not the one that
- * was read (or appeared since a new file was made); writes a temp file and renames it over; deletes `removedFiles`.
+ * was read (or appeared since a new file was made), or a file it would delete changed or vanished; writes a temp file
+ * and renames it over (keeping CRLF line endings); deletes `removedFiles`.
  * Returns the file as loaded again.
  */
 export function saveFactoryFile(file: FactoryFile): FactoryFile {
@@ -447,13 +482,21 @@ export function saveFactoryFile(file: FactoryFile): FactoryFile {
   if (!check.ok) throw new Error(check.error);
   const text = existsSync(file.path) ? readFileSync(file.path, 'utf8') : null;
   const onDisk = text === null ? 0 : yamlVersion(text);
-  if (onDisk !== file.version || (file.version === 0 && existsSync(file.path))) {
-    throw new VersionConflictError(file.path, file.version, onDisk, `${file.path} changed since it was read; reload and save again`);
+  if (onDisk !== file.version || (file.version === 0 && text !== null)) throw changed(file.path, file.version, onDisk);
+  for (const [f, v] of Object.entries(file.removedVersions)) {
+    const now = existsSync(f) ? yamlVersion(readFileSync(f, 'utf8')) : 0;
+    if (now !== v) throw changed(f, v, now);
   }
   mkdirSync(file.dir, { recursive: true });
+  const eol = text?.includes('\r\n') ? '\r\n' : '\n';
+  const out = keepLines(text === null ? null : text.replace(/\r\n/g, '\n'), file.doc.toString(STRINGIFY));
   const tmp = `${file.path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-  writeFileSync(tmp, keepLines(text, file.doc.toString(STRINGIFY)));
-  renameSync(tmp, file.path);
+  try {
+    writeFileSync(tmp, eol === '\n' ? out : out.replace(/\n/g, eol));
+    renameSync(tmp, file.path);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
   for (const f of file.removedFiles) rmSync(f, { force: true });
   const reloaded = loadFactoryFile(file.dir);
   if (!reloaded.ok) throw new Error(reloaded.error);
@@ -466,7 +509,7 @@ function newDoc(dir: string, content: Record<string, unknown>): Validated<Factor
   const doc = new Document(content);
   doc.commentBefore = HEADER;
   checksFlowAll(doc);
-  return build(dir, doc, 0, {}, []);
+  return build(dir, doc, 0, {}, {});
 }
 
 function checksFlowAll(doc: Document): void {
@@ -493,7 +536,9 @@ export function newFactoryFile(dir: string, init: NewFactory): Validated<Factory
 }
 
 /** A board.json definition (no YAML yet) as a new factory file: the "export to YAML" of design section 14, call 3. */
-export function fileFromDefinition(dir: string, def: FactoryDef, repos: FactoryRepo[], gates: Record<Gate, boolean> | null): Validated<FactoryFile> {
+export function fileFromDefinition(
+  dir: string, def: FactoryDef, repos: FactoryRepo[], gates: Record<Gate, boolean> | null, githubLogin?: string,
+): Validated<FactoryFile> {
   const gh = def.github;
   const connected = gh?.mode === 'connected';
   const source = connected ? 'factory-app' : 'local';
@@ -502,13 +547,17 @@ export function fileFromDefinition(dir: string, def: FactoryDef, repos: FactoryR
     project: `${gh.project.owner}/${gh.project.number}`, label: gh.label, approvers: gh.approvers,
     ...(sameRecord(gh.statusMap, DEFAULT_STATUS_MAP) ? {} : { statusMap: gh.statusMap }),
   };
+  // A ghUser equal to the fallback login is what a definition without one holds: it is not written into a user's file.
+  const own = def.ghUser !== DEFAULT_GH_USER ? def.ghUser : undefined;
+  const accounts = accountsFor(own ?? githubLogin, loginUses(board.source, connected ? 'github' : 'none', repos.length > 0));
+  if (!accounts.ok) return fail(`${fileOf(dir)}: ${accounts.error}`);
   return newDoc(dir, {
     factory: {
       id: def.factoryId, name: def.name, source, ...(def.docsPath ? { docsPath: def.docsPath } : {}),
       ...(def.gitName || def.gitEmail ? { git: { name: def.gitName, email: def.gitEmail } } : {}),
       active: def.active, ...(def.agentModels ? { agents: def.agentModels } : {}),
     },
-    accounts: { github: def.ghUser },
+    ...(Object.keys(accounts.value).length > 0 ? { accounts: accounts.value } : {}),
     board,
     ...(gates && source === 'local' ? { gates } : {}),
     repos: { protectedBranches: def.protectedBranches, list: repos.map((r) => repoJs(entryOf(r))) },

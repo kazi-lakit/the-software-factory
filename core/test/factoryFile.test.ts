@@ -1,9 +1,11 @@
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import * as fs from 'node:fs';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { stringify } from 'yaml';
 import { VersionConflictError } from '../src/boardStore.js';
+import { DEFAULT_GH_USER } from '../src/factories.js';
 import { loadFactoriesFromDir } from '../src/factoriesFs.js';
 import {
   applyChange, fileFromDefinition, loadFactoryFile, newFactoryFile, openTasksForRepo, saveFactoryFile,
@@ -13,6 +15,12 @@ import { DEFAULT_STATUS_MAP, STANDARD_STATUS_MAP } from '../src/githubConfig.js'
 import { MemoryStore } from '../src/store.js';
 import type { Validated } from '../src/validated.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
+
+// renameSync can be made to fail once (the failed-write test); otherwise it is the real one.
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, renameSync: vi.fn(actual.renameSync) };
+});
 
 const ok = <T>(r: Validated<T>): T => {
   if (!r.ok) throw new Error(r.error);
@@ -248,6 +256,90 @@ describe('applyChange and saveFactoryFile', () => {
     saveFactoryFile(ok(applyChange(loaded(), { kind: 'setApprovers', approvers: ['x-y'] })));
     expect(readFileSync(path, 'utf8')).toContain('approvers: [ x-y ]');
     expect(readdirSync(dir)).toEqual(['factory.yaml']);
+  });
+});
+
+describe('fix round 1', () => {
+  test('a hand edit to a repos/<id>.yaml that the save would delete makes the save throw and survives', () => {
+    writeFixture();
+    mkdirSync(join(dir, 'repos'));
+    const apiFile = join(dir, 'repos', 'api.yaml');
+    writeFileSync(apiFile, API_REPO);
+    const f = ok(applyChange(loaded(), { kind: 'updateRepo', repoId: 'api', patch: { baseBranch: 'stg' } }));
+    appendFileSync(apiFile, '# my note\n');
+    expect(() => saveFactoryFile(f)).toThrow(VersionConflictError);
+    expect(() => saveFactoryFile(f)).toThrow(`${apiFile} changed since it was read; reload and save again`);
+    expect(readFileSync(apiFile, 'utf8')).toContain('# my note');
+    expect(readFileSync(path, 'utf8')).toBe(FIXTURE);
+  });
+
+  test('a repos/<id>.yaml that vanished before the save makes it throw', () => {
+    writeFixture();
+    mkdirSync(join(dir, 'repos'));
+    const apiFile = join(dir, 'repos', 'api.yaml');
+    writeFileSync(apiFile, API_REPO);
+    const f = ok(applyChange(loaded(), { kind: 'removeRepo', repoId: 'api' }));
+    rmSync(apiFile);
+    expect(() => saveFactoryFile(f)).toThrow(`${apiFile} changed since it was read; reload and save again`);
+    expect(readFileSync(path, 'utf8')).toBe(FIXTURE);
+  });
+
+  const legacyNoLogin = () => {
+    writeFileSync(path, LEGACY.replace('ghUser: my-login\n', ''));
+    mkdirSync(join(dir, 'repos'));
+    writeFileSync(join(dir, 'repos', 'api.yaml'), API_REPO);
+  };
+
+  test('convert of an old file without ghUser needs a login and never writes the fallback', () => {
+    legacyNoLogin();
+    const f = loaded();
+    expect(applyChange(f, { kind: 'convert' })).toEqual({ ok: false, error: `${path}: accounts.github is required (used by: board, repos)` });
+    const saved = saveFactoryFile(ok(applyChange(f, { kind: 'convert', githubLogin: 'me-x' })));
+    expect(saved.config.accounts).toEqual({ github: 'me-x' });
+    expect(readFileSync(path, 'utf8')).not.toContain(DEFAULT_GH_USER);
+  });
+
+  test('convert keeps an explicit ghUser over a given login', () => {
+    writeLegacy();
+    const c = ok(applyChange(loaded(), { kind: 'convert', githubLogin: 'me-x' }));
+    expect(c.config.accounts).toEqual({ github: 'my-login' });
+  });
+
+  test('fileFromDefinition with the fallback login needs a login', () => {
+    const def = defFixture('myapp', { ghUser: DEFAULT_GH_USER });
+    const repos = [repoFixture('myapp', 'web')];
+    expect(fileFromDefinition(dir, def, repos, null)).toEqual({ ok: false, error: `${path}: accounts.github is required (used by: repos)` });
+    const saved = saveFactoryFile(ok(fileFromDefinition(dir, def, repos, null, 'me-x')));
+    expect(saved.config.accounts).toEqual({ github: 'me-x' });
+    expect(saved.config.def.ghUser).toBe('me-x');
+    expect(readFileSync(path, 'utf8')).not.toContain(DEFAULT_GH_USER);
+  });
+
+  test('a failed write leaves no temp file and the old file in place', () => {
+    writeFixture();
+    const f = ok(applyChange(loaded(), { kind: 'setApprovers', approvers: ['x-y'] }));
+    vi.mocked(fs.renameSync).mockImplementationOnce(() => { throw new Error('disk full'); });
+    expect(() => saveFactoryFile(f)).toThrow('disk full');
+    expect(readdirSync(dir)).toEqual(['factory.yaml']);
+    expect(readFileSync(path, 'utf8')).toBe(FIXTURE);
+  });
+
+  test('a file with CRLF line endings keeps them', () => {
+    const crlf = FIXTURE.replace(/\n/g, '\r\n');
+    writeFixture(crlf);
+    const f = ok(applyChange(loaded(), { kind: 'setModels', models: { build: 'haiku' } }));
+    const after = readFileSync(saveFactoryFile(f).path, 'utf8');
+    expect(after).toContain('build: haiku\r\n');
+    expect(after.replace(/\r\n/g, '')).not.toContain('\n');
+    const cut = (t: string) => t.replace(/agents:[\s\S]*?\r\n(?=\S)/, '');
+    expect(cut(after)).toBe(cut(crlf));
+  });
+
+  test('setApprovers and setStatusMap need a board first', () => {
+    writeFixture();
+    const none = ok(applyChange(loaded(), { kind: 'setBoard', board: { source: 'none' } }));
+    expect(applyChange(none, { kind: 'setApprovers', approvers: ['x-y'] })).toEqual({ ok: false, error: `${path}: board.approvers: set the board first` });
+    expect(applyChange(none, { kind: 'setStatusMap', statusMap: STANDARD_STATUS_MAP })).toEqual({ ok: false, error: `${path}: board.statusMap: set the board first` });
   });
 });
 
