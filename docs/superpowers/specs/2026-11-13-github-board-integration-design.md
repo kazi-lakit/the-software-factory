@@ -119,6 +119,7 @@ The task stores `github: { repo, issueNumber, itemId } | null`. It's set by the 
 - **Board-created tasks** (connected mode) can't push from the browser. They wait in the outbox, and the card shows **waiting for GitHub** until the issue exists.
 - **`factory sync --watch`** is a new long-running command on the factory machine. Every few seconds it drains the outbox for its factories and handles Sync requests (section 9.2). It uses the factory's gh login. Nothing reaches GitHub while that machine is off; the Board shows the last time the watcher was seen, from factory health.
 - In GitHub-only mode `factory run` also drains the outbox before and after each step, so a separate watcher is optional there.
+- Stage 2 build: derived outbox and separate link record, see the stage 2 plan's builder's calls.
 
 ## 7. Gates in GitHub-only mode
 

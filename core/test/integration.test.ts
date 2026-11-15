@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -8,6 +8,9 @@ import { Engine, type EngineDeps } from '../src/engine.js';
 import { LocalGitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
 import { FactoryConfig } from '../src/factories.js';
+import { run } from '../src/cli.js';
+import { FakeGitHubBoard } from '../src/githubBoard.js';
+import { FileStore } from '../src/store.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
 import { nextTicket } from './nextTicket.js';
 import { MemoryStore } from '../src/store.js';
@@ -175,5 +178,76 @@ describe('integration', () => {
     expect(task.status).toBe('blocked');
     expect(task.attempt).toBe(3);
     expect(task.blockedReason).toBe('returned to build 3 times');
+  });
+});
+
+describe('GitHub-only push', () => {
+  const MAP = { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress', plan_review: 'In progress',
+    build: 'In progress', verify: 'In progress', review: 'In progress', pr_open: 'In review', done: 'Merged', blocked: 'In progress', cancelled: 'Backlog' };
+  const yamlText = (over: Record<string, string> = {}) => 'factoryId: f\nname: F\ngithub:\n  mode: github-only\n  project: o/3\n  statusMap:\n'
+    + Object.entries({ ...MAP, ...over }).map(([k, v]) => `    ${k}: ${v}\n`).join('');
+  const repoYaml = 'repoId: app\nremote: git@github.com:o/app.git\nchecks:\n  server: { cwd: s, build: b, test: t }\n  client: { cwd: c, install: i, typecheck: tc, lint: l, test: t }\n  e2e: off\n';
+
+  test('GitHub-only push follows a task from new to cancelled', async () => {
+    const root = join(tmp, 'froot');
+    mkdirSync(join(root, 'factories', 'f', 'repos'), { recursive: true });
+    const yaml = join(root, 'factories', 'f', 'factory.yaml');
+    writeFileSync(yaml, yamlText());
+    writeFileSync(join(root, 'factories', 'f', 'repos', 'app.yaml'), repoYaml);
+    const board = new FakeGitHubBoard();
+    const info = board.addProject({ owner: 'o', number: 3 }, ['Backlog', 'Todo', 'In progress', 'In review', 'Merged']);
+    const REPO = { owner: 'o', repo: 'app' };
+    const saved = process.env.FACTORY_ROOT;
+    process.env.FACTORY_ROOT = root;
+    try {
+      let out: string[] = [];
+      const go = async (...argv: string[]) => {
+        out = [];
+        const code = await run(['--store', 'file', ...argv], { out: (s) => out.push(s), err: (s) => out.push(s) }, undefined, { githubBoardFor: () => board });
+        expect(code, out.join('\n')).toBe(0);
+        return out.join('\n');
+      };
+      const status = async () => (await board.listItems(info))[0]!.status;
+      const boardFile = join(root, '.factory', 'board.json');
+      const linkVersion = async (id: string) => (await new FileStore(boardFile, { factoriesDir: join(root, 'factories') }).getGitHubLink(id))!.version;
+
+      const created = await go('new', '--repo', 'app', '--title', 'A', '--description', 'D');
+      const id = /^(\S+) created in/m.exec(created)![1]!;
+      expect(created).toContain('issue o/app#1');
+      expect(board.issue(REPO, 1).labels).toEqual(['factory']);
+      expect(board.issue(REPO, 1).body).toMatch(/<!-- tsf:task=[^>]*-->\s*$/);
+      expect(await status()).toBe('Backlog');
+
+      await go('dev', 'ready', id);
+      expect(await status()).toBe('Todo');
+
+      // The engine's own write path: a spec doc, then the task in spec_review.
+      const engineSide = new FileStore(boardFile, { factoriesDir: join(root, 'factories') });
+      await engineSide.addDoc(id, 'spec', '# Spec\nDo it.', 'spec-writer');
+      const t = (await engineSide.getTask(id))!;
+      await engineSide.updateTask(id, t.version, { status: 'spec_review', stage: 'spec' });
+      expect(await go('sync')).toContain('pushed 1, failed 0');
+      const comments = board.issue(REPO, 1).comments;
+      expect(comments).toHaveLength(1);
+      expect(comments[0]!.body.startsWith('## Spec v1')).toBe(true);
+      expect(await status()).toBe('In progress');
+
+      writeFileSync(yaml, yamlText({ spec_review: 'In review' }));
+      const later = new Date(Date.now() + 5000);
+      utimesSync(yaml, later, later);
+      await go('sync');
+      expect(await status()).toBe('In review');
+      expect(board.issue(REPO, 1).comments).toHaveLength(1);
+
+      await go('dev', 'cancel', id);
+      expect(board.issue(REPO, 1)).toMatchObject({ state: 'closed', stateReason: 'not_planned' });
+      expect(await status()).toBe('Backlog');
+
+      const v = await linkVersion(id);
+      expect(await go('sync')).toContain('pushed 0, failed 0');
+      expect(await linkVersion(id)).toBe(v);
+    } finally {
+      if (saved === undefined) delete process.env.FACTORY_ROOT; else process.env.FACTORY_ROOT = saved;
+    }
   });
 });
