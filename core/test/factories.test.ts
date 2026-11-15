@@ -288,6 +288,18 @@ describe('loadFactoriesFromDir', () => {
     // Without onSkip the note does not throw.
     expect(loadFactoriesFromDir(dir).defs).toEqual([]);
   });
+  test('an unreadable factory.yaml or repo yaml is that factory\'s problem, not a crash', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'factories-'));
+    mkdirSync(join(dir, 'broken', 'factory.yaml'), { recursive: true }); // EISDIR on read
+    mkdirSync(join(dir, 'delta', 'repos', 'x.yaml'), { recursive: true });
+    writeFileSync(join(dir, 'delta', 'factory.yaml'), 'factory:\n  id: delta\n  name: Delta\n');
+    const skipped: string[] = [];
+    const got = loadFactoriesFromDir(dir, (f) => skipped.push(f));
+    expect(got.owned).toEqual(['broken', 'delta']);
+    expect(got.problems.map((p) => p.file)).toEqual([join(dir, 'broken', 'factory.yaml'), join(dir, 'delta', 'repos', 'x.yaml')]);
+    expect(skipped).toHaveLength(2);
+    expect(() => loadFactoriesFromDir(dir)).toThrow(/EISDIR/);
+  });
   test('an invalid factory.yaml is owned and reported with the field path', () => {
     const dir = mkdtempSync(join(tmpdir(), 'factories-'));
     mkdirSync(join(dir, 'delta'), { recursive: true });

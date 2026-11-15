@@ -47,10 +47,10 @@ export function loadFactoriesFromDir(dir: string, onSkip?: (file: string, reason
     out.problems.push({ factoryId, file, reason });
     onSkip(file, reason);
   };
-  /** The file's text and parsed value; a file that cannot be parsed is as bad as one that fails validation. */
+  /** The file's text and parsed value; a file that cannot be read or parsed is as bad as one that fails validation. */
   const read = (factoryId: string, file: string): { text: string; value: unknown } | null => {
-    const text = readFileSync(file, 'utf8');
     try {
+      const text = readFileSync(file, 'utf8');
       return { text, value: parse(text) };
     } catch (e) {
       if (!onSkip) throw e;
