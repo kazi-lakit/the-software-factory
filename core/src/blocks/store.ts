@@ -3,8 +3,8 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from '../limits.js';
 import { DEFAULT_SETTINGS } from '../defaults.js';
 import type { FactoryDef, FactoryHealth, FactoryRepo } from '../factories.js';
-import type { GitHubLink } from '../githubLink.js';
-import { GITHUB_SCHEMA_MISSING, type SyncRequest } from '../githubSync.js';
+import { withLinkDefaults, type GitHubLink } from '../githubLink.js';
+import { canSyncMove, GITHUB_SCHEMA_MISSING, type SyncPlan, type SyncRequest, type SyncResult } from '../githubSync.js';
 import {
   assertNewStatus, canonicalJson, parseScope, CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval,
   settingsConflict, VersionConflictError, type BoardStore, type NewApproval, type NewTask, type StoredSettings,
@@ -13,7 +13,7 @@ import type {
   Approval, Doc, DocKind, FactoryEvent, Gate, Mode, RepoId, RepoSettings, Run, Settings, Step, Task,
 } from '../types.js';
 import { BlocksForbiddenError, BlocksUnauthorizedError, type BlocksData, type Filter, type Row } from './data.js';
-import { FIELDS, type SchemaName } from './schema.js';
+import { FIELDS, GITHUB_SCHEMA, UNIQUE, type SchemaName } from './schema.js';
 import { classifyUpdate, settleConditionalUpdate, type RereadResult, type WriteOutcome } from './update.js';
 
 export { DocTooLargeError, MAX_DOC_BYTES, OwnerOnlyError };
@@ -70,7 +70,11 @@ const parseUtc = (v: Value | undefined): number => {
 export const CLEARABLE_FIELDS: Partial<Record<SchemaName, readonly string[]>> = {
   FactoryTask: ['stage', 'branch', 'prUrl', 'blockedReason', 'question', 'answer', 'claimBy', 'claimUntil'],
   FactoryRun: ['endedAt', 'result', 'costUsd'],
+  FactorySyncRequest: ['plan', 'plannedAt', 'applyingSince', 'result', 'appliedAt', 'error'],
 };
+
+/** A failed schema probe is tried again after this long (a true result is kept for the life of the store). */
+export const SCHEMA_PROBE_RETRY_MS = 60_000;
 
 /** Rows written before plan 6 have no factoryId; they belong to factory `blocks`. */
 const LEGACY_FACTORY = 'blocks';
@@ -195,12 +199,23 @@ const decodeAgentModels = (v: Value | undefined): FactoryDef['agentModels'] | un
   return text(v) as never;
 };
 
+/** Empty text or null means no GitHub; text that is not JSON decodes to the raw text, which validation refuses with a reason. */
+const decodeGitHub = (v: Value | undefined): FactoryDef['github'] | undefined => {
+  if (v === null || v === undefined || v === '') return undefined;
+  try {
+    return JSON.parse(text(v)) as FactoryDef['github'];
+  } catch {
+    return text(v) as never;
+  }
+};
+
 const decodeDef = (r: Row): FactoryDef => {
   const agentModels = decodeAgentModels(r.agentModels);
+  const github = decodeGitHub(r.github);
   return {
     factoryId: text(r.factoryId), name: text(r.name), protectedBranches: decodeBranches(r.protectedBranches), gitName: text(r.gitName),
     gitEmail: text(r.gitEmail), docsPath: text(r.docsPath), ghUser: text(r.ghUser), active: num(r.active) === 1,
-    ...(agentModels === undefined ? {} : { agentModels }), version: num(r.version),
+    ...(agentModels === undefined ? {} : { agentModels }), ...(github === undefined ? {} : { github }), version: num(r.version),
   };
 };
 
@@ -210,13 +225,58 @@ const decodeRepo = (r: Row): FactoryRepo => ({
   checks: (parseObject(r.checks) ?? {}) as FactoryRepo['checks'], version: num(r.version),
 });
 
-const decodeHealth = (r: Row): FactoryHealth => ({ factoryId: text(r.factoryId), ghLoggedIn: num(r.ghLoggedIn) === 1, checkedAt: text(r.checkedAt) });
+/** The watcher fields are read only when selected and not empty. */
+const decodeHealth = (r: Row): FactoryHealth => ({
+  factoryId: text(r.factoryId), ghLoggedIn: num(r.ghLoggedIn) === 1, checkedAt: text(r.checkedAt),
+  ...(text(r.watcherSeenAt) === '' ? {} : { watcherSeenAt: text(r.watcherSeenAt) }),
+  ...(text(r.githubProblems) === '' ? {} : { githubProblems: parseStringArray(r.githubProblems) }),
+});
 
-const encodeDef = (d: FactoryDef): Record<string, Value> => ({
+/** The link JSON holds everything but the row's own columns. */
+const encodeLink = (l: GitHubLink): string => {
+  const { taskId: _t, factoryId: _f, version: _v, ...rest } = l;
+  return JSON.stringify(rest);
+};
+
+const decodeLink = (r: Row): GitHubLink => {
+  const j = (parseObject(r.json) ?? {}) as Partial<GitHubLink>;
+  return withLinkDefaults({
+    repo: '', issueNumber: null, issueNodeId: null, project: null, itemId: null, error: null, lease: null,
+    ...j, taskId: text(r.taskId), factoryId: text(r.factoryId), version: num(r.version),
+  } as GitHubLink);
+};
+
+const parseJson = <T>(v: Value | undefined): T | null => {
+  const o = parseObject(v);
+  return o === undefined ? null : (o as T);
+};
+
+const decodeSync = (r: Row): SyncRequest => ({
+  requestId: text(r.requestId), factoryId: text(r.factoryId), requestedAt: text(r.requestedAt), requestedBy: text(r.requestedBy),
+  state: text(r.state) as SyncRequest['state'], plan: parseJson<SyncPlan>(r.plan), plannedAt: opt(r.plannedAt),
+  applyingSince: opt(r.applyingSince), result: parseJson<SyncResult>(r.result), appliedAt: opt(r.appliedAt), error: opt(r.error), version: num(r.version),
+});
+
+/** The sync columns a save writes; a null is a clear. */
+const encodeSync = (q: SyncRequest): Record<string, Value> => ({
+  requestedAt: q.requestedAt, requestedBy: q.requestedBy, state: q.state, plan: q.plan === null ? null : JSON.stringify(q.plan), plannedAt: q.plannedAt,
+  applyingSince: q.applyingSince, result: q.result === null ? null : JSON.stringify(q.result), appliedAt: q.appliedAt, error: q.error,
+});
+
+const byRequested = (a: SyncRequest, b: SyncRequest) =>
+  a.requestedAt < b.requestedAt ? -1 : a.requestedAt > b.requestedAt ? 1 : a.requestId < b.requestId ? -1 : a.requestId > b.requestId ? 1 : 0;
+
+/** Every field of a table but the ones the schema change adds, for a read before it is applied. */
+const oldFields = (schema: 'FactoryDef' | 'FactoryHealth'): string[] =>
+  FIELDS[schema].map((f) => f.name).filter((n) => !(GITHUB_SCHEMA.fields[schema] as readonly string[]).includes(n));
+
+const encodeDef = (d: FactoryDef, ready: boolean): Record<string, Value> => ({
   name: d.name, protectedBranches: JSON.stringify(d.protectedBranches), gitName: d.gitName, gitEmail: d.gitEmail, docsPath: d.docsPath,
   ghUser: d.ghUser, active: d.active ? 1 : 0,
   // Always written, so an edit can clear every entry: Blocks ignores null in an update.
   agentModels: JSON.stringify(d.agentModels ?? {}),
+  // Written only once the column exists; '' clears it (turning GitHub off).
+  ...(ready ? { github: d.github ? JSON.stringify(d.github) : '' } : {}),
 });
 
 const encodeRepo = (r: FactoryRepo): Record<string, Value> => ({ remote: r.remote, baseBranch: r.baseBranch, checks: canonicalJson(r.checks) });
@@ -266,6 +326,8 @@ export class BlocksStore implements BoardStore {
    * (same row, same version) re-sends with a new writeId; these let it recognise an earlier write that has landed since.
    */
   private readonly pending = new Map<string, string[]>();
+  /** The schema probe: true is kept, false is probed again after SCHEMA_PROBE_RETRY_MS. */
+  private probe: { ready: boolean; at: number } | undefined;
 
   /** `now` decides the addDoc retry window (default: real time). */
   constructor(
@@ -443,7 +505,8 @@ export class BlocksStore implements BoardStore {
   }
 
   async listFactoryDefs(): Promise<FactoryDef[]> {
-    return (await this.data.list('FactoryDef', {})).map(decodeDef).sort((a, b) => (a.factoryId < b.factoryId ? -1 : a.factoryId > b.factoryId ? 1 : 0));
+    const fields = (await this.githubSchemaReady()) ? undefined : oldFields('FactoryDef');
+    return (await this.data.list('FactoryDef', {}, fields)).map(decodeDef).sort((a, b) => (a.factoryId < b.factoryId ? -1 : a.factoryId > b.factoryId ? 1 : 0));
   }
 
   async listFactoryRepos(factoryId?: string): Promise<FactoryRepo[]> {
@@ -455,43 +518,100 @@ export class BlocksStore implements BoardStore {
     });
   }
 
-  /** GitHub links are not stored in Blocks yet (connected mode). */
-  async listGitHubLinks(_factoryId?: string): Promise<GitHubLink[]> {
-    return [];
-  }
-
-  async getGitHubLink(_taskId: string): Promise<GitHubLink | undefined> {
-    return undefined;
-  }
-
+  /** Probes once per store (builder's call 12): any error but an unauthorized one means the schema change is not applied. */
   async githubSchemaReady(): Promise<boolean> {
-    return false;
+    const at = this.now().getTime();
+    if (this.probe && (this.probe.ready || at - this.probe.at < SCHEMA_PROBE_RETRY_MS)) return this.probe.ready;
+    let ready = true;
+    try {
+      for (const table of GITHUB_SCHEMA.tables) {
+        const unique = UNIQUE[table]![0]!;
+        await this.data.list(table, { [unique]: '-' }, [unique]);
+      }
+      for (const [table, fields] of Object.entries(GITHUB_SCHEMA.fields) as [SchemaName, readonly string[]][]) {
+        const unique = UNIQUE[table]![0]!;
+        for (const field of fields) await this.data.list(table, { [unique]: '-' }, [field]);
+      }
+    } catch (error) {
+      if (error instanceof BlocksUnauthorizedError) throw error;
+      ready = false;
+    }
+    this.probe = { ready, at };
+    return ready;
   }
 
-  async listSyncRequests(_factoryId?: string): Promise<SyncRequest[]> {
-    return [];
+  private async needSchema(): Promise<void> {
+    if (!(await this.githubSchemaReady())) throw new ForbiddenError(GITHUB_SCHEMA_MISSING);
   }
 
-  async requestSync(_factoryId: string, _requestedBy: string): Promise<SyncRequest> {
-    throw new ForbiddenError(GITHUB_SCHEMA_MISSING);
+  async listGitHubLinks(factoryId?: string): Promise<GitHubLink[]> {
+    if (!(await this.githubSchemaReady())) return [];
+    const rows = await this.data.list('FactoryGitHubLink', factoryId === undefined ? {} : { factoryId });
+    return rows.map(decodeLink).sort((a, b) => taskNumber(a.taskId) - taskNumber(b.taskId));
   }
 
-  async saveSyncRequest(_before: SyncRequest, _after: SyncRequest): Promise<SyncRequest> {
-    throw new ForbiddenError(GITHUB_SCHEMA_MISSING);
+  async getGitHubLink(taskId: string): Promise<GitHubLink | undefined> {
+    if (!(await this.githubSchemaReady())) return undefined;
+    const [row] = await this.data.list('FactoryGitHubLink', { taskId });
+    return row ? decodeLink(row) : undefined;
+  }
+
+  async saveGitHubLink(before: GitHubLink | null, after: GitHubLink): Promise<GitHubLink> {
+    if (this.identity === 'owner') throw new ForbiddenError('GitHub links are written by the factory core');
+    await this.needSchema();
+    const what = `GitHub link ${after.taskId}`;
+    const json = encodeLink(after);
+    if (before === null) {
+      await this.insertVersioned('FactoryGitHubLink', { taskId: after.taskId }, { taskId: after.taskId, factoryId: after.factoryId, json }, what);
+      return { ...structuredClone(after), version: 1 };
+    }
+    await this.updateVersioned('FactoryGitHubLink', { taskId: after.taskId }, before.version, { factoryId: after.factoryId, json }, what);
+    return { ...structuredClone(after), version: before.version + 1 };
+  }
+
+  async listSyncRequests(factoryId?: string): Promise<SyncRequest[]> {
+    if (!(await this.githubSchemaReady())) return [];
+    const rows = await this.data.list('FactorySyncRequest', factoryId === undefined ? {} : { factoryId });
+    return rows.map(decodeSync).sort(byRequested);
+  }
+
+  async requestSync(factoryId: string, requestedBy: string): Promise<SyncRequest> {
+    this.ownerOnly('requestSync');
+    await this.needSchema();
+    const q: SyncRequest = {
+      requestId: randomUUID(), factoryId, requestedAt: this.now().toISOString(), requestedBy, state: 'queued',
+      plan: null, plannedAt: null, applyingSince: null, result: null, appliedAt: null, error: null, version: 1,
+    };
+    await this.insertVersioned('FactorySyncRequest', { requestId: q.requestId }, { requestId: q.requestId, factoryId, requestedAt: q.requestedAt, requestedBy, state: 'queued' }, `sync request ${q.requestId}`);
+    return q;
+  }
+
+  async saveSyncRequest(before: SyncRequest, after: SyncRequest): Promise<SyncRequest> {
+    await this.needSchema();
+    const what = `sync request ${before.requestId}`;
+    const [row] = await this.data.list('FactorySyncRequest', { requestId: before.requestId });
+    // The version first, then the move against the STORED state; ids stay as stored.
+    if (!row || num(row.version) !== before.version) {
+      throw new VersionConflictError(what, before.version, row ? num(row.version) : 0, `${what} changed since it was read; reload and save again`);
+    }
+    const cur = decodeSync(row);
+    if (!canSyncMove(cur.state, after.state, this.identity)) {
+      throw new ForbiddenError(`a sync request may not move from ${cur.state} to ${after.state} as ${this.identity}`);
+    }
+    await this.updateVersioned('FactorySyncRequest', { requestId: cur.requestId }, before.version, encodeSync(after), what);
+    return { ...structuredClone(after), requestId: cur.requestId, factoryId: cur.factoryId, version: before.version + 1 };
   }
 
   async restoreTask(_t: Task): Promise<Task> {
     throw new ForbiddenError('tasks are restored only on the file store');
   }
 
-  async saveGitHubLink(_before: GitHubLink | null, _after: GitHubLink): Promise<GitHubLink> {
-    throw new ForbiddenError('GitHub links are not stored in Blocks yet (connected mode)');
-  }
-
   async saveFactoryDef(before: FactoryDef | null, after: FactoryDef): Promise<FactoryDef> {
     this.ownerOnly('saveFactoryDef');
     const what = `factory ${after.factoryId}`;
-    const fields = encodeDef(after);
+    const ready = await this.githubSchemaReady();
+    if (!ready && after.github) throw new ForbiddenError(GITHUB_SCHEMA_MISSING);
+    const fields = encodeDef(after, ready);
     if (before === null) {
       const all = await this.data.list('FactorySettings', {}, ['scope', 'json']);
       if (all.some((r) => r.scope === after.factoryId && isLegacyRepoRow(r, legacyIsOn(all)))) {
@@ -548,12 +668,18 @@ export class BlocksStore implements BoardStore {
   }
 
   async listFactoryHealth(): Promise<FactoryHealth[]> {
-    return (await this.data.list('FactoryHealth', {})).map(decodeHealth).sort((a, b) => (a.factoryId < b.factoryId ? -1 : a.factoryId > b.factoryId ? 1 : 0));
+    const fields = (await this.githubSchemaReady()) ? undefined : oldFields('FactoryHealth');
+    return (await this.data.list('FactoryHealth', {}, fields)).map(decodeHealth).sort((a, b) => (a.factoryId < b.factoryId ? -1 : a.factoryId > b.factoryId ? 1 : 0));
   }
 
   async setFactoryHealth(h: FactoryHealth): Promise<void> {
     if (this.identity !== 'core') throw new ForbiddenError('setFactoryHealth is done by the factory core, not on the Board');
     const fields: Record<string, Value> = { ghLoggedIn: h.ghLoggedIn ? 1 : 0, checkedAt: h.checkedAt };
+    // The watcher fields are written only when given (a status write leaves them) and the columns exist.
+    if (await this.githubSchemaReady()) {
+      if (h.watcherSeenAt) fields.watcherSeenAt = h.watcherSeenAt;
+      if (h.githubProblems !== undefined) fields.githubProblems = JSON.stringify(h.githubProblems);
+    }
     const key = { factoryId: h.factoryId };
     // The core is the only writer: an insert that finds the row (or an update that loses a race) is retried once against it.
     for (let attempt = 0; attempt < 2; attempt++) {

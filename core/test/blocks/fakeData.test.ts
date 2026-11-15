@@ -115,4 +115,16 @@ describe('FakeBlocksData', () => {
     await f.insert('FactoryTask', { taskId: 'a' });
     await expect(f.update('FactoryTask', { taskId: 'a' }, { ItemId: 'x' })).rejects.toThrow(/unknown/i);
   });
+  it('a missing table or field fails like an unknown GraphQL name', async () => {
+    const f = new FakeBlocksData('any', { missing: { tables: ['FactorySyncRequest'], fields: { FactoryDef: ['github'] } } });
+    await expect(f.list('FactorySyncRequest', {})).rejects.toThrow('blocks: getFactorySyncRequests GraphQL error');
+    await expect(f.insert('FactorySyncRequest', { requestId: 'a' })).rejects.toThrow('blocks: insertFactorySyncRequest GraphQL error');
+    await expect(f.update('FactorySyncRequest', { requestId: 'a' }, { state: 'x' })).rejects.toThrow('blocks: updateFactorySyncRequest GraphQL error');
+    await expect(f.list('FactoryDef', {})).rejects.toThrow('blocks: getFactoryDefs GraphQL error');
+    await expect(f.list('FactoryDef', {}, ['name'])).resolves.toEqual([]);
+    await expect(f.list('FactoryDef', { github: 'x' }, ['name'])).rejects.toThrow('GraphQL error');
+    await expect(f.insert('FactoryDef', { factoryId: 'a', github: '' })).rejects.toThrow('blocks: insertFactoryDef GraphQL error');
+    await expect(f.update('FactoryDef', { factoryId: 'a' }, { github: 'x' })).rejects.toThrow('blocks: updateFactoryDef GraphQL error');
+    await expect(f.insert('FactoryDef', { factoryId: 'a' })).resolves.toMatchObject({ kind: 'inserted' });
+  });
 });
