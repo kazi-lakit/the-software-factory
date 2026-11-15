@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { baseRules, expand, parseItems, stripComments } from "../test/cssMedia";
 import { tokens } from "../test/cssTokens";
 
 // The scaffold's Tailwind scan emits `.grid` and `.outline` utilities, and its
@@ -138,5 +139,67 @@ describe("shared-control style isolation", () => {
   });
   it("contains absolutely positioned accessibility text inside scrollable tables", () => {
     expect(tokens(css, ".sf-table-wrap").position).toBe("relative");
+  });
+});
+
+describe("equal board column widths (T-36)", () => {
+  const css = read("board.css");
+  const base = (selector: string) => baseRules(css).filter((r) => r.selector === selector);
+  const sizing = ["width", "max-width", "min-width", "flex", "flex-basis"];
+  const media = (prelude: string) => {
+    const item = parseItems(stripComments(css)).find((i) => i.kind === "at" && i.prelude.replace(/\s+/g, " ") === prelude);
+    if (!item || item.kind !== "at") throw new Error(`missing ${prelude}`);
+    return expand(parseItems(item.inner), () => 0);
+  };
+
+  it("lanes_have_four_equal_tracks", () => {
+    expect((tokens(css, ".sf-lanes")["grid-template-columns"] ?? "").replace(/\s+/g, "")).toBe("repeat(4,minmax(0,1fr))");
+    for (const rule of base(".sf-lanes")) {
+      for (const m of (rule.decls["grid-template-columns"] ?? "").matchAll(/([\d.]+)fr/g)) expect(m[1]).toBe("1");
+    }
+    expect(css).not.toContain("1.2fr");
+  });
+
+  it("lanes_cannot_be_widened_by_content", () => {
+    expect(tokens(css, ".sf-lane")["min-width"]).toBe("0");
+  });
+
+  it("every_stages_column_is_260px_including_collapsed", () => {
+    expect(tokens(css, ".sf-column").flex).toBe("0 0 260px");
+    expect(tokens(css, ".sf-column")["min-width"]).toBe("0");
+    for (const rule of baseRules(css).filter((r) => r.selector.includes("sf-column-collapsed"))) {
+      for (const prop of sizing) expect(rule.decls[prop], prop).toBeUndefined();
+    }
+  });
+
+  it("empty_columns_and_lanes_set_no_own_width", () => {
+    for (const selector of [".sf-lane-empty", ".sf-column-empty"]) {
+      for (const rule of base(selector)) for (const prop of sizing) expect(rule.decls[prop], `${selector} ${prop}`).toBeUndefined();
+    }
+  });
+
+  it("long_card_text_wraps_or_truncates", () => {
+    expect(tokens(css, ".sf-card-link")["overflow-wrap"]).toBe("anywhere");
+    expect(tokens(css, ".sf-card-id")["overflow-wrap"]).toBe("anywhere");
+    expect(tokens(css, ".sf-card-question-text")).toMatchObject({ "text-overflow": "ellipsis", overflow: "hidden", "min-width": "0" });
+  });
+
+  it("needs_you_keeps_its_accent", () => {
+    for (const selector of [".sf-lane-needs-you", ".sf-column-needs-you"]) {
+      const t = tokens(css, selector);
+      expect(t["border-color"]).toBe("var(--sf-accent)");
+      for (const prop of ["width", "flex", "flex-basis", "grid-column"]) expect(t[prop], prop).toBeUndefined();
+    }
+  });
+
+  it("narrow_layouts_are_unchanged", () => {
+    const narrow = media("@media (max-width: 1023px)");
+    for (const selector of [".sf-column-collapsed", ".sf-column"]) {
+      const rule = narrow.find((r) => r.selector === selector);
+      expect(rule?.decls["flex-basis"]).toBe("auto");
+      expect(rule?.decls.width).toBe("100%");
+    }
+    const lanes = media("@media (max-width: 1099px)").find((r) => r.selector === ".sf-lanes");
+    expect(lanes?.decls["grid-template-columns"]).toBe("repeat(2, minmax(0, 1fr))");
   });
 });

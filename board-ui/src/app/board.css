@@ -766,16 +766,13 @@ textarea.sf-input {
   border: 1px solid var(--sf-chrome-border);
   border-radius: var(--sf-radius);
   flex: 0 0 260px;
+  min-width: 0;
   padding: 14px;
 }
 
 .sf-column-needs-you {
   background: linear-gradient(to bottom, var(--sf-needs-tint), transparent 70%);
   border-color: var(--sf-accent);
-}
-
-.sf-column-collapsed {
-  flex-basis: 160px;
 }
 
 /* One row: what the view is on the left, the scroll hint on the right; the parts wrap on narrow screens. */
@@ -840,7 +837,7 @@ textarea.sf-input {
   align-items: start;
   display: grid;
   gap: 20px;
-  grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   width: 100%;
 }
 
