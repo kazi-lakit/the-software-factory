@@ -12,7 +12,6 @@ import { GitHubPusher, type PushResult } from './githubPusher.js';
 import { failStaleSync, fitSyncPlan, latestSync, SYNC_FAILED_HOLD_MS, type SyncDone, type SyncRequest } from './githubSync.js';
 import { isGhLoggedIn } from './secrets.js';
 import { ALL_STATUSES } from './status.js';
-import type { FactoryEvent } from './types.js';
 
 // Connected mode, on the factory machine: pushes connected factories, plans the Board's sync requests, writes health.
 
@@ -195,11 +194,9 @@ export class GitHubWatcher {
     }
     const links = new Map((await store.listGitHubLinks(factoryId)).map((l) => [l.taskId, l]));
     const unlinked = (await store.listTasks()).filter((t) => t.factoryId === factoryId && links.get(t.taskId)?.issueNumber == null);
-    if (unlinked.length === 0) return out;
-    const events = new Map<string, FactoryEvent[]>();
-    for (const e of await store.listEvents()) events.set(e.taskId, [...(events.get(e.taskId) ?? []), e]);
+    // Per task: an unfiltered event list can pass the Blocks page limit.
     for (const t of unlinked) {
-      const from = createdFromIssue(events.get(t.taskId) ?? []);
+      const from = createdFromIssue(await store.listEvents(t.taskId));
       if (from) out.push(issueName(from));
     }
     return out;

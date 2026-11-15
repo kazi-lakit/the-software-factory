@@ -606,6 +606,7 @@ export class BlocksStore implements BoardStore {
     if (!canSyncMove(cur.state, after.state, this.identity)) {
       throw new ForbiddenError(`a sync request may not move from ${cur.state} to ${after.state} as ${this.identity}`);
     }
+    if (cur.state === after.state && after.applyingSince === null) throw new ForbiddenError('a heartbeat (applying to applying) needs applyingSince');
     // The heartbeat (applying→applying) refreshes the claim time only.
     const next = cur.state === after.state ? { ...cur, applyingSince: after.applyingSince } : after;
     await this.updateVersioned('FactorySyncRequest', { requestId: cur.requestId }, before.version, encodeSync(next), what);

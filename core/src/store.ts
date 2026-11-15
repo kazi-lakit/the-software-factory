@@ -292,6 +292,7 @@ export class MemoryStore implements BoardStore {
         ? canSyncMove(cur.state, after.state, this.identity)
         : canSyncMove(cur.state, after.state, 'core') || canSyncMove(cur.state, after.state, 'owner');
       if (!ok) throw new ForbiddenError(`a sync request may not move from ${cur.state} to ${after.state}${this.identity ? ` as ${this.identity}` : ''}`);
+      if (cur.state === after.state && after.applyingSince === null) throw new ForbiddenError('a heartbeat (applying to applying) needs applyingSince');
       stored.requestId = cur.requestId;
       stored.factoryId = cur.factoryId;
       // The heartbeat (applying→applying) refreshes the claim time only.

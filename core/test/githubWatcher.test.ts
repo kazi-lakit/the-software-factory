@@ -267,27 +267,6 @@ describe('GitHubWatcher', () => {
     expect(await row(s, a.requestId)).toMatchObject({ state: 'failed', error: 'other' });
   });
 
-  test('pending issues read the events once, not once per task', async () => {
-    const calls: (string | undefined)[] = [];
-    const fails = { n: 0 };
-    const s = setup({
-      board: (b) => failing(b, 'listItems', fails),
-      wrap: (c) => intercept(c, 'listEvents', async (real, taskId) => { calls.push(taskId); return real(taskId); }),
-    });
-    await issueOnProject(s, 'Todo', 'one');
-    await issueOnProject(s, 'Todo', 'two');
-    const a = await s.owner.requestSync('f', 'me');
-    await s.watcher.tick();
-    await applySyncRequest(s.owner, s.now, await row(s, a.requestId));
-    fails.n = 2;
-    calls.length = 0;
-    const b = await s.owner.requestSync('f', 'me');
-    const tick = await s.watcher.tick(); // both adopts fail (one listEvents each); the planner skips both issues
-    expect(tick.synced).toMatchObject([{ requestId: b.requestId, state: 'planned', actions: 0 }]);
-    expect(calls.filter((c) => c === undefined)).toHaveLength(1);
-    expect(calls.filter((c) => c !== undefined)).toHaveLength(2);
-  });
-
   test('issues of create actions in planned rows are not planned again', async () => {
     const s = setup();
     await issueOnProject(s, 'Todo');

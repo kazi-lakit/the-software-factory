@@ -333,6 +333,8 @@ export function runStoreContract(
         expect(beat).toMatchObject({ state: 'applying', applyingSince: 'b', plannedAt: 'p', error: null, version: applying.version + 1 });
         expect((await any.listSyncRequests('delta'))[0]).toMatchObject({ applyingSince: 'b', plannedAt: 'p', error: null, version: beat.version });
         await expect(any.saveSyncRequest(applying, { ...applying, applyingSince: 'c' })).rejects.toBeInstanceOf(VersionConflictError);
+        await expect(any.saveSyncRequest(beat, { ...beat, applyingSince: null })).rejects.toBeInstanceOf(ForbiddenError);
+        expect((await any.listSyncRequests('delta'))[0]).toMatchObject({ applyingSince: 'b', version: beat.version });
       });
       test('the stored state decides the role check, and ids cannot change', async () => {
         const s = await make('owner');
