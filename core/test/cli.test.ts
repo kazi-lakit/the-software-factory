@@ -758,6 +758,22 @@ describe('GitHub pushing from the CLI', () => {
     expect(err).toEqual([]);
   });
 
+  test('new on the blocks store with no connected factory reads no push snapshot', async () => {
+    const data = new FakeBlocksData('factory-core');
+    seedBlocksFactories(data, { defs: [defFixture('blocks')], repos: [repoFixture('blocks', 'data')] });
+    const real = new BlocksStore(data, 'core');
+    const reads: string[] = [];
+    const store = new Proxy(real, { get(target, p, r) {
+      const v = Reflect.get(target, p, r);
+      if (typeof v !== 'function') return v;
+      return (...a: unknown[]) => { reads.push(String(p)); return v.apply(target, a); };
+    } });
+    const code = await run(['--store', 'blocks', 'new', '--repo', 'data', '--title', 'x', '--description', 'd'], { out: () => {}, err: () => {} },
+      async () => ({ engine: {} as Engine, store }), { exec: fakeGh(), githubBoardFor: () => { throw new Error('no GitHub call expected'); } });
+    expect(code).toBe(0);
+    expect(reads.filter((m) => m === 'getGitHubLink' || m === 'listGitHubLinks' || m === 'getSettings')).toEqual([]);
+  });
+
   test('no pushing on the blocks store', async () => {
     const board = newBoard();
     const { err, go } = setup(withGithub(), [], undefined, undefined, undefined, board);

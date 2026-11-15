@@ -294,8 +294,9 @@ export class MemoryStore implements BoardStore {
       if (!ok) throw new ForbiddenError(`a sync request may not move from ${cur.state} to ${after.state}${this.identity ? ` as ${this.identity}` : ''}`);
       stored.requestId = cur.requestId;
       stored.factoryId = cur.factoryId;
-      rows[i] = stored;
-      return clone(stored);
+      // The heartbeat (applying→applying) refreshes the claim time only.
+      rows[i] = cur.state === after.state ? { ...clone(cur), applyingSince: after.applyingSince, version: stored.version } : stored;
+      return clone(rows[i]);
     });
   }
 

@@ -324,6 +324,16 @@ export function runStoreContract(
         const q2 = await any.requestSync('delta', 'kazi');
         await expect(any.saveSyncRequest(q2, { ...q2 })).rejects.toBeInstanceOf(ForbiddenError);
       });
+      test('the owner may refresh an applying row (applying to applying); only applyingSince changes', async () => {
+        const any = await make();
+        const q = await any.requestSync('delta', 'kazi');
+        const planned = await any.saveSyncRequest(q, { ...q, state: 'planned', plan: { actions: [], notApplied: [], done: [], errors: [] }, plannedAt: 'p' });
+        const applying = await any.saveSyncRequest(planned, { ...planned, state: 'applying', applyingSince: 'a' });
+        const beat = await any.saveSyncRequest(applying, { ...applying, state: 'applying', applyingSince: 'b', plannedAt: 'x', error: 'x' });
+        expect(beat).toMatchObject({ state: 'applying', applyingSince: 'b', plannedAt: 'p', error: null, version: applying.version + 1 });
+        expect((await any.listSyncRequests('delta'))[0]).toMatchObject({ applyingSince: 'b', plannedAt: 'p', error: null, version: beat.version });
+        await expect(any.saveSyncRequest(applying, { ...applying, applyingSince: 'c' })).rejects.toBeInstanceOf(VersionConflictError);
+      });
       test('the stored state decides the role check, and ids cannot change', async () => {
         const s = await make('owner');
         const q = await s.requestSync('delta', 'kazi');

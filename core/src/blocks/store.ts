@@ -329,6 +329,8 @@ export class BlocksStore implements BoardStore {
   private readonly pending = new Map<string, string[]>();
   /** The schema probe: true is kept, false is probed again after SCHEMA_PROBE_RETRY_MS. */
   private probe: { ready: boolean; at: number } | undefined;
+  /** The probe in flight, shared by concurrent callers. */
+  private probing: Promise<boolean> | undefined;
 
   /** `now` decides the addDoc retry window (default: real time). */
   constructor(
@@ -523,6 +525,11 @@ export class BlocksStore implements BoardStore {
   async githubSchemaReady(): Promise<boolean> {
     const at = this.now().getTime();
     if (this.probe && (this.probe.ready || at - this.probe.at < SCHEMA_PROBE_RETRY_MS)) return this.probe.ready;
+    this.probing ??= this.probeSchema(at).finally(() => { this.probing = undefined; });
+    return this.probing;
+  }
+
+  private async probeSchema(at: number): Promise<boolean> {
     let ready = true;
     try {
       for (const table of GITHUB_SCHEMA.tables) {
@@ -599,8 +606,10 @@ export class BlocksStore implements BoardStore {
     if (!canSyncMove(cur.state, after.state, this.identity)) {
       throw new ForbiddenError(`a sync request may not move from ${cur.state} to ${after.state} as ${this.identity}`);
     }
-    await this.updateVersioned('FactorySyncRequest', { requestId: cur.requestId }, before.version, encodeSync(after), what);
-    return { ...structuredClone(after), requestId: cur.requestId, factoryId: cur.factoryId, version: before.version + 1 };
+    // The heartbeat (applying→applying) refreshes the claim time only.
+    const next = cur.state === after.state ? { ...cur, applyingSince: after.applyingSince } : after;
+    await this.updateVersioned('FactorySyncRequest', { requestId: cur.requestId }, before.version, encodeSync(next), what);
+    return { ...structuredClone(next), requestId: cur.requestId, factoryId: cur.factoryId, version: before.version + 1 };
   }
 
   async restoreTask(_t: Task): Promise<Task> {

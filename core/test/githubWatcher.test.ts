@@ -181,12 +181,111 @@ describe('GitHubWatcher', () => {
     const blocked = await s.watcher.tick();
     expect(blocked.synced).toEqual([]);
     expect((await row(s, b.requestId)).state).toBe('queued');
-    s.advance(118_000);
+    // The watcher first saw the row applying 1 s after the claim: 120 s by its own clock is 121 s after the claim.
+    s.advance(119_000);
     expect((await s.watcher.tick()).synced).toEqual([]);
+    expect((await row(s, a.requestId)).state).toBe('applying');
     s.advance(1000);
     const tick = await s.watcher.tick();
     expect(await row(s, a.requestId)).toMatchObject({ state: 'failed', error: 'interrupted while applying; click Sync again' });
-    expect(tick.synced).toMatchObject([{ requestId: b.requestId, state: 'planned', actions: 1 }]);
+    // a's create stays pending for 10 minutes (its applier may not have stopped), so b does not plan it again.
+    expect(tick.synced).toMatchObject([{ requestId: b.requestId, state: 'planned', actions: 0 }]);
+  });
+
+  test('a long apply that keeps its heartbeat is never failed; a Board failure after it still holds its issues for 10 minutes', async () => {
+    const s = setup();
+    await issueOnProject(s, 'Todo');
+    const a = await s.owner.requestSync('f', 'me');
+    await s.watcher.tick();
+    let cur = await row(s, a.requestId);
+    cur = await s.owner.saveSyncRequest(cur, { ...cur, state: 'applying', applyingSince: s.now().toISOString() });
+    for (let i = 0; i < 12; i++) {
+      s.advance(60_000);
+      cur = await s.owner.saveSyncRequest(cur, { ...cur, applyingSince: s.now().toISOString() });
+      await s.watcher.tick();
+      expect((await row(s, a.requestId)).state).toBe('applying');
+    }
+    await s.owner.saveSyncRequest(cur, { ...cur, state: 'failed', error: 'boom' });
+    s.advance(1000);
+    const b = await s.owner.requestSync('f', 'me');
+    const tick = await s.watcher.tick();
+    expect(tick.synced).toMatchObject([{ requestId: b.requestId, state: 'planned', actions: 0 }]);
+  });
+
+  test('a claim stamped by a browser clock far behind is not failed before 120 s by the watcher clock', async () => {
+    const s = setup();
+    const a = await s.owner.requestSync('f', 'me');
+    await s.watcher.tick();
+    const planned = await row(s, a.requestId);
+    await s.owner.saveSyncRequest(planned, { ...planned, state: 'applying', applyingSince: '2026-11-15T09:00:00.000Z' });
+    await s.watcher.tick();
+    s.advance(119_000);
+    await s.watcher.tick();
+    expect((await row(s, a.requestId)).state).toBe('applying');
+    s.advance(1000);
+    await s.watcher.tick();
+    expect((await row(s, a.requestId)).state).toBe('failed');
+  });
+
+  test('the creates of a row failed as stale are not planned again for 10 minutes, whatever the browser clock says', async () => {
+    const s = setup();
+    await issueOnProject(s, 'Todo');
+    const a = await s.owner.requestSync('f', 'me');
+    await s.watcher.tick();
+    const planned = await row(s, a.requestId);
+    // The Board claims with a clock an hour behind and then stops (the page closed mid-apply).
+    await s.owner.saveSyncRequest(planned, { ...planned, state: 'applying', applyingSince: '2026-11-15T09:00:00.000Z' });
+    await s.watcher.tick();
+    s.advance(120_000);
+    await s.watcher.tick();
+    expect((await row(s, a.requestId)).state).toBe('failed');
+    const b = await s.owner.requestSync('f', 'me');
+    expect((await s.watcher.tick()).synced).toMatchObject([{ requestId: b.requestId, state: 'planned', actions: 0 }]);
+    s.advance(9 * 60_000);
+    const c = await s.owner.requestSync('f', 'me');
+    expect((await s.watcher.tick()).synced).toMatchObject([{ requestId: c.requestId, state: 'planned', actions: 0 }]);
+    s.advance(60_000);
+    const d = await s.owner.requestSync('f', 'me');
+    expect((await s.watcher.tick()).synced).toMatchObject([{ requestId: d.requestId, state: 'planned', actions: 1 }]);
+  });
+
+  test('a planned save lost to another party reports nothing', async () => {
+    let core: BoardStore | undefined;
+    const s = setup({
+      wrap: (c) => {
+        core = c;
+        return intercept(c, 'saveSyncRequest', async (real, before, after) => {
+          // Another watcher fails the row first.
+          if (after.state === 'planned') await core!.saveSyncRequest(before, { ...before, state: 'failed', error: 'other' });
+          return real(before, after);
+        });
+      },
+    });
+    const a = await s.owner.requestSync('f', 'me');
+    const tick = await s.watcher.tick();
+    expect(tick.synced).toEqual([]);
+    expect(await row(s, a.requestId)).toMatchObject({ state: 'failed', error: 'other' });
+  });
+
+  test('pending issues read the events once, not once per task', async () => {
+    const calls: (string | undefined)[] = [];
+    const fails = { n: 0 };
+    const s = setup({
+      board: (b) => failing(b, 'listItems', fails),
+      wrap: (c) => intercept(c, 'listEvents', async (real, taskId) => { calls.push(taskId); return real(taskId); }),
+    });
+    await issueOnProject(s, 'Todo', 'one');
+    await issueOnProject(s, 'Todo', 'two');
+    const a = await s.owner.requestSync('f', 'me');
+    await s.watcher.tick();
+    await applySyncRequest(s.owner, s.now, await row(s, a.requestId));
+    fails.n = 2;
+    calls.length = 0;
+    const b = await s.owner.requestSync('f', 'me');
+    const tick = await s.watcher.tick(); // both adopts fail (one listEvents each); the planner skips both issues
+    expect(tick.synced).toMatchObject([{ requestId: b.requestId, state: 'planned', actions: 0 }]);
+    expect(calls.filter((c) => c === undefined)).toHaveLength(1);
+    expect(calls.filter((c) => c !== undefined)).toHaveLength(2);
   });
 
   test('issues of create actions in planned rows are not planned again', async () => {

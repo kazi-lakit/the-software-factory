@@ -8,7 +8,7 @@ import { Engine, type EngineDeps } from '../src/engine.js';
 import { LocalGitRepos, type GitIdentity } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
 import { FactoryConfig, type FactoryRepo } from '../src/factories.js';
-import { run } from '../src/cli.js';
+import { run, type CliDeps } from '../src/cli.js';
 import { FakeGitHubBoard } from '../src/githubBoard.js';
 import { BlocksStore } from '../src/blocks/store.js';
 import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
@@ -428,10 +428,11 @@ describe('connected mode end to end', () => {
     board.addProject(PROJECT, OPTIONS);
     const info = (await board.project(PROJECT))!;
     const lock = async () => () => undefined;
-    const go = async (...argv: string[]) => {
+    const go = async (...argv: string[]) => goWith({}, ...argv);
+    const goWith = async (extra: Partial<CliDeps>, ...argv: string[]) => {
       const out: string[] = [];
       const code = await run(['--store', 'blocks', ...argv], { out: (s) => out.push(s), err: (s) => out.push(s) }, async () => ({ engine: {} as Engine, store: core }), {
-        githubBoardFor: () => board, githubFor: () => new FakeGitHub(), pullLock: lock, loggedIn: async () => new Set(['me']),
+        githubBoardFor: () => board, githubFor: () => new FakeGitHub(), pullLock: lock, loggedIn: async () => new Set(['me']), ...extra,
       });
       expect(code, out.join('\n')).toBe(0);
       return out.join('\n');
@@ -484,11 +485,19 @@ describe('connected mode end to end', () => {
     const p3 = await requestAndPlan();
     expect(p3.state).toBe('planned');
     await owner.saveSyncRequest(p3, { ...p3, state: 'applying', applyingSince: now().toISOString() });
-    advance(121_000);
-    const p4 = await requestAndPlan();
+    // The watcher fails the claim once it has seen it unchanged for 120 s by its own clock (three passes 61 s apart).
+    const q4 = await owner.requestSync('f', 'me');
+    await goWith({ watchTicks: 3, sleep: async (ms) => { advance(ms); } }, 'sync', '--watch', '--interval', '61');
     expect(await row(p3.requestId)).toMatchObject({ state: 'failed', error: 'interrupted while applying; click Sync again' });
+    const p4 = await row(q4.requestId);
     expect(p4.state).toBe('planned');
+    // Its create stays pending for 10 minutes (the interrupted applier may still be running), then a Sync creates it once.
+    expect(p4.plan!.actions).toEqual([]);
     await applySyncRequest(owner, now, p4);
+    advance(600_000);
+    const p6 = await requestAndPlan();
+    expect(p6.plan!.actions.map((a) => a.kind)).toEqual(['create']);
+    await applySyncRequest(owner, now, p6);
     await go('sync');
     const from3 = (await owner.listTasks()).filter((t) => t.title === 'Third');
     expect(from3).toHaveLength(1);

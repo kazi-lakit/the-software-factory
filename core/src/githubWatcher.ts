@@ -9,9 +9,10 @@ import { applyPull, type PullError } from './githubPullApply.js';
 import { GitHubPuller, type PullLock, type PullRelease } from './githubPuller.js';
 import { projectKey } from './githubPush.js';
 import { GitHubPusher, type PushResult } from './githubPusher.js';
-import { failStaleSync, fitSyncPlan, latestSync, type SyncDone, type SyncRequest } from './githubSync.js';
+import { failStaleSync, fitSyncPlan, latestSync, SYNC_FAILED_HOLD_MS, type SyncDone, type SyncRequest } from './githubSync.js';
 import { isGhLoggedIn } from './secrets.js';
 import { ALL_STATUSES } from './status.js';
+import type { FactoryEvent } from './types.js';
 
 // Connected mode, on the factory machine: pushes connected factories, plans the Board's sync requests, writes health.
 
@@ -49,6 +50,11 @@ export class GitHubWatcher {
   private readonly puller: GitHubPuller;
   private readonly lock: PullLock;
   private healthAt: number | null = null;
+  /** Per applying request: the row version and when this watcher first saw it (its own clock; a heartbeat restarts it). */
+  private readonly applyingSeen = new Map<string, { version: number; at: number }>();
+  /** Requests this watcher saw planned or applying, and when (its own clock) it first saw each of them failed. */
+  private readonly openSeen = new Set<string>();
+  private readonly failedSeen = new Map<string, number>();
 
   constructor(private readonly d: WatcherDeps) {
     this.lock = d.lock ?? noLock;
@@ -86,10 +92,10 @@ export class GitHubWatcher {
   private async requests(def: FactoryDef, defs: FactoryDef[], repos: FactoryRepo[], out: WatchTick): Promise<void> {
     const { store, now } = this.d;
     const f = def.factoryId;
-    let rows = await store.listSyncRequests(f);
-    // A stale claim fails; a fresh one means the Board may be mid-apply, so nothing is planned for this factory.
-    for (const r of rows.filter((x) => x.state === 'applying')) await failStaleSync(store, now, r);
-    rows = await store.listSyncRequests(f);
+    let rows = this.observe(await store.listSyncRequests(f));
+    // A claim unchanged for SYNC_APPLY_MS by this watcher's clock fails; a fresh one means the Board may be mid-apply, so nothing is planned.
+    for (const r of rows.filter((x) => x.state === 'applying')) await failStaleSync(store, now, r, this.applyingSeen.get(r.requestId)!.at);
+    rows = this.observe(await store.listSyncRequests(f));
     if (rows.some((r) => r.state === 'applying')) return;
 
     const target = latestSync(rows, 'queued');
@@ -145,8 +151,37 @@ export class GitHubWatcher {
     }
     allErrors.push(...(await this.puller.saveNotAppliedLinks(def, plan.notApplied)));
     const fitted = fitSyncPlan({ actions: rest, notApplied, done, errors: allErrors });
-    await this.saveRow(target, { ...target, state: 'planned', plan: fitted, plannedAt: now().toISOString() });
+    // Lost to another party (another watcher failed or planned it): nothing to report.
+    if (!(await this.saveRow(target, { ...target, state: 'planned', plan: fitted, plannedAt: now().toISOString() }))) return null;
     return handled('planned', fitted.actions.length, fitted.notApplied.length, null);
+  }
+
+  /**
+   * Remembers, by this watcher's clock, when each applying row version was first seen and when a row it saw open was
+   * first seen failed. Browser timestamps (`applyingSince`) are never trusted for timing.
+   */
+  private observe(rows: SyncRequest[]): SyncRequest[] {
+    const at = this.d.now().getTime();
+    for (const r of rows) {
+      if (r.state === 'applying') {
+        const seen = this.applyingSeen.get(r.requestId);
+        if (!seen || seen.version !== r.version) this.applyingSeen.set(r.requestId, { version: r.version, at });
+      } else this.applyingSeen.delete(r.requestId);
+      if (r.state === 'planned' || r.state === 'applying') this.openSeen.add(r.requestId);
+      else if (r.state === 'failed' && this.openSeen.has(r.requestId) && !this.failedSeen.has(r.requestId)) this.failedSeen.set(r.requestId, at);
+      else if (r.state === 'applied') this.openSeen.delete(r.requestId);
+    }
+    for (const [id, t] of this.failedSeen) {
+      if (at - t >= SYNC_FAILED_HOLD_MS) { this.failedSeen.delete(id); this.openSeen.delete(id); }
+    }
+    return rows;
+  }
+
+  /** A failed row that was claimed and whose applier may still be finishing: failed (as seen by this watcher) or planned less than SYNC_FAILED_HOLD_MS ago. */
+  private recentlyFailed(r: SyncRequest): boolean {
+    if (r.state !== 'failed' || r.applyingSince === null) return false; // never claimed (e.g. superseded): nothing was applied
+    const times = [this.failedSeen.get(r.requestId) ?? NaN, r.plannedAt ? Date.parse(r.plannedAt) : NaN].filter((t) => !Number.isNaN(t));
+    return times.length > 0 && this.d.now().getTime() - Math.max(...times) < SYNC_FAILED_HOLD_MS;
   }
 
   /** Issues the Board will create or has created without the link yet: never planned again. */
@@ -154,14 +189,17 @@ export class GitHubWatcher {
     const { store } = this.d;
     const out: string[] = [];
     // Requests first: a row applied after this read has created its tasks by the time the tasks are read below.
-    for (const r of await store.listSyncRequests(factoryId)) {
-      if ((r.state !== 'planned' && r.state !== 'applying') || !r.plan) continue;
+    for (const r of this.observe(await store.listSyncRequests(factoryId))) {
+      if ((r.state !== 'planned' && r.state !== 'applying' && !this.recentlyFailed(r)) || !r.plan) continue;
       for (const a of r.plan.actions) if (a.kind === 'create') out.push(issueName(a.issue));
     }
     const links = new Map((await store.listGitHubLinks(factoryId)).map((l) => [l.taskId, l]));
     const unlinked = (await store.listTasks()).filter((t) => t.factoryId === factoryId && links.get(t.taskId)?.issueNumber == null);
+    if (unlinked.length === 0) return out;
+    const events = new Map<string, FactoryEvent[]>();
+    for (const e of await store.listEvents()) events.set(e.taskId, [...(events.get(e.taskId) ?? []), e]);
     for (const t of unlinked) {
-      const from = createdFromIssue(await store.listEvents(t.taskId));
+      const from = createdFromIssue(events.get(t.taskId) ?? []);
       if (from) out.push(issueName(from));
     }
     return out;

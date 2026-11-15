@@ -16,7 +16,11 @@ export interface PullCreated { taskId: string; issue: string; status: 'inbox' | 
 export interface PullError { taskId: string | null; issue: string | null; message: string }
 export interface ApplyResult { created: PullCreated[]; applied: PullApplied[]; notApplied: NotApplied[]; errors: PullError[] }
 /** `onCreated` runs right after each create (the core saves the new task's link there); a throw is an error for that task. */
-export interface ApplyHooks { onCreated?: (created: PullCreated) => Promise<void> }
+export interface ApplyHooks {
+  onCreated?: (created: PullCreated) => Promise<void>;
+  /** Runs before action `index`; a throw stops the apply and is thrown to the caller. */
+  beforeAction?: (index: number) => Promise<void>;
+}
 
 type Linked = Exclude<PullAction, { kind: 'create' }>;
 type Done = { task: Task; change: string };
@@ -68,7 +72,8 @@ export async function applyPull(store: BoardStore, now: () => Date, plan: PullPl
   const out: ApplyResult = { created: [], applied: [], notApplied: [...plan.notApplied], errors: [] };
   /** The version each task has after this plan's earlier actions. */
   const versions = new Map<string, number>();
-  for (const a of plan.actions) {
+  for (const [index, a] of plan.actions.entries()) {
+    await hooks.beforeAction?.(index);
     const issue = issueName(a.issue);
     if (a.kind === 'create') {
       let created: PullCreated;

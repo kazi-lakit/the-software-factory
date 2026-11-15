@@ -140,7 +140,7 @@ export interface BoardStore {
   listSyncRequests(factoryId?: string): Promise<SyncRequest[]>;
   /** Owner only. A new `queued` row with a random requestId and requestedAt = now. */
   requestSync(factoryId: string, requestedBy: string): Promise<SyncRequest>;
-  /** CAS on version; after.state must differ from before.state and canSyncMove for the store's identity, else ForbiddenError. */
+  /** CAS on version; canSyncMove from the stored state for the store's identity, else ForbiddenError. applying→applying (the heartbeat) changes only applyingSince. */
   saveSyncRequest(before: SyncRequest, after: SyncRequest): Promise<SyncRequest>;
   listFactoryHealth(): Promise<FactoryHealth[]>;
   /** Core only: the owner reads health, the core writes it. */

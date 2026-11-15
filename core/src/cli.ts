@@ -139,8 +139,9 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   const pusherFor = (store: BoardStore, storeKind: 'file' | 'blocks' = 'file') =>
     new GitHubPusher({ store, boardFor, now: () => new Date(), claimant: `cli:${hostname()}`, storeKind, ...(pullBusy ? { pullBusy } : {}) });
   const storeKindOf = (cmd: Command): 'file' | 'blocks' => ((cmd.optsWithGlobals() as { store: string }).store === 'blocks' ? 'blocks' : 'file');
-  /** False on Blocks until the GitHub tables exist: the push then does nothing, quietly. */
-  const pushable = async (kind: 'file' | 'blocks', store: BoardStore): Promise<boolean> => kind === 'file' || (await store.githubSchemaReady());
+  /** False on Blocks until the GitHub tables exist or while no factory is connected: the push then does nothing, quietly, and reads nothing more. */
+  const pushable = async (kind: 'file' | 'blocks', store: BoardStore): Promise<boolean> =>
+    kind === 'file' || ((await store.githubSchemaReady()) && (await store.listFactoryDefs()).some((f) => f.github?.mode === 'connected'));
   const githubFor = deps.githubFor ?? lazyGitHubFor(undefined, undefined, exec);
   const pullerFor = (store: BoardStore) => new GitHubPuller({ store, boardFor, githubFor, now: () => new Date(), lock: pullLock });
   /** Pulls GitHub changes before `next` (file store only). Never throws and never changes the exit code; lines go to stderr so stdout stays the ticket. */

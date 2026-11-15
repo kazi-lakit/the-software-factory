@@ -908,6 +908,17 @@ describe('BlocksStore GitHub (connected mode)', () => {
     expect((await core.listSyncRequests('delta'))[0]).toMatchObject({ state: 'applied', plan: emptyPlan, result });
   });
 
+  it('only the owner refreshes an applying row', async () => {
+    const storage = newFakeStorage();
+    const core = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core');
+    const owner = new BlocksStore(new FakeBlocksData('factory-owner', { storage }), 'owner');
+    const q = await owner.requestSync('delta', 'kazi');
+    const planned = await core.saveSyncRequest(q, { ...q, state: 'planned', plan: emptyPlan, plannedAt: 'p' });
+    const applying = await owner.saveSyncRequest(planned, { ...planned, state: 'applying', applyingSince: 'a' });
+    await expect(core.saveSyncRequest(applying, { ...applying, applyingSince: 'b' })).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await owner.saveSyncRequest(applying, { ...applying, applyingSince: 'b' })).toMatchObject({ applyingSince: 'b', version: 4 });
+  });
+
   describe('before the schema is applied', () => {
     const make = (extra: { now?: () => Date } = {}) => {
       const storage = newFakeStorage();
@@ -962,6 +973,15 @@ describe('BlocksStore GitHub (connected mode)', () => {
       t += 3_600_000;
       expect(await s.githubSchemaReady()).toBe(true);
       expect(data.calls).toBe(after);
+    });
+
+    it('parallel callers share one probe', async () => {
+      const data = counting(new FakeBlocksData('any', { storage: newFakeStorage() }));
+      const s = new BlocksStore(data, 'owner');
+      const one = counting(new FakeBlocksData('any', { storage: newFakeStorage() }));
+      await new BlocksStore(one, 'owner').githubSchemaReady();
+      expect(await Promise.all([s.githubSchemaReady(), s.githubSchemaReady(), s.githubSchemaReady()])).toEqual([true, true, true]);
+      expect(data.calls).toBe(one.calls);
     });
 
     it('an unauthorized probe is thrown, not read as missing', async () => {

@@ -69,6 +69,24 @@ describe("usePendingSyncs", () => {
     expect((await owner().listTasks()).filter((t) => t.title === "From GitHub")).toHaveLength(0);
   });
 
+  it("a claim that fails with a non-conflict error is tried again on the next poll", async () => {
+    await planned([create]);
+    const real = owner().saveSyncRequest.bind(owner());
+    let fail = true;
+    vi.spyOn(owner(), "saveSyncRequest").mockImplementation(async (before, after) => {
+      if (after.state === "applying" && fail) { fail = false; throw new Error("network down"); }
+      return real(before, after);
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const { client } = render();
+    await waitFor(() => expect(fail).toBe(false));
+    await new Promise((r) => setTimeout(r, 50));
+    expect((await owner().listSyncRequests("blocks"))[0]!.state).toBe("planned");
+    await client.invalidateQueries({ queryKey: ["board", "github-sync", "blocks"] });
+    expect(await screen.findByText("From GitHub")).toBeInTheDocument();
+    expect((await owner().listSyncRequests("blocks"))[0]!.state).toBe("applied");
+  });
+
   it("losing the final applied save to a stale failure is a refresh, not an error", async () => {
     await planned([create]);
     const real = owner().saveSyncRequest.bind(owner());

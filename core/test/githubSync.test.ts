@@ -4,7 +4,8 @@ import {
 } from '../src/githubSync.js';
 import type { PullAction } from '../src/githubPull.js';
 import { createTask } from '../src/owner.js';
-import { MemoryStore } from '../src/store.js';
+import type { BoardStore } from '../src/boardStore.js';
+import { MemoryStore, VersionConflictError } from '../src/store.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
 
 
@@ -21,7 +22,7 @@ const create = (n: number, description: string): PullAction => ({
 describe('githubSync', () => {
   test('core may plan or fail a queued row; only the owner claims and finishes', () => {
     const core = [['queued', 'planned'], ['queued', 'failed'], ['planned', 'failed'], ['applying', 'failed']];
-    const owner = [['planned', 'applying'], ['applying', 'applied'], ['applying', 'failed']];
+    const owner = [['planned', 'applying'], ['applying', 'applying'], ['applying', 'applied'], ['applying', 'failed']];
     for (const from of STATES) for (const to of STATES) {
       expect(canSyncMove(from, to, 'core')).toBe(core.some(([a, b]) => a === from && b === to));
       expect(canSyncMove(from, to, 'owner')).toBe(owner.some(([a, b]) => a === from && b === to));
@@ -119,6 +120,55 @@ describe('applySyncRequest', () => {
     const { store, planned } = await setup({ actions: [mk(9)] });
     expect(await applySyncRequest(store, now, { ...planned, state: 'applied' })).toBeNull();
     expect(await store.listTasks()).toHaveLength(0);
+  });
+  test('a long apply refreshes applyingSince every 10 applied actions', async () => {
+    const { store, planned } = await setup({ actions: Array.from({ length: 25 }, (_, i) => mk(100 + i)) });
+    const moves: string[] = [];
+    let created = 0;
+    const spy = new Proxy(store, { get(target, p, r) {
+      const v = Reflect.get(target, p, r);
+      if (typeof v !== 'function') return v;
+      if (p === 'createTask') return async (...a: unknown[]) => { created++; return v.apply(target, a); };
+      if (p === 'saveSyncRequest') return async (b: SyncRequest, a: SyncRequest) => { moves.push(`${b.state}>${a.state}@${created}`); return v.call(target, b, a); };
+      return v.bind(target);
+    } }) as BoardStore;
+    const r = await applySyncRequest(spy, now, planned);
+    expect(moves).toEqual(['planned>applying@0', 'applying>applying@10', 'applying>applying@20', 'applying>applied@25']);
+    expect(r).toMatchObject({ state: 'applied', version: 6 });
+    expect(r!.result!.created).toHaveLength(25);
+  });
+  test('a heartbeat that conflicts stops the apply at once and leaves the row as the other party wrote it', async () => {
+    const { store, core, planned } = await setup({ actions: Array.from({ length: 25 }, (_, i) => mk(100 + i)) });
+    const spy = new Proxy(store, { get(target, p, r) {
+      const v = Reflect.get(target, p, r);
+      if (typeof v !== 'function') return v;
+      if (p === 'saveSyncRequest') {
+        return async (b: SyncRequest, a: SyncRequest) => {
+          // The watcher fails the row just before the first heartbeat.
+          if (b.state === 'applying' && a.state === 'applying') await core.saveSyncRequest(b, { ...b, state: 'failed', error: 'interrupted while applying; click Sync again' });
+          return v.call(target, b, a);
+        };
+      }
+      return v.bind(target);
+    } }) as BoardStore;
+    await expect(applySyncRequest(spy, now, planned)).rejects.toBeInstanceOf(VersionConflictError);
+    expect(await store.listTasks()).toHaveLength(10);
+    expect((await store.listSyncRequests('f'))[0]).toMatchObject({ state: 'failed', error: 'interrupted while applying; click Sync again' });
+  });
+  test('the store keeps everything but applyingSince on a heartbeat', async () => {
+    const { store, planned } = await setup({});
+    const applying = await store.saveSyncRequest(planned, { ...planned, state: 'applying', applyingSince: 'a' });
+    const beat = await store.saveSyncRequest(applying, { ...applying, state: 'applying', applyingSince: 'b', error: 'x', plan: null });
+    expect(beat).toMatchObject({ state: 'applying', applyingSince: 'b', error: null, version: applying.version + 1 });
+    expect(beat.plan).toEqual(planned.plan);
+  });
+  test('failStaleSync with the caller\'s own since time ignores applyingSince', async () => {
+    const { store, planned } = await setup({});
+    // applyingSince from a browser clock ten minutes behind.
+    const applying = await store.saveSyncRequest(planned, { ...planned, state: 'applying', applyingSince: '2026-11-15T09:50:00.000Z' });
+    const seen = Date.parse('2026-11-15T09:59:00.000Z');
+    expect(await failStaleSync(store, now, applying, seen)).toBeNull();
+    expect(await failStaleSync(store, () => new Date('2026-11-15T10:01:00.000Z'), applying, seen)).toMatchObject({ state: 'failed' });
   });
   test('failStaleSync fails an applying row after 120 s and leaves a fresh one', async () => {
     const { store, planned } = await setup({});

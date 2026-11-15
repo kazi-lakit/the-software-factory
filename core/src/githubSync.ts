@@ -21,14 +21,19 @@ export interface SyncRequest {
 /** The state moves each identity may make (builder's call 4). */
 export const SYNC_MOVES: Readonly<Record<'core' | 'owner', readonly (readonly [SyncState, SyncState])[]>> = {
   core: [['queued', 'planned'], ['queued', 'failed'], ['planned', 'failed'], ['applying', 'failed']],
-  owner: [['planned', 'applying'], ['applying', 'applied'], ['applying', 'failed']],
+  owner: [['planned', 'applying'], ['applying', 'applying'], ['applying', 'applied'], ['applying', 'failed']],
 };
+/** applying→applying is the applier's heartbeat: the stores change only `applyingSince` (and the version). */
 
 export const canSyncMove = (from: SyncState, to: SyncState, who: 'core' | 'owner'): boolean =>
   SYNC_MOVES[who].some(([a, b]) => a === from && b === to);
 
-/** An `applying` row younger than this still blocks planning. */
+/** An `applying` row the watcher has seen unchanged for less than this (by its own clock) still blocks planning. */
 export const SYNC_APPLY_MS = 120_000;
+/** The applier refreshes its claim (applying→applying) every this many actions. */
+export const SYNC_HEARTBEAT_ACTIONS = 10;
+/** The creates of a row that failed less than this long ago are still treated as pending (its applier may not have stopped yet). */
+export const SYNC_FAILED_HOLD_MS = 600_000;
 /** The watcher counts as not seen after this long. */
 export const WATCHER_STALE_MS = 120_000;
 export const MAX_SYNC_JSON_BYTES = MAX_DOC_BYTES;
@@ -87,12 +92,17 @@ const conflictOrThrow = (e: unknown): null => {
   throw e;
 };
 
-/** Claims the planned row (planned→applying), applies its actions as the caller (the owner), stores the result (applied). Null when another applier holds it. */
+/**
+ * Claims the planned row (planned→applying), applies its actions as the caller (the owner), stores the result (applied).
+ * Refreshes the claim every SYNC_HEARTBEAT_ACTIONS actions; a refresh that conflicts (the row was failed or taken) stops
+ * the apply at once and throws the VersionConflictError, leaving the row as the other party wrote it.
+ * Null when another applier holds it.
+ */
 export async function applySyncRequest(store: BoardStore, now: () => Date, row: SyncRequest): Promise<SyncRequest | null> {
   if (row.state !== 'planned' || !row.plan) return null;
-  let claimed: SyncRequest;
+  let cur: SyncRequest;
   try {
-    claimed = await store.saveSyncRequest(row, { ...row, state: 'applying', applyingSince: now().toISOString() });
+    cur = await store.saveSyncRequest(row, { ...row, state: 'applying', applyingSince: now().toISOString() });
   } catch (e) {
     return conflictOrThrow(e);
   }
@@ -101,19 +111,34 @@ export async function applySyncRequest(store: BoardStore, now: () => Date, row: 
   const refused: NotApplied[] = blocks.map((a) => ({
     taskId: 'taskId' in a ? a.taskId : null, issue: `${a.issue.repo}#${a.issue.number}`, change: 'block', reason: 'the factory machine applies this',
   }));
+  let lost = false;
+  const beforeAction = async (i: number): Promise<void> => {
+    if (i === 0 || i % SYNC_HEARTBEAT_ACTIONS !== 0) return;
+    try {
+      cur = await store.saveSyncRequest(cur, { ...cur, applyingSince: now().toISOString() });
+    } catch (e) {
+      lost = e instanceof VersionConflictError;
+      throw e;
+    }
+  };
   try {
-    const r = await applyPull(store, now, { factoryId: claimed.factoryId, actions: plan.actions.filter((a) => a.kind !== 'block'), notApplied: plan.notApplied });
+    const r = await applyPull(store, now, { factoryId: cur.factoryId, actions: plan.actions.filter((a) => a.kind !== 'block'), notApplied: plan.notApplied }, { beforeAction });
     r.notApplied.push(...refused);
-    return await store.saveSyncRequest(claimed, { ...claimed, state: 'applied', result: toSyncResult(plan, r), appliedAt: now().toISOString() });
+    return await store.saveSyncRequest(cur, { ...cur, state: 'applied', result: toSyncResult(plan, r), appliedAt: now().toISOString() });
   } catch (e) {
-    try { await store.saveSyncRequest(claimed, { ...claimed, state: 'failed', error: firstLine(e) }); } catch { /* the first error is the one to report */ }
+    if (!lost) {
+      try { await store.saveSyncRequest(cur, { ...cur, state: 'failed', error: firstLine(e) }); } catch { /* the first error is the one to report */ }
+    }
     throw e;
   }
 }
 
-/** An applying row whose claim is older than SYNC_APPLY_MS: applying→failed with `interrupted while applying; click Sync again`. Null when it is not stale or the save conflicts. */
-export async function failStaleSync(store: BoardStore, now: () => Date, row: SyncRequest): Promise<SyncRequest | null> {
-  const since = row.applyingSince ? Date.parse(row.applyingSince) : NaN;
+/**
+ * An applying row stale for SYNC_APPLY_MS: applying→failed with `interrupted while applying; click Sync again`.
+ * `since` (ms) is when the caller first saw this row version; the watcher passes its own clock's time so a skewed
+ * browser clock in `applyingSince` cannot shorten the window. Null when it is not stale or the save conflicts.
+ */
+export async function failStaleSync(store: BoardStore, now: () => Date, row: SyncRequest, since = row.applyingSince ? Date.parse(row.applyingSince) : NaN): Promise<SyncRequest | null> {
   if (row.state !== 'applying' || now().getTime() - since < SYNC_APPLY_MS) return null;
   try {
     return await store.saveSyncRequest(row, { ...row, state: 'failed', error: 'interrupted while applying; click Sync again' });
