@@ -12,17 +12,17 @@ import { ghLoggedInUsers, isGhLoggedIn, realExecFile, type ExecFile } from './se
 import { isValidId } from './factories.js';
 import { buildImport, checkMigration, migrate } from './migrate.js';
 import { ForbiddenError, OwnerOnlyError } from './boardStore.js';
-import type { BoardStore } from './store.js';
+import { FileStore, type BoardStore } from './store.js';
 import type { AgentStep, Gate, Mode, RepoId } from './types.js';
 import { doctor, redactSecrets } from './doctor.js';
 import { GitHubPusher, type PushResult } from './githubPusher.js';
 import { GitHubPuller, type PullLock, type PullResult, type RebuildResult } from './githubPuller.js';
 import { fileLock } from './pullLock.js';
 import { GitHubWatcher, type SyncHandled, type WatchTick } from './githubWatcher.js';
+import { lazyGitHubSetupFor, type GitHubSetupFor } from './githubSetup.js';
 import { GITHUB_SCHEMA_MISSING } from './githubSync.js';
 import type { GitHubFor } from './github.js';
 import type { GitHubBoardFor } from './githubBoard.js';
-import { lazyGitHubSetupFor, type GitHubSetupFor } from './githubSetup.js';
 import { parseStoreKind, storeDirPath, storeForFactories, type StoreKind } from './storeSelect.js';
 import { findRoot, lazyGitHubBoardFor, lazyGitHubFor, wire, type WireOptions } from './wire.js';
 
@@ -376,8 +376,9 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       if (unknown.length > 0) throw new CliExit(`unknown factory: ${unknown.join(', ')}`, 1);
       const checks = await doctor({
         defs, repos, store: kind, ...(kind === 'blocks' ? { schemaReady: await store.githubSchemaReady(), health: await store.listFactoryHealth() } : {}), loggedIn: await ghLoggedInUsers(exec), boardFor: deps.githubBoardFor ?? lazyGitHubBoardFor(undefined, undefined, exec),
-        setupFor: deps.githubSetupFor ?? lazyGitHubSetupFor(undefined, exec),
-        ...(kind === 'file' && 'factoryFileProblems' in store ? { fileProblems: (store as unknown as { factoryFileProblems(): { factoryId: string; file: string; reason: string }[] }).factoryFileProblems() } : {}),
+        // The file store only: the Blocks store's doctor output stays as it was.
+        ...(kind === 'file' ? { setupFor: deps.githubSetupFor ?? lazyGitHubSetupFor(undefined, exec) } : {}),
+        ...(kind === 'file' && store instanceof FileStore ? { fileProblems: store.factoryFileProblems() } : {}),
         ...(only ? { only } : {}),
       });
       if (o.json) printJson({ checks });

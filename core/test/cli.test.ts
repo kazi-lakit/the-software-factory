@@ -1,4 +1,3 @@
-import { FakeGitHubSetup } from '../src/githubSetup.js';
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -14,9 +13,10 @@ import { FactoryConfig } from '../src/factories.js';
 import type { GitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
 import { FakeGitHubBoard, type GitHubBoard } from '../src/githubBoard.js';
+import { FakeGitHubSetup } from '../src/githubSetup.js';
 import { BlocksStore } from '../src/blocks/store.js';
 import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
-import { MemoryStore } from '../src/store.js';
+import { FileStore, MemoryStore } from '../src/store.js';
 import { DEFAULT_STATUS_MAP } from '../src/githubConfig.js';
 import { GITHUB_SCHEMA } from '../src/blocks/schema.js';
 import { GITHUB_SCHEMA_MISSING } from '../src/githubSync.js';
@@ -675,9 +675,9 @@ describe('factory doctor', () => {
     return b;
   };
 
-  test('prints a line per check and exits 0 when all pass', async () => {
+  test('prints a line per check and exits 0 when all pass (file store: with repo and base lines)', async () => {
     const { out, err, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, board(['Backlog', 'Todo', 'In progress', 'In review', 'Merged']));
-    expect(await go('doctor')).toBe(0);
+    expect(await go('--store', 'file', 'doctor')).toBe(0);
     expect(out).toEqual([
       'ok blocks gh login: gh-blocks logged in',
       'ok blocks repo data: org/data reachable as gh-blocks',
@@ -689,6 +689,16 @@ describe('factory doctor', () => {
       'ok blocks label data: exists',
     ]);
     expect(err).toEqual([]);
+  });
+
+  test('a Blocks doctor run makes no GitHub setup calls and prints no repo or base lines', async () => {
+    const connected = { defs: [defFixture('blocks', { github: { ...github, mode: 'connected' as const } })], repos: [repoFixture('blocks', 'data')] };
+    const { out, goWith } = setup(connected, ['gh-blocks'], undefined, undefined, undefined, board(['Backlog', 'Todo', 'In progress', 'In review', 'Merged']));
+    let calls = 0;
+    await goWith({ githubSetupFor: () => { calls++; return new FakeGitHubSetup(); } }, '--store', 'blocks', 'doctor');
+    expect(calls).toBe(0);
+    expect(out.length).toBeGreaterThan(1);
+    expect(out.filter((l) => / (repo|base) /.test(l))).toEqual([]);
   });
 
   test('exits 1 on a failing check, with no extra error line', async () => {
@@ -705,10 +715,22 @@ describe('factory doctor', () => {
   });
 
   test('prints FAIL for an invalid factory.yaml and exits 1', async () => {
-    const { out, store, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, board(['Backlog', 'Todo', 'In progress', 'In review', 'Merged']));
-    (store as unknown as { factoryFileProblems: () => unknown }).factoryFileProblems = () => [{ factoryId: 'broken', file: '/f/broken/factory.yaml', reason: 'factory.agents.build: bad model' }];
-    expect(await go('--store', 'file', 'doctor')).toBe(1);
-    expect(out).toContain('FAIL broken config file: /f/broken/factory.yaml: factory.agents.build: bad model; fix the file or run ./factory init');
+    const dir = mkdtempSync(join(tmpdir(), 'factory-doctor-'));
+    try {
+      mkdirSync(join(dir, 'factories', 'broken'), { recursive: true });
+      writeFileSync(join(dir, 'factories', 'broken', 'factory.yaml'), 'factory:\n  agents:\n    build: nonsense-model\n');
+      const store = new FileStore(join(dir, 'board.json'), { factoriesDir: join(dir, 'factories') });
+      const factories = withGithub();
+      const engine = new Engine({
+        store, git, githubFor: () => new FakeGitHub(), factories: async () => new FactoryConfig(factories.defs, factories.repos),
+        exec: async () => ({ code: 0, output: '' }), now: () => new Date(), mode: 'session', claimant: 'me',
+      });
+      const out: string[] = [];
+      const code = await run(['--store', 'file', 'doctor'], { out: (l) => out.push(l), err: () => {} }, async () => ({ engine, store }),
+        { exec: fakeGh(['gh-blocks']), githubBoardFor: () => new FakeGitHubBoard(), githubSetupFor: () => new FakeGitHubSetup() });
+      expect(code).toBe(1);
+      expect(out.some((l) => l.startsWith('FAIL broken config file: ') && l.includes('fix the file or run ./factory init'))).toBe(true);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
   test('an unknown --factory exits 1', async () => {
