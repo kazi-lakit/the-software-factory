@@ -3,6 +3,8 @@ import { MemoryStore } from '../src/store.js';
 import { FakeGitHubBoard, type GitHubBoard } from '../src/githubBoard.js';
 import { GitHubPusher, LEASE_MS, backoffMs } from '../src/githubPusher.js';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
+import { VersionConflictError } from '../src/boardStore.js';
+import { issueBody, issueText, bodyHash, MAX_BODY } from '../src/githubPush.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
 
 const map = { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress',
@@ -273,5 +275,129 @@ describe('GitHubPusher', () => {
     for (const r of rs) expect(r.error).toContain('only one factory repo');
     expect(() => board.issue(REPO, 1)).toThrow();
     expect((await store.listGitHubLinks()).every((l) => l.error !== null && l.issueNumber === null)).toBe(true);
+  });
+  const clash = () => {
+    const store = new MemoryStore({ factories: {
+      defs: [defFixture('a', { github: hub() }), defFixture('b', { github: hub() })],
+      repos: [repoFixture('a', 'app', { remote: 'git@github.com:o/app.git' }), repoFixture('b', 'app', { remote: 'git@github.com:o/app.git' })],
+    } });
+    const board = new FakeGitHubBoard();
+    board.addProject({ owner: 'o', number: 3 }, OPTIONS);
+    return { store, board, pusher: new GitHubPusher({ store, boardFor: () => board, now: () => NOW, claimant: 'x' }) };
+  };
+
+  test('both sides of a repo clash fail', async () => {
+    const c = clash();
+    const a = await c.store.createTask({ factoryId: 'a', title: 'x', description: 'd', repo: 'app' });
+    const b = await c.store.createTask({ factoryId: 'b', title: 'y', description: 'd', repo: 'app' });
+    const rs = await c.pusher.pushAll();
+    expect(rs.map((r) => r.taskId)).toEqual([a.taskId, b.taskId]);
+    for (const r of rs) expect(r.error).toContain('already used by');
+    expect(() => c.board.issue(REPO, 1)).toThrow();
+  });
+
+  test('a done task never pushed with a clashing repo writes no link', async () => {
+    const c = clash();
+    await c.store.createTask({ factoryId: 'a', title: 'x', description: 'd', repo: 'app' });
+    const b = await c.store.createTask({ factoryId: 'b', title: 'y', description: 'd', repo: 'app' });
+    await c.store.updateTask(b.taskId, 1, { status: 'done' });
+    const r = await c.pusher.pushTask(b.taskId);
+    expect(r.error).toBeNull();
+    expect(await c.store.getGitHubLink(b.taskId)).toBeUndefined();
+  });
+
+  test('spec comment stores docAt; blocked comment stores blockedAt', async () => {
+    const s = setup();
+    const t = await add(s);
+    await s.pusher.pushTask(t.taskId);
+    await s.store.addDoc(t.taskId, 'spec', 'the spec', 'agent');
+    await s.store.updateTask(t.taskId, 1, { status: 'blocked', blockedReason: 'why' });
+    await s.pusher.pushTask(t.taskId);
+    const comments = await s.board.listComments(REPO, 1);
+    const spec = comments.find((c) => c.body.startsWith('## Spec v1'))!;
+    const blocked = comments.find((c) => c.body.startsWith('**Blocked:**'))!;
+    const p = (await s.store.getGitHubLink(t.taskId))!.pushed;
+    expect(p.docAt.spec).toBe(spec.createdAt);
+    expect(p.blockedAt).toBe(blocked.createdAt);
+  });
+
+  test('an issue carrying the marker is adopted, not created again', async () => {
+    const s = setup();
+    const t = await add(s);
+    const made = await s.board.createIssue(REPO, { title: 'Do it', body: issueBody('desc', t.taskId, 'f'), labels: ['factory'] });
+    await s.board.addToProject((await s.board.project({ owner: 'o', number: 3 }))!, made.nodeId);
+    const r = await s.pusher.pushTask(t.taskId);
+    expect(r.error).toBeNull();
+    expect(r.done).not.toContain('created');
+    expect(() => s.board.issue(REPO, 2)).toThrow();
+    const link = (await s.store.getGitHubLink(t.taskId))!;
+    expect(link).toMatchObject({ issueNumber: made.number, issueNodeId: made.nodeId, project: 'o/3' });
+    expect(link.itemId).not.toBeNull();
+    expect(link.pushed).toMatchObject({ title: 'Do it', label: 'factory', bodyHash: bodyHash(issueText('desc', t.taskId, 'f')), option: 'Backlog' });
+  });
+
+  /** The store, but the first link save after `board.method` ran throws `err`. */
+  const failingSave = (s: ReturnType<typeof setup>, method: string, err: Error) => {
+    let armed = false;
+    const board = new Proxy(s.board, { get(t, p, r) {
+      const v = Reflect.get(t, p, r);
+      if (typeof v !== 'function') return v;
+      return async (...a: unknown[]) => { const out = await v.apply(t, a); if (p === method) armed = true; return out; };
+    } }) as GitHubBoard;
+    const store = new Proxy(s.store, { get(t, p, r) {
+      const v = Reflect.get(t, p, r);
+      if (typeof v !== 'function') return v;
+      if (p !== 'saveGitHubLink') return v.bind(t);
+      return (...a: unknown[]) => { if (armed) { armed = false; throw err; } return v.apply(t, a); };
+    } }) as MemoryStore;
+    return new GitHubPusher({ store, boardFor: () => board, now: () => NOW, claimant: 'x' });
+  };
+
+  test('phrase kept when the link save after a GitHub call fails', async () => {
+    const s = setup();
+    const t = await add(s);
+    const r = await failingSave(s, 'setStatus', new Error('disk full')).pushTask(t.taskId);
+    expect(r.done).toContain('status Backlog');
+    expect(r.error).toBe('disk full');
+  });
+
+  test('final save conflict is not an error', async () => {
+    const s = setup();
+    const t = await add(s);
+    const store = new Proxy(s.store, { get(tg, p, r) {
+      const v = Reflect.get(tg, p, r);
+      if (typeof v !== 'function') return v;
+      if (p !== 'saveGitHubLink') return v.bind(tg);
+      return (cur: unknown, next: { lease: unknown }) => { if (next.lease === null) throw new VersionConflictError(t.taskId, 1, 2); return v.call(tg, cur, next); };
+    } }) as MemoryStore;
+    const r = await new GitHubPusher({ store, boardFor: () => s.board, now: () => NOW, claimant: 'x' }).pushTask(t.taskId);
+    expect(r.error).toBeNull();
+    expect(r.done).toEqual(['created', 'status Backlog']);
+  });
+
+  test('pushAll reads the factory defs once per pass', async () => {
+    const s = setup();
+    for (let i = 0; i < 3; i++) await add(s, `t${i}`);
+    let n = 0;
+    const store = new Proxy(s.store, { get(tg, p, r) {
+      const v = Reflect.get(tg, p, r);
+      if (typeof v !== 'function') return v;
+      return (...a: unknown[]) => { if (p === 'listFactoryDefs') n++; return v.apply(tg, a); };
+    } }) as MemoryStore;
+    const out = await new GitHubPusher({ store, boardFor: () => s.board, now: () => NOW, claimant: 'x' }).pushAll();
+    expect(out.every((r) => r.error === null)).toBe(true);
+    expect(n).toBe(1);
+  });
+
+  test('the stored body hash is of the issue text, so a padded or long description is not pushed again', async () => {
+    const s = setup();
+    const long = 'x'.repeat(MAX_BODY + 50) + '  \n';
+    const t = await s.store.createTask({ factoryId: 'f', title: 'T', description: long, repo: 'app' });
+    await s.pusher.pushTask(t.taskId);
+    expect((await s.store.getGitHubLink(t.taskId))!.pushed.bodyHash).toBe(bodyHash(issueText(long, t.taskId, 'f')));
+    expect((await s.pusher.pushTask(t.taskId)).done).toEqual([]);
+    await s.store.updateTask(t.taskId, 1, { description: long + '  ', title: 'T2' });
+    expect((await s.pusher.pushTask(t.taskId)).done).toEqual(['title/body']);
+    expect((await s.pusher.pushTask(t.taskId)).done).toEqual([]);
   });
 });

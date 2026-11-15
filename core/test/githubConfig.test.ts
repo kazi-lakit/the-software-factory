@@ -73,13 +73,19 @@ describe('githubConfigProblems', () => {
     const a = defOf('a', cfg('github-only')); const b = defOf('b', cfg('github-only'));
     const ra = repoOf(a, 'x', 'git@github.com:O/R.git'); const rb = repoOf(b, 'y', 'https://github.com/o/r');
     expect(githubConfigProblems([b, a], [rb, ra], 'file')).toEqual([
-      { factoryId: 'b', repoId: 'y', message: `O/R is already used by a/x; ${DUP}` },
+      { factoryId: 'b', repoId: 'y', message: `O/R is already used by a/x; ${DUP}`, clashWith: { factoryId: 'a', repoId: 'x' } },
     ]);
+  });
+  test('clash problem carries clashWith', () => {
+    const a = defOf('a', cfg('github-only')); const b = defOf('b', cfg('github-only'));
+    const p = githubConfigProblems([a, b], [repoOf(a, 'app', 'git@github.com:o/app.git'), repoOf(b, 'app', 'git@github.com:o/app.git')], 'file');
+    expect(p).toHaveLength(1);
+    expect(p[0]).toMatchObject({ factoryId: 'b', repoId: 'app', clashWith: { factoryId: 'a', repoId: 'app' } });
   });
   test('duplicates within one factory are flagged on the later repo', () => {
     const a = defOf('a', cfg('github-only'));
     expect(githubConfigProblems([a], [repoOf(a, 'y', 'https://github.com/o/r'), repoOf(a, 'x', 'git@github.com:O/R.git')], 'file')).toEqual([
-      { factoryId: 'a', repoId: 'y', message: `O/R is already used by a/x; ${DUP}` },
+      { factoryId: 'a', repoId: 'y', message: `O/R is already used by a/x; ${DUP}`, clashWith: { factoryId: 'a', repoId: 'x' } },
     ]);
   });
   test('factories without github are ignored as owners and as duplicates', () => {

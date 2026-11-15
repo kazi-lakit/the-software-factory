@@ -1,14 +1,15 @@
-import type { BoardStore } from './boardStore.js';
+import type { BoardStore, StoredSettings } from './boardStore.js';
 import { VersionConflictError } from './boardStore.js';
 import { redactSecrets } from './doctor.js';
 import { DEFAULT_SETTINGS } from './defaults.js';
 import { resolveGates, resolveSettings } from './gates.js';
-import type { GitHubBoard, GitHubBoardFor, ProjectInfo, RepoRef } from './githubBoard.js';
+import type { GitHubBoard, GitHubBoardFor, ProjectInfo, ProjectItem, RepoRef } from './githubBoard.js';
 import type { GitHubSettings } from './githubConfig.js';
 import { emptyPushed, type GitHubLink } from './githubLink.js';
-import { blockedKey, bodyHash, planPush, projectKey, type PushAction } from './githubPush.js';
+import { blockedKey, bodyHash, issueText, markerIn, planPush, stripMarker, projectKey, type PushAction } from './githubPush.js';
 import { githubConfigProblems } from './githubConfig.js';
 import { parseRemote } from './remote.js';
+import type { FactoryDef, FactoryRepo } from './factories.js';
 import type { Task } from './types.js';
 
 // Runs the planned GitHub actions for a task: one pusher per task at a time (lease), progress saved after each action, backoff on failure.
@@ -27,7 +28,12 @@ export interface PusherDeps { store: BoardStore; boardFor: GitHubBoardFor; now: 
 export const LEASE_MS = 60_000;
 export const backoffMs = (attempts: number): number => Math.min(5_000 * 2 ** (attempts - 1), 600_000);
 
-type ProjectCache = Map<string, ProjectInfo | null>;
+/** Per-pass cache: Projects, and the items of each Project (for adopting marked issues). */
+interface ProjectCache { projects: Map<string, ProjectInfo | null>; items: Map<string, ProjectItem[]> }
+const newCache = (): ProjectCache => ({ projects: new Map(), items: new Map() });
+/** What one pass reads once: the definitions, repos, stored settings and links. */
+interface Snapshot { defs: FactoryDef[]; repos: FactoryRepo[]; stored: StoredSettings; links: Map<string, GitHubLink> }
+const isTerminal = (t: Task): boolean => t.status === 'done' || t.status === 'cancelled';
 
 const numericId = (id: string): number => Number(/(\d+)$/.exec(id)?.[1] ?? 0);
 
@@ -46,20 +52,31 @@ function phrase(a: PushAction): string | null {
 export class GitHubPusher {
   constructor(private readonly d: PusherDeps) {}
 
-  pushTask(taskId: string, opts: { ignoreBackoff?: boolean } = {}): Promise<PushResult> {
-    return this.push(taskId, opts, new Map());
+  async pushTask(taskId: string, opts: { ignoreBackoff?: boolean } = {}): Promise<PushResult> {
+    const { store } = this.d;
+    const link = await store.getGitHubLink(taskId);
+    const snap: Snapshot = {
+      defs: await store.listFactoryDefs(), repos: await store.listFactoryRepos(), stored: await store.getSettings(),
+      links: new Map(link ? [[taskId, link]] : []),
+    };
+    return this.push(await store.getTask(taskId), opts, newCache(), snap);
   }
 
   /** Every task of every github-only factory (or only `factoryIds`), one at a time, by task id. */
   async pushAll(factoryIds?: string[], opts: { ignoreBackoff?: boolean } = {}): Promise<PushResult[]> {
-    const defs = await this.d.store.listFactoryDefs();
+    const { store } = this.d;
+    const defs = await store.listFactoryDefs();
+    const snap: Snapshot = {
+      defs, repos: await store.listFactoryRepos(), stored: await store.getSettings(),
+      links: new Map((await store.listGitHubLinks()).map((l) => [l.taskId, l])),
+    };
     const ids = new Set(defs.filter((f) => f.github?.mode === 'github-only' && (!factoryIds || factoryIds.includes(f.factoryId))).map((f) => f.factoryId));
     const tasks = (await this.d.store.listTasks()).filter((t) => ids.has(t.factoryId)).sort((a, b) => numericId(a.taskId) - numericId(b.taskId));
-    const cache: ProjectCache = new Map();
+    const cache = newCache();
     const out: PushResult[] = [];
     for (const t of tasks) {
       try {
-        out.push(await this.push(t.taskId, opts, cache));
+        out.push(await this.push(t, opts, cache, snap));
       } catch (e) {
         out.push({ taskId: t.taskId, issue: null, done: [], error: this.firstLine(e), skipped: null });
       }
@@ -71,30 +88,31 @@ export class GitHubPusher {
     return redactSecrets((e instanceof Error ? e.message : String(e)).split('\n')[0]!);
   }
 
-  private async push(taskId: string, opts: { ignoreBackoff?: boolean }, cache: ProjectCache): Promise<PushResult> {
+  private async push(task: Task, opts: { ignoreBackoff?: boolean }, cache: ProjectCache, snap: Snapshot): Promise<PushResult> {
     const { store } = this.d;
+    const taskId = task.taskId;
     const now = this.d.now();
     const result: PushResult = { taskId, issue: null, done: [], error: null, skipped: null };
-    const task = await store.getTask(taskId);
-    const def = (await store.listFactoryDefs()).find((f) => f.factoryId === task.factoryId);
+    const def = snap.defs.find((f) => f.factoryId === task.factoryId);
     const settings = def?.github;
     if (!def || !settings || settings.mode !== 'github-only') return { ...result, skipped: 'not-github' };
-    const link = await store.getGitHubLink(taskId);
+    const link = snap.links.get(taskId);
     if (link) result.issue = this.issueName(link);
+    // Nothing more to push for a closed issue, or for a task that ended before it was ever pushed: no config check, no write.
+    if (link?.pushed.closed || (!link && isTerminal(task))) return result;
     if (link?.error && !opts.ignoreBackoff && Date.parse(link.error.nextAttemptAt) > now.getTime()) return { ...result, skipped: 'backoff' };
 
-    const factoryRepo = (await store.listFactoryRepos(task.factoryId)).find((r) => r.repoId === task.repo);
+    const factoryRepo = snap.repos.find((r) => r.factoryId === task.factoryId && r.repoId === task.repo);
     if (!factoryRepo) return this.fail(link, task, '', `repo ${task.repo} is not configured for factory ${task.factoryId}`, result);
     let ref: RepoRef;
     try { ref = parseRemote(factoryRepo.remote); } catch (e) { return this.fail(link, task, '', this.firstLine(e), result); }
     const repoName = `${ref.owner}/${ref.repo}`;
-    const defs = await store.listFactoryDefs();
-    const problem = githubConfigProblems(defs, await store.listFactoryRepos(), 'file')
+    const problem = githubConfigProblems(snap.defs, snap.repos, 'file')
       .find((p) => (p.factoryId === task.factoryId && (p.repoId === undefined || p.repoId === task.repo))
-        || p.message.includes(`already used by ${task.factoryId}/${task.repo};`)); // the first owner is blocked too: it is a clash
+        || (p.clashWith?.factoryId === task.factoryId && p.clashWith.repoId === task.repo)); // the first owner is blocked too: it is a clash
     if (problem) return this.fail(link, task, repoName, problem.message, result);
 
-    const stored = (await store.getSettings()).factories[task.factoryId];
+    const stored = snap.stored.factories[task.factoryId];
     const gates = resolveGates(resolveSettings(stored?.factory ?? DEFAULT_SETTINGS, stored?.repos[task.repo]), task.gateOverrides);
     const docs = { spec: await store.currentDoc(taskId, 'spec'), plan: await store.currentDoc(taskId, 'plan') };
     const actions = planPush({ task, link, settings, docs, gates });
@@ -115,9 +133,13 @@ export class GitHubPusher {
     }
 
     try {
-      cur = await this.run(task, ref, settings, actions, cur, result, cache, (l) => { cur = l; });
+      cur = await this.run(task, def, ref, settings, actions, cur, result, cache, (l) => { cur = l; });
       const pushed = { ...cur.pushed, blocked: key };
-      cur = await store.saveGitHubLink(cur, { ...cur, pushed, error: null, lease: null });
+      try {
+        cur = await store.saveGitHubLink(cur, { ...cur, pushed, error: null, lease: null });
+      } catch (e) {
+        if (!(e instanceof VersionConflictError)) throw e; // the actions are done; the next push re-plans
+      }
       result.issue = this.issueName(cur);
       return result;
     } catch (e) {
@@ -157,9 +179,8 @@ export class GitHubPusher {
     return l.issueNumber == null ? null : `${l.repo}#${l.issueNumber}`;
   }
 
-  private async run(task: Task, ref: RepoRef, settings: GitHubSettings, actions: PushAction[], start: GitHubLink, result: PushResult, cache: ProjectCache, track: (l: GitHubLink) => void): Promise<GitHubLink> {
+  private async run(task: Task, def: FactoryDef, ref: RepoRef, settings: GitHubSettings, actions: PushAction[], start: GitHubLink, result: PushResult, cache: ProjectCache, track: (l: GitHubLink) => void): Promise<GitHubLink> {
     if (actions.length === 0) return start;
-    const def = (await this.d.store.listFactoryDefs()).find((f) => f.factoryId === task.factoryId)!;
     const board = this.d.boardFor(def.ghUser);
     let project: ProjectInfo | undefined;
     if (actions.some((a) => a.kind === 'addToProject' || a.kind === 'setStatus')) project = await this.project(board, def.ghUser, settings, cache);
@@ -177,52 +198,83 @@ export class GitHubPusher {
       track(cur);
     };
     for (const a of actions) {
+      const note = (): void => { const p = phrase(a); if (p) result.done.push(p); }; // right after the GitHub call, before its save
       switch (a.kind) {
         case 'create': {
+          const found = await this.findMarked(board, def.ghUser, settings, project!, ref, task, cache);
+          if (found) {
+            result.done.push('adopted');
+            await save((l) => ({
+              ...l, issueNumber: found.issue.number, issueNodeId: found.issue.nodeId, itemId: found.itemId, project: projectKey(settings.project),
+              pushed: { ...l.pushed, title: found.issue.title, bodyHash: bodyHash(stripMarker(found.issue.body)), label: settings.label !== '' && found.issue.labels.includes(settings.label) ? settings.label : null },
+            }));
+            break;
+          }
           await ensureLabel();
           const made = await board.createIssue(ref, { title: a.title, body: a.body, labels: a.labels });
+          note();
           const label = settings.label === '' ? null : settings.label;
-          await save((l) => ({ ...l, issueNumber: made.number, issueNodeId: made.nodeId, pushed: { ...l.pushed, title: a.title, bodyHash: bodyHash(task.description), label } }));
+          const hash = bodyHash(issueText(task.description, task.taskId, task.factoryId));
+          await save((l) => ({ ...l, issueNumber: made.number, issueNodeId: made.nodeId, pushed: { ...l.pushed, title: a.title, bodyHash: hash, label } }));
           break;
         }
         case 'addToProject': {
           const itemId = await board.addToProject(project!, cur.issueNodeId!);
+          note();
           await save((l) => ({ ...l, itemId, project: projectKey(settings.project) }));
           break;
         }
         case 'setStatus':
           await board.setStatus(project!, cur.itemId!, a.option);
+          note();
           await save((l) => ({ ...l, pushed: { ...l.pushed, status: task.status, option: a.option } }));
           break;
         case 'addLabel':
           await ensureLabel();
           await board.addLabels(ref, cur.issueNumber!, [a.label]);
+          note();
           await save((l) => ({ ...l, pushed: { ...l.pushed, label: a.label } }));
           break;
-        case 'updateIssue':
+        case 'updateIssue': {
           await board.updateIssue(ref, cur.issueNumber!, { title: a.title, body: a.body });
-          await save((l) => ({ ...l, pushed: { ...l.pushed, title: a.title, bodyHash: bodyHash(task.description) } }));
+          note();
+          const hash = bodyHash(issueText(task.description, task.taskId, task.factoryId));
+          await save((l) => ({ ...l, pushed: { ...l.pushed, title: a.title, bodyHash: hash } }));
           break;
-        case 'comment':
-          await board.addComment(ref, cur.issueNumber!, a.body);
-          if (a.about === 'blocked') await save((l) => ({ ...l, pushed: { ...l.pushed, blocked: a.key } }));
-          else await save((l) => ({ ...l, pushed: { ...l.pushed, docs: { ...l.pushed.docs, [a.about]: a.version } } }));
+        }
+        case 'comment': {
+          const posted = await board.addComment(ref, cur.issueNumber!, a.body);
+          note();
+          if (a.about === 'blocked') await save((l) => ({ ...l, pushed: { ...l.pushed, blocked: a.key, blockedAt: posted.createdAt } }));
+          else await save((l) => ({ ...l, pushed: { ...l.pushed, docs: { ...l.pushed.docs, [a.about]: a.version }, docAt: { ...l.pushed.docAt, [a.about]: posted.createdAt } } }));
           break;
+        }
         case 'close':
           await board.closeIssue(ref, cur.issueNumber!, a.reason);
+          note();
           await save((l) => ({ ...l, pushed: { ...l.pushed, closed: true, status: task.status } }));
           break;
       }
-      const p = phrase(a);
-      if (p) result.done.push(p);
     }
     return cur;
   }
 
+  /** An open or closed issue of the repo on the Project whose marker names this task and factory (listed once per pass). */
+  private async findMarked(board: GitHubBoard, ghUser: string, s: GitHubSettings, project: ProjectInfo, ref: RepoRef, task: Task, cache: ProjectCache): Promise<ProjectItem | undefined> {
+    const k = `${ghUser}|${projectKey(s.project)}`;
+    if (!cache.items.has(k)) cache.items.set(k, await board.listItems(project));
+    const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
+    return cache.items.get(k)!.find((it) => {
+      if (!same(it.issue.repo.owner, ref.owner) || !same(it.issue.repo.repo, ref.repo)) return false;
+      const m = markerIn(it.issue.body);
+      return m?.taskId === task.taskId && m.factoryId === task.factoryId;
+    });
+  }
+
   private async project(board: GitHubBoard, ghUser: string, s: GitHubSettings, cache: ProjectCache): Promise<ProjectInfo> {
     const k = `${ghUser}|${projectKey(s.project)}`;
-    if (!cache.has(k)) cache.set(k, await board.project(s.project));
-    const p = cache.get(k);
+    if (!cache.projects.has(k)) cache.projects.set(k, await board.project(s.project));
+    const p = cache.projects.get(k);
     if (!p) throw new Error(`Project ${s.project.owner}/${s.project.number} not found`);
     return p;
   }

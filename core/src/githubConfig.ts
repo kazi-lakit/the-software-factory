@@ -78,7 +78,11 @@ export function validateGitHubSettings(input: unknown, ghUser: string): Validate
   return { ok: true, value: { mode: input.mode, project, label, approvers, statusMap: statusMap.value } };
 }
 
-export interface GitHubConfigProblem { factoryId: string; repoId?: string; message: string }
+export interface GitHubConfigProblem {
+  factoryId: string; repoId?: string; message: string;
+  /** Set on the "already used by" problem: the factory repo that owns the GitHub repo first. */
+  clashWith?: { factoryId: string; repoId: string };
+}
 
 const byId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 const parsedRemote = (remote: string): { owner: string; repo: string } | null => {
@@ -88,7 +92,7 @@ const parsedRemote = (remote: string): { owner: string; repo: string } | null =>
 /** Cross-factory checks: the mode fits the store, and each GitHub repo belongs to one factory repo. Factories without `github` are ignored. */
 export function githubConfigProblems(defs: FactoryDef[], repos: FactoryRepo[], store: 'file' | 'blocks'): GitHubConfigProblem[] {
   const problems: GitHubConfigProblem[] = [];
-  const owners = new Map<string, { id: string; slug: string }>();
+  const owners = new Map<string, { id: string; factoryId: string; repoId: string; slug: string }>();
   const sortedRepos = [...repos].sort((a, b) => byId(a.factoryId, b.factoryId) || byId(a.repoId, b.repoId));
   for (const def of [...defs].sort((a, b) => byId(a.factoryId, b.factoryId))) {
     const github = def.github;
@@ -100,8 +104,8 @@ export function githubConfigProblems(defs: FactoryDef[], repos: FactoryRepo[], s
       if (!remote) { problems.push({ factoryId: def.factoryId, repoId: repo.repoId, message: 'remote is not a GitHub repo; GitHub mode needs one' }); continue; }
       const key = `${remote.owner}/${remote.repo}`.toLowerCase();
       const first = owners.get(key);
-      if (first) problems.push({ factoryId: def.factoryId, repoId: repo.repoId, message: `${first.slug} is already used by ${first.id}; a GitHub repo can belong to only one factory repo` });
-      else owners.set(key, { id: `${def.factoryId}/${repo.repoId}`, slug: `${remote.owner}/${remote.repo}` });
+      if (first) problems.push({ factoryId: def.factoryId, repoId: repo.repoId, message: `${first.slug} is already used by ${first.id}; a GitHub repo can belong to only one factory repo`, clashWith: { factoryId: first.factoryId, repoId: first.repoId } });
+      else owners.set(key, { id: `${def.factoryId}/${repo.repoId}`, factoryId: def.factoryId, repoId: repo.repoId, slug: `${remote.owner}/${remote.repo}` });
     }
   }
   return problems;
