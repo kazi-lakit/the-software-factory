@@ -1,0 +1,79 @@
+import { sha256 } from '@noble/hashes/sha2.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
+import type { ProjectRef, GitHubSettings } from './githubConfig.js';
+import { emptyPushed, type GitHubLink } from './githubLink.js';
+import type { Doc, Gate, Task } from './types.js';
+
+// Pure planner (no Node API, no credential): what to do on GitHub so it matches the task.
+
+export const markerOf = (taskId: string, factoryId: string): string => `<!-- tsf:task=${taskId} factory=${factoryId} -->`;
+
+/** The issue body: the description, then the marker that ties the issue to its task. */
+export function issueBody(description: string, taskId: string, factoryId: string): string {
+  const marker = markerOf(taskId, factoryId);
+  const d = description.trimEnd();
+  return d === '' ? marker : `${d}\n\n${marker}`;
+}
+
+export const bodyHash = (description: string): string => bytesToHex(sha256(new TextEncoder().encode(description)));
+
+export const projectKey = (p: ProjectRef): string => `${p.owner}/${p.number}`;
+
+/** Identifies one block (reason and question); null when the task is not blocked. */
+export function blockedKey(t: Task): string | null {
+  return t.status === 'blocked' ? `${t.blockedReason ?? ''}\n${t.question ?? ''}` : null;
+}
+
+export type PushAction =
+  | { kind: 'create'; title: string; body: string; labels: string[] }
+  | { kind: 'addToProject' }
+  | { kind: 'setStatus'; option: string }
+  | { kind: 'addLabel'; label: string }
+  | { kind: 'updateIssue'; title: string; body: string }
+  | { kind: 'comment'; about: 'spec' | 'plan'; version: number; body: string }
+  | { kind: 'comment'; about: 'blocked'; key: string; body: string }
+  | { kind: 'close'; reason: 'completed' | 'not_planned' };
+
+export interface PushInput {
+  task: Task; link: GitHubLink | undefined; settings: GitHubSettings; docs: { spec?: Doc; plan?: Doc }; gates: Record<Gate, boolean>;
+}
+
+function docComment(kind: 'spec' | 'plan', doc: Doc, i: PushInput): PushAction {
+  const name = kind === 'spec' ? 'Spec' : 'Plan';
+  let body = `## ${name} v${doc.version}\n\n${doc.body}`;
+  if (i.settings.mode === 'github-only' && i.gates[kind]) body += '\n\n---\nReply `/approve` to approve, or `/changes <what to change>` to send it back.';
+  return { kind: 'comment', about: kind, version: doc.version, body };
+}
+
+/** The ordered GitHub actions that bring the issue up to date with the task. */
+export function planPush(i: PushInput): PushAction[] {
+  const { task, link, settings } = i;
+  const created = link?.issueNumber != null;
+  const done = task.status === 'done' || task.status === 'cancelled';
+  if (!created && done) return [];
+  const p = { ...emptyPushed(), ...link?.pushed };
+  const out: PushAction[] = [];
+  const body = issueBody(task.description, task.taskId, task.factoryId);
+  if (!created) {
+    out.push({ kind: 'create', title: task.title, body, labels: settings.label === '' ? [] : [settings.label] });
+    p.title = task.title; p.bodyHash = bodyHash(task.description); p.label = settings.label === '' ? null : settings.label;
+  }
+  const readd = !created || link?.itemId == null || link.project !== projectKey(settings.project);
+  if (readd) out.push({ kind: 'addToProject' });
+  const option = settings.statusMap[task.status];
+  if (readd || option !== p.option) out.push({ kind: 'setStatus', option });
+  if (settings.label !== '' && settings.label !== p.label) out.push({ kind: 'addLabel', label: settings.label });
+  if (task.title !== p.title || bodyHash(task.description) !== p.bodyHash) out.push({ kind: 'updateIssue', title: task.title, body });
+  for (const kind of ['spec', 'plan'] as const) {
+    const doc = i.docs[kind];
+    if (doc && doc.version > p.docs[kind]) out.push(docComment(kind, doc, i));
+  }
+  const key = blockedKey(task);
+  if (key !== null && key !== p.blocked) {
+    let text = `**Blocked:** ${task.blockedReason ?? 'no reason given'}`;
+    if (task.question && settings.mode === 'github-only') text += `\n\n**Question:** ${task.question}\n\nReply \`/answer <text>\` to answer.`;
+    out.push({ kind: 'comment', about: 'blocked', key, body: text });
+  }
+  if (done && !p.closed) out.push({ kind: 'close', reason: task.status === 'done' ? 'completed' : 'not_planned' });
+  return out;
+}
