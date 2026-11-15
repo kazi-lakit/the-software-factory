@@ -87,7 +87,7 @@ This needs the Blocks rules to let the factory core insert a task (`blocks/data/
 
 If `factory new` fails, the skill shows the error and falls back to one pre-filled Board link: open it, check the form, click **Create task**, then **Mark ready**. The link goes to `https://dfrsgz-eseqz.slsblx.com` unless `FACTORY_BOARD_URL` is set in the shell that starts `claude`, and it works only once the Board page with the pre-fill change is deployed. The draft files are saved under `runs/.drafts/` in the factory folder (ignored by git).
 
-`factory sync [--watch]` first pulls GitHub changes into the GitHub-only factories (new issues, Status moves, `/approve` and `/changes` comments, PR reviews), then pushes every task to GitHub (the core also pulls before `factory next` and pushes the touched task after each step); `--watch` repeats every `--interval` seconds (default 5) until Ctrl-C. `factory sync --rebuild [--factory <id>]` restores an empty board from the factory's marked issues, then pushes; it runs once.
+`factory sync [--watch]` (add `--store blocks` for connected mode: it pushes the connected factories' tasks and plans the Board's Sync requests) first pulls GitHub changes into the GitHub-only factories (new issues, Status moves, `/approve` and `/changes` comments, PR reviews), then pushes every task to GitHub (the core also pulls before `factory next` and pushes the touched task after each step); `--watch` repeats every `--interval` seconds (default 5) until Ctrl-C. `factory sync --rebuild [--factory <id>]` restores an empty board from the factory's marked issues, then pushes; it runs once.
 
 ## Safety layers
 

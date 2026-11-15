@@ -16,6 +16,9 @@ import { FakeGitHubBoard, type GitHubBoard } from '../src/githubBoard.js';
 import { BlocksStore } from '../src/blocks/store.js';
 import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
 import { MemoryStore } from '../src/store.js';
+import { DEFAULT_STATUS_MAP } from '../src/githubConfig.js';
+import { GITHUB_SCHEMA } from '../src/blocks/schema.js';
+import { GITHUB_SCHEMA_MISSING } from '../src/githubSync.js';
 import { emptyPushed } from '../src/githubLink.js';
 import { issueBody } from '../src/githubPush.js';
 import { GhLoginMissingError } from '../src/secrets.js';
@@ -828,12 +831,6 @@ describe('GitHub pushing from the CLI', () => {
     expect(await go('sync', '--interval', '0')).toBe(1);
   });
 
-  test('sync on the blocks store is refused', async () => {
-    const { err, go } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
-    expect(await go('--store', 'blocks', 'sync')).toBe(1);
-    expect(err).toEqual(['error: factory sync needs --store file until connected mode is built']);
-  });
-
   test('status --json has no githubErrors key without errors', async () => {
     const { out, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, newBoard());
     expect(await go('status', '--json')).toBe(0);
@@ -1129,5 +1126,74 @@ describe('GitHub pulling from the CLI', () => {
     const { err, goWith } = setup(withGithub());
     expect(await goWith(wire(newBoard()), '--store', 'file', 'sync', '--rebuild', '--watch')).toBe(1);
     expect(err).toEqual(['error: --rebuild runs once; leave out --watch']);
+  });
+});
+
+describe('factory sync and push on the Blocks store (connected mode)', () => {
+  const PROJECT = { owner: 'o', number: 3 };
+  const hubSettings = { mode: 'connected' as const, project: PROJECT, label: 'factory', approvers: ['me'], statusMap: DEFAULT_STATUS_MAP };
+  function blocks(opts: { missing?: boolean } = {}) {
+    const storage = newFakeStorage();
+    const missing = opts.missing ? { missing: GITHUB_SCHEMA } : {};
+    const coreData = new FakeBlocksData('factory-core', { storage, ...missing });
+    const ownerData = new FakeBlocksData('factory-owner', { storage, ...missing });
+    const factories = { defs: [defFixture('f', { ghUser: 'me', github: hubSettings })], repos: [repoFixture('f', 'app', { remote: 'git@github.com:o/app.git' })] };
+    seedBlocksFactories(coreData, factories);
+    const core = new BlocksStore(coreData, 'core');
+    const owner = new BlocksStore(ownerData, 'owner');
+    const board = new FakeGitHubBoard();
+    board.addProject(PROJECT, ['Backlog', 'Todo', 'In progress', 'In review', 'Merged']);
+    const engine = new Engine({
+      store: core, git, githubFor: () => new FakeGitHub(), factories: async () => new FactoryConfig(factories.defs, factories.repos),
+      exec: async () => ({ code: 0, output: '' }), now: () => new Date(), mode: 'session', claimant: 'me',
+    });
+    const out: string[] = [];
+    const err: string[] = [];
+    const go = (extra: CliDeps, ...argv: string[]) =>
+      run(['--store', 'blocks', ...argv], { out: (s) => out.push(s), err: (s) => err.push(s) }, async () => ({ engine, store: core }),
+        { exec: fakeGh(['me']), githubBoardFor: () => board, githubFor: () => new FakeGitHub(), pullLock: async () => () => undefined, loggedIn: async () => new Set(['me']), ...extra });
+    return { core, owner, board, out, err, go };
+  }
+
+  test('sync on blocks without the schema prints the message and exits 1', async () => {
+    const { out, go } = blocks({ missing: true });
+    expect(await go({}, 'sync')).toBe(1);
+    expect(out).toEqual([GITHUB_SCHEMA_MISSING]);
+  });
+
+  test('sync on blocks plans a queued request and pushes', async () => {
+    const { owner, out, go } = blocks();
+    const q = await owner.requestSync('f', 'me');
+    expect(await go({}, 'sync')).toBe(0);
+    expect(out[0]).toBe(`sync f ${q.requestId.slice(0, 8)}: planned 0 changes, 0 not applied`);
+    expect(out.at(-1)).toBe('pushed 0, failed 0');
+  });
+
+  test('sync --watch on blocks prints the schema message once across ticks', async () => {
+    const { out, go } = blocks({ missing: true });
+    expect(await go({ watchTicks: 2, sleep: async () => {} }, 'sync', '--watch')).toBe(0);
+    expect(out).toEqual([GITHUB_SCHEMA_MISSING]);
+  });
+
+  test('sync --rebuild on blocks is refused', async () => {
+    const { err, go } = blocks();
+    expect(await go({}, 'sync', '--rebuild')).toBe(1);
+    expect(err.join('\n')).toContain('--rebuild is for GitHub-only factories (--store file)');
+  });
+
+  test('new on blocks for a connected factory pushes at once', async () => {
+    const { board, go } = blocks();
+    expect(await go({}, 'new', '--repo', 'app', '--title', 'Do it', '--description', 'd')).toBe(0);
+    expect(board.issue({ owner: 'o', repo: 'app' }, 1).title).toBe('Do it');
+  });
+
+  test('status on blocks shows a stuck connected push', async () => {
+    const { core, out, go } = blocks();
+    await go({}, 'new', '--repo', 'app', '--title', 'Do it', '--description', 'd');
+    const link = (await core.listGitHubLinks('f'))[0]!;
+    await core.saveGitHubLink(link, { ...link, error: { message: 'boom', attempts: 3, nextAttemptAt: '2026-11-15T10:00:00.000Z' } });
+    out.length = 0;
+    expect(await go({}, 'status')).toBe(0);
+    expect(out).toContain(`github: ${link.taskId} push failing (boom), attempt 3, next try 2026-11-15T10:00:00.000Z`);
   });
 });

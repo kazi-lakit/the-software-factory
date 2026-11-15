@@ -17,6 +17,8 @@ import { doctor, redactSecrets } from './doctor.js';
 import { GitHubPusher, type PushResult } from './githubPusher.js';
 import { GitHubPuller, type PullLock, type PullResult, type RebuildResult } from './githubPuller.js';
 import { fileLock } from './pullLock.js';
+import { GitHubWatcher, type SyncHandled, type WatchTick } from './githubWatcher.js';
+import { GITHUB_SCHEMA_MISSING } from './githubSync.js';
 import type { GitHubFor } from './github.js';
 import type { GitHubBoardFor } from './githubBoard.js';
 import { findRoot, lazyGitHubBoardFor, lazyGitHubFor, wire, type WireOptions } from './wire.js';
@@ -90,6 +92,8 @@ export interface CliDeps {
   sleep?: (ms: number) => Promise<void>;
   /** `factory sync --watch` stops after this many passes. Default: run until SIGINT or SIGTERM. Tests set it. */
   watchTicks?: number;
+  /** Logins found on this machine (the connected-mode watcher's health). Default: the login check. Tests pass a fake. */
+  loggedIn?: () => Promise<ReadonlySet<string>>;
 }
 
 /** The printable lines of one factory's pull: created, applied, not applied and failed items. */
@@ -132,8 +136,11 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   const lockFile = fileLock(() => findRoot());
   const pullLock = deps.pullLock ?? lockFile;
   const pullBusy = deps.pullBusy ?? (deps.pullLock ? undefined : lockFile.held);
-  const pusherFor = (store: BoardStore) =>
-    new GitHubPusher({ store, boardFor, now: () => new Date(), claimant: `cli:${hostname()}`, ...(pullBusy ? { pullBusy } : {}) });
+  const pusherFor = (store: BoardStore, storeKind: 'file' | 'blocks' = 'file') =>
+    new GitHubPusher({ store, boardFor, now: () => new Date(), claimant: `cli:${hostname()}`, storeKind, ...(pullBusy ? { pullBusy } : {}) });
+  const storeKindOf = (cmd: Command): 'file' | 'blocks' => ((cmd.optsWithGlobals() as { store: string }).store === 'blocks' ? 'blocks' : 'file');
+  /** False on Blocks until the GitHub tables exist: the push then does nothing, quietly. */
+  const pushable = async (kind: 'file' | 'blocks', store: BoardStore): Promise<boolean> => kind === 'file' || (await store.githubSchemaReady());
   const githubFor = deps.githubFor ?? lazyGitHubFor(undefined, undefined, exec);
   const pullerFor = (store: BoardStore) => new GitHubPuller({ store, boardFor, githubFor, now: () => new Date(), lock: pullLock });
   /** Pulls GitHub changes before `next` (file store only). Never throws and never changes the exit code; lines go to stderr so stdout stays the ticket. */
@@ -146,11 +153,12 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     }
   };
 
-  /** Pushes the touched task to GitHub (file store only). Catches everything: prints one stderr line on failure, never changes the exit code. */
+  /** Pushes the touched task to GitHub (GitHub-only on file, connected on Blocks). Catches everything: prints one stderr line on failure, never changes the exit code. */
   const pushAfter = async (cmd: Command, store: BoardStore, taskId: string): Promise<PushResult | null> => {
-    if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') return null;
+    const kind = storeKindOf(cmd);
     try {
-      const r = await pusherFor(store).pushTask(taskId);
+      if (!(await pushable(kind, store))) return null;
+      const r = await pusherFor(store, kind).pushTask(taskId);
       if (r.error !== null) io.err(`github: ${taskId} not pushed (${r.error}); factory sync retries`);
       return r;
     } catch (e) {
@@ -161,9 +169,10 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
 
   /** Pushes every GitHub-only task (next also moves other tasks while it syncs). Same never-fail, stderr-only behaviour as pushAfter. */
   const pushAllAfter = async (cmd: Command, store: BoardStore, factories: string[] | undefined): Promise<void> => {
-    if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') return;
+    const kind = storeKindOf(cmd);
     try {
-      for (const r of await pusherFor(store).pushAll(factories)) {
+      if (!(await pushable(kind, store))) return;
+      for (const r of await pusherFor(store, kind).pushAll(factories)) {
         if (r.error !== null) io.err(`github: ${r.taskId} not pushed (${r.error}); factory sync retries`);
       }
     } catch (e) {
@@ -275,7 +284,8 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       }
       for (const f of s.factories) f.ghLoggedIn = loggedIn.get(f.factoryId) ?? f.ghLoggedIn;
       const wanted = factoryFilter(o.factory);
-      const githubOnly = new Set((await store.listFactoryDefs()).filter((d) => d.github?.mode === 'github-only').map((d) => d.factoryId));
+      const pushMode = storeKindOf(cmd) === 'blocks' ? 'connected' : 'github-only';
+      const githubOnly = new Set((await store.listFactoryDefs()).filter((d) => d.github?.mode === pushMode).map((d) => d.factoryId));
       const githubErrors = (await store.listGitHubLinks())
         .filter((l) => l.error !== null && githubOnly.has(l.factoryId) && (!wanted || wanted.includes(l.factoryId)))
         .map((l) => ({ taskId: l.taskId, message: l.error!.message, attempts: l.error!.attempts, nextAttemptAt: l.error!.nextAttemptAt }));
@@ -356,7 +366,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       const unknown = (only ?? []).filter((id) => !defs.some((d) => d.factoryId === id));
       if (unknown.length > 0) throw new CliExit(`unknown factory: ${unknown.join(', ')}`, 1);
       const checks = await doctor({
-        defs, repos, store: kind, loggedIn: await ghLoggedInUsers(exec), boardFor: deps.githubBoardFor ?? lazyGitHubBoardFor(undefined, undefined, exec),
+        defs, repos, store: kind, ...(kind === 'blocks' ? { schemaReady: await store.githubSchemaReady(), health: await store.listFactoryHealth() } : {}), loggedIn: await ghLoggedInUsers(exec), boardFor: deps.githubBoardFor ?? lazyGitHubBoardFor(undefined, undefined, exec),
         ...(only ? { only } : {}),
       });
       if (o.json) printJson({ checks });
@@ -401,9 +411,75 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       }
     });
 
+  /** `factory sync --store blocks` (connected mode): one watcher tick, or one per interval with --watch. */
+  const syncConnected = async (store: BoardStore, only: string[] | undefined, watch: boolean, interval: number): Promise<void> => {
+    const watcher = new GitHubWatcher({
+      store, boardFor, githubFor, now: () => new Date(), claimant: `cli:${hostname()}`, lock: pullLock,
+      loggedIn: deps.loggedIn ?? (() => ghLoggedInUsers(exec)),
+    });
+    /** Prints one tick's lines; returns whether a request or a push failed. */
+    const print = (t: WatchTick): boolean => {
+      let failed = false;
+      const id8 = (h: SyncHandled) => h.requestId.slice(0, 8);
+      for (const h of t.synced) {
+        if (h.state === 'failed') { io.out(`sync ${h.factoryId} ${id8(h)}: FAIL ${h.error}`); failed = true; }
+        else io.out(`sync ${h.factoryId} ${id8(h)}: planned ${h.actions} changes, ${h.notApplied} not applied`);
+      }
+      for (const r of t.superseded) io.out(`sync ${r.slice(0, 8)}: superseded`);
+      for (const r of t.pushed) {
+        if (r.done.length > 0) io.out(`${r.taskId} ${r.issue ?? '-'}: ${r.done.join(', ')}`);
+        if (r.error !== null) { io.out(`FAIL ${r.taskId}: ${r.error}`); failed = true; }
+      }
+      return failed;
+    };
+    const anyConnected = async (): Promise<boolean> =>
+      (await store.listFactoryDefs()).some((d) => d.github?.mode === 'connected' && (!only || only.includes(d.factoryId)));
+    if (!watch) {
+      const t = await watcher.tick(only);
+      if (t.schemaMissing) { io.out(GITHUB_SCHEMA_MISSING); throw new CliExit('', 1, true); }
+      if (!(await anyConnected())) return io.out('no factory uses connected mode');
+      const failed = print(t);
+      io.out(`pushed ${t.pushed.filter((r) => r.done.length > 0).length}, failed ${t.pushed.filter((r) => r.error !== null).length}`);
+      if (failed) throw new CliExit('', 1, true);
+      return;
+    }
+    let noticed = false;
+    let schemaShown = false;
+    let stop = false;
+    let wakeUp: () => void = () => {};
+    const wake = new Promise<void>((resolve) => { wakeUp = resolve; });
+    const onSignal = () => { stop = true; wakeUp(); };
+    process.on('SIGINT', onSignal);
+    process.on('SIGTERM', onSignal);
+    try {
+      for (let tick = 1; !stop; tick++) {
+        try {
+          const t = await watcher.tick(only);
+          if (t.schemaMissing) {
+            if (!schemaShown) io.out(GITHUB_SCHEMA_MISSING);
+            schemaShown = true;
+          } else {
+            if (!noticed) {
+              noticed = true;
+              if (!(await anyConnected())) io.out('no factory uses connected mode');
+            }
+            print(t);
+          }
+        } catch (e) {
+          io.out(`error: ${firstLine(e)}`);
+        }
+        if (stop || (deps.watchTicks !== undefined && tick >= deps.watchTicks)) break;
+        await waitOrWake(interval * 1000, wake, deps.sleep);
+      }
+    } finally {
+      process.off('SIGINT', onSignal);
+      process.off('SIGTERM', onSignal);
+    }
+  };
+
   program
     .command('sync')
-    .description('pull GitHub changes, then push every task of the GitHub-only factories (file store only; exit 1 when a pull or push fails)')
+    .description('pull GitHub changes, then push every task of the GitHub-only factories (--store file); on --store blocks, push and plan the Board\'s Sync requests of the connected factories (exit 1 when a pull, push or request fails)')
     .option('--factory <id>', 'only this factory (repeat for several)', collect, undefined)
     .option('--watch', 'keep pulling and pushing until Ctrl-C')
     .option('--rebuild', 'restore an empty GitHub-only factory\'s board from its marked issues, then push (runs once)')
@@ -412,9 +488,11 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       const only = factoryFilter(o.factory);
       if (!/^\d+$/.test(o.interval) || Number(o.interval) < 1 || Number(o.interval) > 3600) throw new CliExit('--interval must be a whole number from 1 to 3600', 1);
       const interval = Number(o.interval);
-      if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') throw new CliExit('factory sync needs --store file until connected mode is built', 1);
+      const kind = storeKindOf(cmd);
+      if (kind === 'blocks' && o.rebuild) throw new CliExit('--rebuild is for GitHub-only factories (--store file)', 1);
       if (o.rebuild && o.watch) throw new CliExit('--rebuild runs once; leave out --watch', 1);
       const { store } = await open(cmd);
+      if (kind === 'blocks') return syncConnected(store, only, o.watch === true, interval);
       const pusher = pusherFor(store);
       const puller = pullerFor(store);
       const printed = new Set<string>();

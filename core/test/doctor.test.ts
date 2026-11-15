@@ -158,3 +158,37 @@ describe('doctor', () => {
     expect(names(out).some((n) => n.startsWith('label'))).toBe(false);
   });
 });
+
+describe('doctor on the Blocks store (connected mode)', () => {
+  const connected = () => ({ ...gh(), mode: 'connected' as const });
+  const now = new Date('2026-11-15T10:00:00Z');
+  const runB = (more: { schemaReady?: boolean; seenAt?: string | null; store?: 'file' | 'blocks'; mode?: 'connected' | 'github-only' }) => {
+    const board = setup();
+    board.labels.set('org/api', new Set(['factory']));
+    const d = def('a', (more.mode === 'github-only' ? gh() : connected()) as never);
+    return doctor({
+      defs: [d], repos: [repoFixture('a', 'api')], store: more.store ?? 'blocks', loggedIn: LOGGED, boardFor: () => board, now,
+      ...(more.store === 'file' ? {} : { schemaReady: more.schemaReady ?? true, health: more.seenAt === undefined ? [] : [{ factoryId: 'a', ghLoggedIn: true, checkedAt: '', watcherSeenAt: more.seenAt }] }),
+    });
+  };
+
+  test('connected on blocks: github tables and watcher seen', async () => {
+    const out = await runB({ seenAt: '2026-11-15T09:59:30.000Z' });
+    expect(names(out)).toEqual(['gh login', 'config', 'github tables', 'scope', 'project', 'status options', 'label api', 'watcher']);
+    expect(out.every((c) => c.ok)).toBe(true);
+    expect(out.at(-1)!.detail).toBe('seen 2026-11-15T09:59:30.000Z');
+  });
+
+  test('missing schema and a stale watcher fail with their hints', async () => {
+    const stale = await runB({ schemaReady: false, seenAt: '2026-11-15T09:00:00.000Z' });
+    expect(stale.find((c) => c.check === 'github tables')).toMatchObject({ ok: false, detail: expect.stringContaining('apply the schema change') });
+    expect(stale.at(-1)).toMatchObject({ check: 'watcher', ok: false, detail: 'not seen since 2026-11-15T09:00:00.000Z; run factory sync --watch --store blocks' });
+    const never = await runB({});
+    expect(never.at(-1)).toMatchObject({ check: 'watcher', ok: false, detail: 'never seen; run factory sync --watch --store blocks' });
+  });
+
+  test('github-only on file: no new checks', async () => {
+    const out = await runB({ store: 'file', mode: 'github-only' });
+    expect(names(out)).toEqual(['gh login', 'config', 'scope', 'project', 'status options', 'label api']);
+  });
+});

@@ -1,9 +1,13 @@
-import type { FactoryDef, FactoryRepo } from './factories.js';
+import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
 import { githubConfigProblems } from './githubConfig.js';
 import type { GitHubBoardFor, ProjectInfo } from './githubBoard.js';
+import { GITHUB_SCHEMA_MISSING } from './githubSync.js';
 import { parseRemote } from './remote.js';
 import { isGhLoggedIn } from './secrets.js';
 import { ALL_STATUSES } from './status.js';
+
+/** The watcher counts as not seen after this long (builder's call 9). */
+export const WATCHER_STALE_MS = 120_000;
 
 export interface DoctorCheck { factoryId: string; check: string; ok: boolean; detail: string }
 
@@ -18,6 +22,8 @@ export async function doctor(o: {
   defs: FactoryDef[]; repos: FactoryRepo[]; store: 'file' | 'blocks'; loggedIn: ReadonlySet<string>; boardFor: GitHubBoardFor;
   /** Only these factories are checked; config problems are still found across all of them. */
   only?: string[];
+  /** Blocks store: whether the GitHub tables exist, each factory's health, and the clock (the connected checks). */
+  schemaReady?: boolean; health?: FactoryHealth[]; now?: Date;
 }): Promise<DoctorCheck[]> {
   const problems = githubConfigProblems(o.defs, o.repos, o.store);
   const out: DoctorCheck[] = [];
@@ -40,6 +46,11 @@ export async function doctor(o: {
     const mine = problems.filter((p) => p.factoryId === factoryId);
     if (mine.length === 0) add('config', true, 'ok');
     for (const p of mine) add(p.repoId ? `config ${p.repoId}` : 'config', false, p.message);
+    const connected = o.store === 'blocks' && github.mode === 'connected';
+    if (connected) {
+      if (o.schemaReady === false) add('github tables', false, GITHUB_SCHEMA_MISSING);
+      else add('github tables', true, 'present');
+    }
 
     const board = await attempt('scope', async () => o.boardFor(def.ghUser));
     if (!board) continue;
@@ -72,6 +83,13 @@ export async function doctor(o: {
       if (github.label === '') { add(check, true, 'no label filter'); continue; }
       const exists = await attempt(check, () => board.labelExists(remote, github.label));
       if (exists !== undefined) add(check, true, exists ? 'exists' : 'missing; created on first push');
+    }
+    if (connected) {
+      const seen = o.health?.find((h) => h.factoryId === factoryId)?.watcherSeenAt ?? null;
+      const age = seen ? (o.now ?? new Date()).getTime() - Date.parse(seen) : Infinity;
+      if (seen && age <= WATCHER_STALE_MS) add('watcher', true, `seen ${seen}`);
+      else if (seen) add('watcher', false, `not seen since ${seen}; run factory sync --watch --store blocks`);
+      else add('watcher', false, 'never seen; run factory sync --watch --store blocks');
     }
   }
   return out;
