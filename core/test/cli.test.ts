@@ -745,6 +745,19 @@ describe('GitHub pushing from the CLI', () => {
     expect(board.issue({ owner: 'o', repo: 'app' }, 1)).toMatchObject({ state: 'closed', stateReason: 'not_planned' });
   });
 
+  test.each([['without the GitHub schema', true], ['with the schema and no connected factory', false]])('new on the blocks store %s prints nothing extra to stderr', async (_n, missing) => {
+    const data = new FakeBlocksData('factory-core', missing ? { missing: GITHUB_SCHEMA } : {});
+    seedBlocksFactories(data, { defs: [defFixture('blocks')], repos: [repoFixture('blocks', 'data')] });
+    const store = new BlocksStore(data, 'core');
+    const out: string[] = [];
+    const err: string[] = [];
+    const code = await run(['--store', 'blocks', 'new', '--repo', 'data', '--title', 'x', '--description', 'd'], { out: (l) => out.push(l), err: (l) => err.push(l) },
+      async () => ({ engine: {} as Engine, store }), { exec: fakeGh(), githubBoardFor: () => { throw new Error('no GitHub call expected'); } });
+    expect(code).toBe(0);
+    expect(out).toEqual(['T-1 created in inbox']);
+    expect(err).toEqual([]);
+  });
+
   test('no pushing on the blocks store', async () => {
     const board = newBoard();
     const { err, go } = setup(withGithub(), [], undefined, undefined, undefined, board);
