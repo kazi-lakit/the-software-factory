@@ -48,7 +48,7 @@ export function findRoot(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = p
 }
 
 /** Builds a gh login's client from its token on the first use (one read, a failed read is not cached); a missing login becomes GhLoginMissingError. */
-class LoadOnce<T> {
+export class LoadOnce<T> {
   private inner: Promise<T> | undefined;
   constructor(
     private readonly user: string,
