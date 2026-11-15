@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { shellExec } from '../src/checks.js';
 import { Engine, type EngineDeps } from '../src/engine.js';
 import { LocalGitRepos, type GitIdentity } from '../src/git.js';
@@ -10,6 +10,11 @@ import { FakeGitHub } from '../src/github.js';
 import { FactoryConfig, type FactoryRepo } from '../src/factories.js';
 import { run } from '../src/cli.js';
 import { FakeGitHubBoard } from '../src/githubBoard.js';
+import { BlocksStore } from '../src/blocks/store.js';
+import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
+import { DEFAULT_STATUS_MAP } from '../src/githubConfig.js';
+import { applySyncRequest, syncSummary, type SyncRequest } from '../src/githubSync.js';
+import { createTask } from '../src/owner.js';
 import { FileStore } from '../src/store.js';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
@@ -396,5 +401,109 @@ describe('GitHub-only end to end', () => {
     } finally {
       if (saved === undefined) delete process.env.FACTORY_ROOT; else process.env.FACTORY_ROOT = saved;
     }
+  });
+});
+
+describe('connected mode end to end', () => {
+  const OPTIONS = ['Backlog', 'Todo', 'In progress', 'In review', 'Merged'];
+  const REPO = { owner: 'o', repo: 'app' };
+  const PROJECT = { owner: 'o', number: 3 };
+
+  afterEach(() => { vi.useRealTimers(); });
+
+  test('a Board task and a GitHub issue round-trip through the watcher and Sync', async () => {
+    // The CLI reads the real clock; faking Date lets the test move it for the stale-claim step.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-15T10:00:00Z'));
+    const now = () => new Date();
+    const advance = (ms: number) => vi.setSystemTime(new Date(Date.now() + ms));
+    const storage = newFakeStorage();
+    const core = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core');
+    const owner = new BlocksStore(new FakeBlocksData('factory-owner', { storage }), 'owner');
+    await owner.saveFactoryDef(null, defFixture('f', {
+      ghUser: 'me', github: { mode: 'connected', project: PROJECT, label: 'factory', approvers: ['me'], statusMap: DEFAULT_STATUS_MAP },
+    }));
+    await owner.saveFactoryRepo(null, repoFixture('f', 'app', { remote: 'git@github.com:o/app.git' }));
+    const board = new FakeGitHubBoard();
+    board.addProject(PROJECT, OPTIONS);
+    const info = (await board.project(PROJECT))!;
+    const lock = async () => () => undefined;
+    const go = async (...argv: string[]) => {
+      const out: string[] = [];
+      const code = await run(['--store', 'blocks', ...argv], { out: (s) => out.push(s), err: (s) => out.push(s) }, async () => ({ engine: {} as Engine, store: core }), {
+        githubBoardFor: () => board, githubFor: () => new FakeGitHub(), pullLock: lock, loggedIn: async () => new Set(['me']),
+      });
+      expect(code, out.join('\n')).toBe(0);
+      return out.join('\n');
+    };
+    const row = async (id: string): Promise<SyncRequest> => (await owner.listSyncRequests('f')).find((r) => r.requestId === id)!;
+    /** Queues a request, lets the watcher plan it, and returns the planned row. */
+    const requestAndPlan = async () => {
+      const q = await owner.requestSync('f', 'me');
+      await go('sync');
+      return row(q.requestId);
+    };
+    const labelled = async (status: string, title: string): Promise<number> => {
+      const made = await board.createIssue(REPO, { title, body: 'please', labels: ['factory'] });
+      await board.setStatus(info, await board.addToProject(info, made.nodeId), status);
+      return made.number;
+    };
+    const statusOf = async (n: number) => (await board.listItems(info)).find((i) => i.issue.number === n)?.status;
+    const issuesOf = (taskId: string) => [1, 2, 3, 4].filter((n) => { try { return board.issue(REPO, n).body.includes(`tsf:task=${taskId} `); } catch { return false; } });
+
+    // 1. A Board task gets an issue in Backlog.
+    const t1 = await createTask(owner, now, { factoryId: 'f', title: 'Do it', description: 'd', repo: 'app' });
+    expect(t1.taskId).toBe('T-1');
+    await go('sync');
+    expect(board.issue(REPO, 1).body).toContain('<!-- tsf:task=T-1 factory=f -->');
+    expect(await statusOf(1)).toBe('Backlog');
+
+    // 2. A new labelled issue, and T-1 moved to Todo on GitHub: one create and one ready are planned.
+    const n2 = await labelled('Todo', 'From GitHub');
+    expect(n2).toBe(2);
+    await board.setStatus(info, (await board.listItems(info)).find((i) => i.issue.number === 1)!.itemId, 'Todo');
+    const planned = await requestAndPlan();
+    expect(planned.state).toBe('planned');
+    expect(planned.plan!.actions.map((a) => a.kind).sort()).toEqual(['create', 'ready']);
+
+    // 3. The owner applies it.
+    const applied = (await applySyncRequest(owner, now, planned))!;
+    expect(applied.state).toBe('applied');
+    expect(await owner.getTask('T-2')).toMatchObject({ status: 'ready', title: 'From GitHub' });
+    expect(await owner.getTask('T-1')).toMatchObject({ status: 'ready' });
+    expect(syncSummary(applied.result!)).toBe('created 1, applied 1, not applied 0, failed 0');
+
+    // 4. The next push marks issue 2 and creates no third issue.
+    await go('sync');
+    expect(board.issue(REPO, 2).body).toMatch(/<!-- tsf:task=T-2 factory=f -->$/);
+    expect(() => board.issue(REPO, 3)).toThrow();
+
+    // 5. An apply interrupted midway: claimed, never finished.
+    const n3 = await labelled('Todo', 'Third');
+    expect(n3).toBe(3);
+    const p3 = await requestAndPlan();
+    expect(p3.state).toBe('planned');
+    await owner.saveSyncRequest(p3, { ...p3, state: 'applying', applyingSince: now().toISOString() });
+    advance(121_000);
+    const p4 = await requestAndPlan();
+    expect(await row(p3.requestId)).toMatchObject({ state: 'failed', error: 'interrupted while applying; click Sync again' });
+    expect(p4.state).toBe('planned');
+    await applySyncRequest(owner, now, p4);
+    await go('sync');
+    const from3 = (await owner.listTasks()).filter((t) => t.title === 'Third');
+    expect(from3).toHaveLength(1);
+    expect(issuesOf(from3[0]!.taskId)).toEqual([3]);
+    const events = await owner.listEvents(from3[0]!.taskId);
+    expect(events.find((e) => e.action === 'create')?.reason).toBe('created from GitHub issue o/app#3');
+
+    // 6. The label is removed from a task in build: the factory machine blocks it.
+    const cur = await core.getTask('T-1');
+    await core.updateTask('T-1', cur.version, { status: 'build', stage: 'build' });
+    await go('sync');
+    board.issue(REPO, 1).labels = [];
+    const p5 = await requestAndPlan();
+    const done = (await applySyncRequest(owner, now, p5))!;
+    expect(await owner.getTask('T-1')).toMatchObject({ status: 'blocked' });
+    expect(done.result!.applied[0]).toMatchObject({ taskId: 'T-1', change: 'blocked (label removed)' });
   });
 });

@@ -178,6 +178,7 @@ A **GitHub** section on the factory settings page: mode (off / connected), Proje
 - Clicking it writes a sync request row (factory, requested at, by). The watcher picks it up, reads GitHub, works out the change set with the section 8.3 rules, and writes it to the row as a list of proposed owner actions (each with the task id and version it was worked out against). The Board, signed in as the owner, then applies each action through the owner functions, with version compare-and-set; an action whose task changed in the meantime is skipped and shown as "not applied". The Board shows the result (section 8.3 list) and marks the row applied. While waiting, the button shows "syncing… (waiting for the factory machine)".
 - If the page is closed before the change set is applied, it stays pending on the row and is applied the next time the Board opens for that factory (re-checked against current versions).
 - If the watcher hasn't been seen for 2 minutes, the button says so and still queues the request.
+- Stage 4 build: sync request rows, watcher and Board applier, see the stage 4 plan's builder's calls.
 
 ### 9.3 Cards
 - A task with an issue shows a link to it (`#<n>`).
