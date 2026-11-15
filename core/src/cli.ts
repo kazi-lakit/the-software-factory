@@ -13,7 +13,7 @@ import { buildImport, checkMigration, migrate } from './migrate.js';
 import { ForbiddenError, OwnerOnlyError } from './boardStore.js';
 import type { BoardStore } from './store.js';
 import type { AgentStep, Gate, Mode, RepoId } from './types.js';
-import { doctor } from './doctor.js';
+import { doctor, redactSecrets } from './doctor.js';
 import { GitHubPusher, type PushResult } from './githubPusher.js';
 import type { GitHubBoardFor } from './githubBoard.js';
 import { findRoot, lazyGitHubBoardFor, wire, type WireOptions } from './wire.js';
@@ -83,8 +83,13 @@ export interface CliDeps {
   watchTicks?: number;
 }
 
-const firstLine = (e: unknown): string => (e instanceof Error ? e.message : String(e)).split('\n')[0]!;
-const realSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+const firstLine = (e: unknown): string => redactSecrets((e instanceof Error ? e.message : String(e)).split('\n')[0]!);
+/** Waits `ms`, or less when `wake` resolves first; the real timer is cleared either way so the process can exit. */
+function waitOrWake(ms: number, wake: Promise<void>, sleep?: (ms: number) => Promise<void>): Promise<void> {
+  if (sleep) return Promise.race([sleep(ms), wake]);
+  let timer: NodeJS.Timeout;
+  return Promise.race([new Promise<void>((resolve) => { timer = setTimeout(resolve, ms); }), wake]).finally(() => clearTimeout(timer));
+}
 
 export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) => wire(o), deps: CliDeps = {}): Promise<number> {
   const exec = deps.exec ?? realExecFile;
@@ -224,7 +229,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       const githubErrors = (await store.listGitHubLinks())
         .filter((l) => l.error !== null && (!wanted || wanted.includes(l.factoryId)))
         .map((l) => ({ taskId: l.taskId, message: l.error!.message, attempts: l.error!.attempts, nextAttemptAt: l.error!.nextAttemptAt }));
-      if (o.json) return printJson({ ...s, githubErrors });
+      if (o.json) return printJson(githubErrors.length > 0 ? { ...s, githubErrors } : s);
       io.out(`paused: ${s.paused}`);
       for (const f of s.factories) {
         const counts = Object.entries(f.counts).filter(([, n]) => n > 0).map(([status, n]) => `${status}=${n}`);
@@ -376,10 +381,11 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
         return;
       }
       let stop = false;
-      const onSignal = () => { stop = true; };
+      let wakeUp: () => void = () => {};
+      const wake = new Promise<void>((resolve) => { wakeUp = resolve; });
+      const onSignal = () => { stop = true; wakeUp(); };
       process.on('SIGINT', onSignal);
       process.on('SIGTERM', onSignal);
-      const sleep = deps.sleep ?? realSleep;
       try {
         for (let tick = 1; !stop; tick++) {
           try {
@@ -388,7 +394,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
             io.out(`error: ${firstLine(e)}`);
           }
           if (stop || (deps.watchTicks !== undefined && tick >= deps.watchTicks)) break;
-          await sleep(interval * 1000);
+          await waitOrWake(interval * 1000, wake, deps.sleep);
         }
       } finally {
         process.off('SIGINT', onSignal);
@@ -473,7 +479,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       if (e.message !== '') io.err(e.code === 2 || e.plain ? e.message : `error: ${e.message}`);
       return e.code;
     }
-    io.err(`error: ${(e instanceof Error ? e.message : String(e)).split('\n')[0]}`);
+    io.err(`error: ${firstLine(e)}`);
     return 1;
   }
 }

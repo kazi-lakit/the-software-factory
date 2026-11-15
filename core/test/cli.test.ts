@@ -776,12 +776,13 @@ describe('GitHub pushing from the CLI', () => {
     const { out, store, goWith } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
     const slept: number[] = [];
     const before = process.listenerCount('SIGINT');
+    const beforeTerm = process.listenerCount('SIGTERM');
     const code = await goWith({ watchTicks: 2, sleep: async (ms) => { slept.push(ms); await direct(store); } }, 'sync', '--watch');
     expect(code).toBe(0);
     expect(slept).toEqual([5000]);
     expect(out).toEqual(['T-1 o/app#1: created, status Backlog']);
     expect(process.listenerCount('SIGINT')).toBe(before);
-    expect(process.listenerCount('SIGTERM')).toBe(process.listenerCount('SIGTERM'));
+    expect(process.listenerCount('SIGTERM')).toBe(beforeTerm);
   });
 
   test('sync --watch survives a failing pass', async () => {
@@ -795,6 +796,32 @@ describe('GitHub pushing from the CLI', () => {
     expect(out).toContain('T-1 o/app#1: created, status Backlog');
   });
 
+  test('sync --watch stops on SIGINT during the wait', async () => {
+    const { out, store, goWith } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
+    await direct(store);
+    const before = process.listenerCount('SIGINT');
+    const beforeTerm = process.listenerCount('SIGTERM');
+    const code = await goWith({ sleep: () => { setTimeout(() => process.emit('SIGINT'), 0); return new Promise<void>(() => {}); } }, 'sync', '--watch');
+    expect(code).toBe(0);
+    expect(out).toEqual(['T-1 o/app#1: created, status Backlog']);
+    expect(process.listenerCount('SIGINT')).toBe(before);
+    expect(process.listenerCount('SIGTERM')).toBe(beforeTerm);
+  });
+
+  test('errors are redacted in output', async () => {
+    const token = `ghp_${'a1B2'.repeat(9)}`;
+    const { out, err, store, goWith } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
+    const orig = store.listFactoryDefs.bind(store);
+    store.listFactoryDefs = async () => { throw new Error(`locked ${token}`); };
+    await goWith({ watchTicks: 1 }, 'sync', '--watch');
+    store.listFactoryDefs = orig;
+    store.getTask = async () => { throw new Error(`broken ${token}`); };
+    await goWith({}, 'new', '--repo', 'app', '--title', 'x', '--description', 'd');
+    expect(out.join('\n')).toContain('error: locked [redacted]');
+    expect(err.join('\n')).toContain('github: T-1 not pushed (broken [redacted])');
+    expect([...out, ...err].join('\n')).not.toContain(token);
+  });
+
   test('sync --interval 0 is refused', async () => {
     const { go } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
     expect(await go('sync', '--interval', '0')).toBe(1);
@@ -806,6 +833,12 @@ describe('GitHub pushing from the CLI', () => {
     expect(err).toEqual(['error: factory sync needs --store file until connected mode is built']);
   });
 
+  test('status --json has no githubErrors key without errors', async () => {
+    const { out, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, newBoard());
+    expect(await go('status', '--json')).toBe(0);
+    expect(JSON.parse(out.join('\n'))).not.toHaveProperty('githubErrors');
+  });
+
   test('status lists push errors', async () => {
     const { out, store, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, newBoard());
     await direct(store);
@@ -813,6 +846,9 @@ describe('GitHub pushing from the CLI', () => {
       taskId: 'T-1', factoryId: 'blocks', repo: 'o/app', issueNumber: null, issueNodeId: null, project: null, itemId: null,
       pushed: emptyPushed(), error: { message: 'boom', attempts: 2, nextAttemptAt: '2026-06-01T00:00:10.000Z' }, lease: null, version: 0,
     });
+    expect(await go('status', '--json')).toBe(0);
+    expect(JSON.parse(out.join('\n')).githubErrors).toHaveLength(1);
+    out.length = 0;
     expect(await go('status')).toBe(0);
     expect(out).toContain('github: T-1 push failing (boom), attempt 2, next try 2026-06-01T00:00:10.000Z');
     out.length = 0;
