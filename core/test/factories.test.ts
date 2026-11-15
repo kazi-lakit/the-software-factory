@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { isProtected } from '../src/branches.js';
-import { AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, FactoryConfig, ensureMain, validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from '../src/factories.js';
+import { AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, FactoryConfig, ensureMain, protectedFor, validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from '../src/factories.js';
 import { loadFactoriesFromDir } from '../src/factoriesFs.js';
 
 const checks = {
@@ -127,6 +127,21 @@ describe('validateFactoryDef github block', () => {
 
 describe('validateFactoryRepo', () => {
   const def = defOf('delta');
+  test('a protectedBranches override gets main added; none leaves the field out', () => {
+    const r = validateFactoryRepo({ repoId: 'api', remote: 'r', checks, protectedBranches: [' release ', 'release'] }, def);
+    expect(r.ok && r.value.protectedBranches).toEqual(['release', 'main']);
+    const plain = validateFactoryRepo({ repoId: 'api', remote: 'r', checks }, def);
+    expect(plain.ok && 'protectedBranches' in plain.value).toBe(false);
+  });
+  test('a protectedBranches override must be a list of names', () => {
+    expect(validateFactoryRepo({ repoId: 'api', remote: 'r', checks, protectedBranches: 'main' }, def))
+      .toEqual({ ok: false, error: 'protectedBranches must be a list of branch names' });
+  });
+  test('protectedFor: the repo override wins, else the factory list', () => {
+    expect(protectedFor(def, { protectedBranches: ['release', 'main'] })).toEqual(['release', 'main']);
+    expect(protectedFor(def, {})).toEqual(def.protectedBranches);
+    expect(protectedFor(def, undefined)).toEqual(def.protectedBranches);
+  });
   test.each(['main', 'refs/heads/main', 'origin/main', ' Main '])('main is never a base (%j)', (baseBranch) => {
     const r = validateFactoryRepo({ repoId: 'api', remote: 'r', baseBranch, checks }, def);
     expect(r).toEqual({ ok: false, error: 'main is never a base' });

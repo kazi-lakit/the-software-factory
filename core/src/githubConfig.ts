@@ -27,6 +27,12 @@ export const DEFAULT_STATUS_MAP: Record<Status, string> = {
   cancelled: 'Backlog',
 };
 
+/** One Project column per status, named after it: the map for a Project the wizard creates (design section 14, call 4). */
+export const STANDARD_STATUS_MAP: Record<Status, string> = {
+  inbox: 'Inbox', ready: 'Ready', spec: 'Spec', spec_review: 'Spec review', plan: 'Plan', plan_review: 'Plan review',
+  build: 'Build', verify: 'Verify', review: 'Review', pr_open: 'PR open', done: 'Done', blocked: 'Blocked', cancelled: 'Cancelled',
+};
+
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
 

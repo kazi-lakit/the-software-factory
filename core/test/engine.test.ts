@@ -39,6 +39,8 @@ class FakeGit implements GitRepos {
   readonly calls: string[] = [];
   readonly bases: string[] = [];
   readonly pushes: { path: string; branch: string }[] = [];
+  /** The protected list each push was given. */
+  readonly pushProtected: (readonly string[] | undefined)[] = [];
   async ensureClone(factoryId: string, c: FactoryRepo) {
     this.calls.push(`clone ${factoryId}/${c.repoId}`);
     return join(ROOT, '.clones', factoryId, c.repoId);
@@ -48,8 +50,9 @@ class FakeGit implements GitRepos {
     this.bases.push(c.baseBranch);
     return join(ROOT, '.clones', 'worktrees', taskId);
   }
-  async push(path: string, branch: string) {
+  async push(path: string, branch: string, protectedBranches?: readonly string[]) {
     this.pushes.push({ path, branch });
+    this.pushProtected.push(protectedBranches);
   }
   async isClean() {
     return true;
@@ -311,6 +314,19 @@ describe('next across factories', () => {
       await putIn(store, 'a', { status: 'review', stage: 'ship', branch: 'factory/T-2-x' });
       await nextTicket(engine, 'T-2');
       expect((await engine.ship('T-2')).status).toBe('done');
+      expect([...github.prs.values()][0]).toMatchObject({ base: 'dev', state: 'merged' });
+    });
+
+    test('ship pushes with the repo protectedBranches override when it has one', async () => {
+      const t = TWO();
+      t.repos[0] = { ...t.repos[0]!, protectedBranches: ['release', 'main'] };
+      const { store, engine, git, github } = setup(t);
+      await store.setSettings({ factories: { a: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: false } }, repos: {} } } });
+      await putIn(store, 'a', { status: 'review', stage: 'ship', branch: 'factory/T-1-x' });
+      await nextTicket(engine, 'T-1');
+      expect((await engine.ship('T-1')).status).toBe('done');
+      expect(git.pushProtected).toEqual([['release', 'main']]);
+      // dev is not protected for this repo, so the PR into dev merges.
       expect([...github.prs.values()][0]).toMatchObject({ base: 'dev', state: 'merged' });
     });
   });

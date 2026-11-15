@@ -37,6 +37,8 @@ export interface FactoryRepo {
   remote: string;
   baseBranch: string;
   checks: Checks;
+  /** Set only when the repo overrides the factory's list (`main` always included). */
+  protectedBranches?: string[];
   version: number;
 }
 
@@ -71,6 +73,13 @@ export function ensureMain(branches: string[]): string[] {
   }
   return out;
 }
+
+/** The protected branches for a repo: its own override, else the factory's list. */
+export function protectedFor(def: FactoryDef, repo: Pick<FactoryRepo, 'protectedBranches'> | undefined): string[] {
+  return repo?.protectedBranches ?? def.protectedBranches;
+}
+
+const isBranchList = (v: unknown): v is string[] => Array.isArray(v) && v.every((b) => typeof b === 'string');
 
 function text(input: Record<string, unknown>, key: string, fallback: string): string | null {
   const v = input[key];
@@ -110,7 +119,7 @@ export function validateFactoryDef(input: unknown): Validated<FactoryDef> {
   if (gitEmail !== '' && !gitEmail.includes('@')) return fail('gitEmail must contain @');
   if (docsPath !== '' && !docsPath.startsWith('/')) return fail('docsPath must be an absolute folder or empty');
   const rawBranches = input.protectedBranches ?? ['dev', 'stg', 'main'];
-  if (!Array.isArray(rawBranches) || !rawBranches.every((b) => typeof b === 'string')) return fail('protectedBranches must be a list of branch names');
+  if (!isBranchList(rawBranches)) return fail('protectedBranches must be a list of branch names');
   const active = input.active ?? true;
   if (typeof active !== 'boolean') return fail('active must be true or false');
   const version = input.version ?? 1;
@@ -122,7 +131,7 @@ export function validateFactoryDef(input: unknown): Validated<FactoryDef> {
   return {
     ok: true,
     value: {
-      factoryId, name, protectedBranches: ensureMain(rawBranches as string[]), gitName, gitEmail, docsPath,
+      factoryId, name, protectedBranches: ensureMain(rawBranches), gitName, gitEmail, docsPath,
       ghUser, active, ...(models.value ? { agentModels: models.value } : {}), ...(github.value ? { github: github.value } : {}), version,
     },
   };
@@ -145,9 +154,17 @@ export function validateFactoryRepo(input: unknown, def: FactoryDef): Validated<
     const path = ['checks', ...issue.path].join('.');
     return fail(`${path} ${issue.code === 'invalid_type' && issue.input === undefined ? 'is required' : issue.message}`);
   }
+  const branches = input.protectedBranches;
+  if (branches !== undefined && branches !== null && !isBranchList(branches)) return fail('protectedBranches must be a list of branch names');
   const version = input.version ?? 1;
   if (typeof version !== 'number' || !Number.isInteger(version) || version < 0) return fail('version must be a whole number');
-  return { ok: true, value: { factoryId: def.factoryId, repoId, remote, baseBranch, checks: parsed.data, version } };
+  return {
+    ok: true,
+    value: {
+      factoryId: def.factoryId, repoId, remote, baseBranch, checks: parsed.data,
+      ...(isBranchList(branches) ? { protectedBranches: ensureMain(branches) } : {}), version,
+    },
+  };
 }
 
 /** Definitions held in memory. A definition that fails validation is left out and listed in `skipped()`. */
