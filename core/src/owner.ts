@@ -34,6 +34,10 @@ export class StaleDocError extends Error {
 }
 
 export const OWNER_ACTOR = 'you';
+/** Who acted when it was not the owner on the Board (a GitHub user). `reason` replaces the default event reason. */
+export interface OwnerBy { actor: string; reason?: string }
+export const GITHUB_ACTOR = 'github';
+export const githubActor = (login?: string): string => (login ? `github · ${login}` : GITHUB_ACTOR);
 const GATES: readonly Gate[] = ['spec', 'plan', 'pr'];
 /** The status a task waits in for each gate. */
 export const GATE_STATUS: Readonly<Record<Gate, Status>> = { spec: 'spec_review', plan: 'plan_review', pr: 'pr_open' };
@@ -93,19 +97,21 @@ async function writeEvents(store: BoardStore, events: FactoryEvent[]): Promise<v
 }
 
 /** One compare-and-set write with the owner's events. */
-async function ownerUpdate(store: BoardStore, now: () => Date, task: Task, patch: Partial<Task>, reason: string): Promise<Task> {
+async function ownerUpdate(store: BoardStore, now: () => Date, task: Task, patch: Partial<Task>, reason: string, by?: OwnerBy): Promise<Task> {
   const at = now().toISOString();
   const updated = await updateHeld(store, task, patch);
-  const events = [...diffEvents(task, updated, OWNER_ACTOR, reason, at), ...ownerFieldEvents(task, updated, reason, at)];
+  const actor = by?.actor ?? OWNER_ACTOR;
+  const why = by?.reason ?? reason;
+  const events = [...diffEvents(task, updated, actor, why, at), ...ownerFieldEvents(task, updated, why, at, actor)];
   await writeEvents(store, events);
   return updated;
 }
 
 /** diffEvents covers the core's fields; these are the owner's (title … gateOverrides). */
-function ownerFieldEvents(before: Task, after: Task, reason: string, at: string): FactoryEvent[] {
+function ownerFieldEvents(before: Task, after: Task, reason: string, at: string, actor: string = OWNER_ACTOR): FactoryEvent[] {
   const text = (v: unknown) => (typeof v === 'string' ? v : canon(v));
   return EDITABLE_FIELDS.filter((f) => canon(before[f]) !== canon(after[f])).map((field) => ({
-    taskId: after.taskId, factoryId: after.factoryId, actor: OWNER_ACTOR, action: 'set' as const, field, from: text(before[field]), to: text(after[field]), reason, at,
+    taskId: after.taskId, factoryId: after.factoryId, actor, action: 'set' as const, field, from: text(before[field]), to: text(after[field]), reason, at,
   }));
 }
 
@@ -174,6 +180,14 @@ export async function createTask(
   return insertTask(store, now, input, OWNER_ACTOR, 'created');
 }
 
+/** The pull creates a task from a GitHub issue (`o/r#n`); the base is never main. */
+export function createTaskFromGitHub(
+  store: BoardStore, now: () => Date,
+  input: { factoryId: string; title: string; description: string; repo: RepoId; baseBranch: string; status: 'inbox' | 'ready' }, issue: string,
+): Promise<Task> {
+  return insertTask(store, now, input, GITHUB_ACTOR, `created from GitHub issue ${issue}`);
+}
+
 export const CORE_NEW_ACTOR = 'core · new';
 
 /**
@@ -191,31 +205,31 @@ export async function createTaskAsCore(
   );
 }
 
-async function move(store: BoardStore, now: () => Date, taskId: string, to: Status, reason: string): Promise<Task> {
+async function move(store: BoardStore, now: () => Date, taskId: string, to: Status, reason: string, by?: OwnerBy): Promise<Task> {
   const task = await store.getTask(taskId);
   assertMove(task.status, to, 'you');
   // Cancel is terminal: it frees the claim, so the slot is free and the old claimant's next call fails with ClaimError.
-  return ownerUpdate(store, now, task, to === 'cancelled' ? { status: to, claimBy: null, claimUntil: null } : { status: to }, reason);
+  return ownerUpdate(store, now, task, to === 'cancelled' ? { status: to, claimBy: null, claimUntil: null } : { status: to }, reason, by);
 }
 
-export function markReady(store: BoardStore, now: () => Date, taskId: string): Promise<Task> {
-  return move(store, now, taskId, 'ready', 'marked ready');
+export function markReady(store: BoardStore, now: () => Date, taskId: string, by?: OwnerBy): Promise<Task> {
+  return move(store, now, taskId, 'ready', 'marked ready', by);
 }
 
-export function cancelTask(store: BoardStore, now: () => Date, taskId: string): Promise<Task> {
-  return move(store, now, taskId, 'cancelled', 'cancelled');
+export function cancelTask(store: BoardStore, now: () => Date, taskId: string, by?: OwnerBy): Promise<Task> {
+  return move(store, now, taskId, 'cancelled', 'cancelled', by);
 }
 
 /**
  * The engine's sync resumes the task once it sees the answer. `seenVersion` is the task version the owner saw the
  * question at: if the task moved on since (another question, a restart), the answer is refused, not applied to it.
  */
-export async function answerTask(store: BoardStore, now: () => Date, taskId: string, text: string, seenVersion: number): Promise<Task> {
+export async function answerTask(store: BoardStore, now: () => Date, taskId: string, text: string, seenVersion: number, by?: OwnerBy): Promise<Task> {
   if (!nonBlank(text)) invalid('answer must not be blank');
   const task = await store.getTask(taskId);
   if (task.version !== seenVersion) throw new VersionConflictError(taskId, seenVersion, task.version);
   if (task.status !== 'blocked') throw new OwnerActionError('not-blocked', `${taskId} is not blocked`);
-  return ownerUpdate(store, now, task, { answer: text }, 'answered');
+  return ownerUpdate(store, now, task, { answer: text }, 'answered', by);
 }
 
 /**
@@ -224,7 +238,7 @@ export async function answerTask(store: BoardStore, now: () => Date, taskId: str
  */
 export async function decideGate(
   store: BoardStore, now: () => Date, taskId: string, gate: Gate, decision: 'approve' | 'changes', seenDocVersion: number, comment: string,
-  approvalId?: string,
+  approvalId?: string, by?: OwnerBy,
 ): Promise<Approval> {
   if (!(GATES as readonly string[]).includes(gate)) invalid(`gate must be one of ${GATES.join(', ')}`);
   if (decision !== 'approve' && decision !== 'changes') invalid('decision must be approve or changes');
@@ -237,9 +251,9 @@ export async function decideGate(
   const doc = await store.currentDoc(taskId, kind);
   if (!doc) return invalid(`no current ${kind} doc for ${taskId}`);
   if (doc.version !== seenDocVersion) throw new StaleDocError(taskId, kind, seenDocVersion, doc.version);
-  const reason = comment.trim() || (decision === 'approve' ? 'approved' : 'changes requested');
+  const reason = by?.reason ?? (comment.trim() || (decision === 'approve' ? 'approved' : 'changes requested'));
   const events: FactoryEvent[] = [{
-    taskId, factoryId: task.factoryId, actor: OWNER_ACTOR, action: 'set', field: 'approval', from: null, to: `${gate}:${decision}@v${doc.version}`, reason, at: now().toISOString(),
+    taskId, factoryId: task.factoryId, actor: by?.actor ?? OWNER_ACTOR, action: 'set', field: 'approval', from: null, to: `${gate}:${decision}@v${doc.version}`, reason, at: now().toISOString(),
   }];
   const approval = await store.addApproval({ approvalId: approvalId ?? randomUUID(), taskId, gate, docVersion: doc.version, decision, comment });
   await writeEvents(store, events);
@@ -247,7 +261,7 @@ export async function decideGate(
 }
 
 /** Edits the task's definition while it is in the inbox or ready. A write since `expectedVersion` is a VersionConflictError. */
-export async function editTask(store: BoardStore, now: () => Date, taskId: string, expectedVersion: number, patch: TaskEdit): Promise<Task> {
+export async function editTask(store: BoardStore, now: () => Date, taskId: string, expectedVersion: number, patch: TaskEdit, by?: OwnerBy): Promise<Task> {
   if (!isObject(patch)) invalid('edit must be an object');
   for (const [key, value] of Object.entries(patch)) {
     if (!(EDITABLE_FIELDS as readonly string[]).includes(key)) invalid(`${key} cannot be edited`);
@@ -270,7 +284,7 @@ export async function editTask(store: BoardStore, now: () => Date, taskId: strin
   if (clean.dependsOn !== undefined) clean.dependsOn = await checkDeps(store, task.factoryId, task.taskId, clean.dependsOn, task.dependsOn);
   if (!EDITABLE_FIELDS.some((f) => f in clean && canon(clean[f]) !== canon(task[f]))) return task;
   if (clean.repo !== undefined && clean.repo !== task.repo) await requireRepo(store, task.factoryId, clean.repo);
-  return ownerUpdate(store, now, task, clean, 'edited');
+  return ownerUpdate(store, now, task, clean, 'edited', by);
 }
 
 /** A repo scope's patch: null (for a key, or for one gate) means inherit the factory's value. */
