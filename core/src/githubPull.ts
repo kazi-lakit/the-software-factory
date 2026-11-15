@@ -127,10 +127,18 @@ function planUnlinked(i: PullInput, it: ProjectItem, out: Out): void {
 }
 
 /** Rules 1 and 2: a close or a label removal, which end the task's planning when they fire. */
-function closeOrLabel(i: PullInput, v: PullTaskView, it: ProjectItem, base: { taskId: string; version: number; issue: IssueRef }): PullAction | 'skip' | null {
+function closeOrLabel(i: PullInput, v: PullTaskView, it: ProjectItem, base: { taskId: string; version: number; issue: IssueRef }, out: Out): PullAction | 'skip' | null {
   const { task, link: { pushed: p } } = v;
   const { label } = i.settings;
-  if (it.issue.state === 'closed' && !p.closed) return v.prState === 'merged' ? 'skip' : { kind: 'cancel', ...base, why: 'issue closed' };
+  if (it.issue.state === 'closed' && !p.closed) {
+    if (v.prState === 'merged') return 'skip';
+    // A PR whose state could not be read may have merged and closed the issue (Closes #n): never cancel then.
+    if (task.prUrl && v.prState === undefined) {
+      out.notApplied.push({ taskId: task.taskId, issue: issueName(base.issue), change: 'issue closed', reason: 'PR state unknown' });
+      return 'skip';
+    }
+    return { kind: 'cancel', ...base, why: 'issue closed' };
+  }
   if (label !== '' && !hasLabel(it, label) && p.label === label) {
     if (task.status === 'inbox' || task.status === 'ready') return { kind: 'cancel', ...base, why: 'label removed' };
     return task.status === 'blocked' ? 'skip' : { kind: 'block', ...base, reason: 'label removed' };
@@ -234,7 +242,7 @@ const recorded = (v: PullTaskView, a: PullAction): boolean =>
 function planLinked(i: PullInput, v: PullTaskView, it: ProjectItem, out: Out): void {
   if (closedTask(v.task)) return;
   const base = { taskId: v.task.taskId, version: v.task.version, issue: refOf(it) };
-  const ended = closeOrLabel(i, v, it, base);
+  const ended = closeOrLabel(i, v, it, base, out);
   if (ended === 'skip') return;
   if (ended) {
     out.actions.push(ended);

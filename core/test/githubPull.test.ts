@@ -148,6 +148,13 @@ describe('planPull: close and label', () => {
     const plan = planPull(input({ tasks: [view(t, { prState: 'merged' })], items: [item({ state: 'closed', status: 'In review' })] }));
     expect(plan).toEqual({ factoryId: 'f', actions: [], notApplied: [] });
   });
+  it('a closed issue whose PR state is unknown is not cancelled', () => {
+    const t = task({ status: 'pr_open', prUrl: 'https://github.com/o/app/pull/9' });
+    const plan = planPull(input({ tasks: [view(t)], items: [item({ state: 'closed', status: 'In review' })] }));
+    expect(plan).toEqual({
+      factoryId: 'f', actions: [], notApplied: [{ taskId: 'T-1', issue: 'o/app#7', change: 'issue closed', reason: 'PR state unknown' }],
+    });
+  });
   it('a closed issue the factory closed and a done task are no change', () => {
     const done = task({ status: 'done' });
     expect(planPull(input({ tasks: [view(done)], items: [item({ state: 'closed', status: 'Todo' })] })).actions).toEqual([]);
