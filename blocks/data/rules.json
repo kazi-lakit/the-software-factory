@@ -281,6 +281,62 @@
       "fieldNames": []
     },
     {
+      "schemaName": "FactoryGitHubLink",
+      "operation": 0,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryGitHubLink",
+      "operation": 1,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryGitHubLink",
+      "operation": 2,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactoryGitHubLink",
+      "operation": 3,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactorySyncRequest",
+      "operation": 0,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactorySyncRequest",
+      "operation": 1,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactorySyncRequest",
+      "operation": 2,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
+      "schemaName": "FactorySyncRequest",
+      "operation": 3,
+      "policyType": 0,
+      "accessLevel": 3,
+      "fieldNames": []
+    },
+    {
       "schemaName": "FactoryTask",
       "operation": 2,
       "policyType": 1,
@@ -1251,6 +1307,231 @@
       "schemaName": "FactoryHealth",
       "policyName": "factory-health-edit-factory-core",
       "policyDescription": "factory-core edits FactoryHealth rows.",
+      "policyType": 0,
+      "operation": 2,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-core"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryGitHubLink",
+      "policyName": "factory-git-hub-link-read-factory-owner",
+      "policyDescription": "factory-owner reads FactoryGitHubLink rows.",
+      "policyType": 0,
+      "operation": 0,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-owner"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryGitHubLink",
+      "policyName": "factory-git-hub-link-read-factory-core",
+      "policyDescription": "factory-core reads FactoryGitHubLink rows.",
+      "policyType": 0,
+      "operation": 0,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-core"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryGitHubLink",
+      "policyName": "factory-git-hub-link-insert-factory-core",
+      "policyDescription": "factory-core inserts FactoryGitHubLink rows.",
+      "policyType": 0,
+      "operation": 1,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-core"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactoryGitHubLink",
+      "policyName": "factory-git-hub-link-edit-factory-core",
+      "policyDescription": "factory-core edits FactoryGitHubLink rows.",
+      "policyType": 0,
+      "operation": 2,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-core"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactorySyncRequest",
+      "policyName": "factory-sync-request-read-factory-owner",
+      "policyDescription": "factory-owner reads FactorySyncRequest rows.",
+      "policyType": 0,
+      "operation": 0,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-owner"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactorySyncRequest",
+      "policyName": "factory-sync-request-read-factory-core",
+      "policyDescription": "factory-core reads FactorySyncRequest rows.",
+      "policyType": 0,
+      "operation": 0,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-core"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactorySyncRequest",
+      "policyName": "factory-sync-request-insert-factory-owner",
+      "policyDescription": "factory-owner inserts FactorySyncRequest rows.",
+      "policyType": 0,
+      "operation": 1,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-owner"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactorySyncRequest",
+      "policyName": "factory-sync-request-edit-factory-owner",
+      "policyDescription": "factory-owner edits FactorySyncRequest rows.",
+      "policyType": 0,
+      "operation": 2,
+      "fieldNames": [],
+      "ruleGroup": {
+        "logicalOperator": 0,
+        "nestedGroups": [],
+        "rules": [
+          {
+            "leftSource": 0,
+            "leftOperand": "Roles",
+            "operator": 6,
+            "rightSource": 2,
+            "staticValue": [
+              "factory-owner"
+            ]
+          }
+        ]
+      },
+      "priority": 0,
+      "isAllowPolicy": true
+    },
+    {
+      "schemaName": "FactorySyncRequest",
+      "policyName": "factory-sync-request-edit-factory-core",
+      "policyDescription": "factory-core edits FactorySyncRequest rows.",
       "policyType": 0,
       "operation": 2,
       "fieldNames": [],

@@ -1,0 +1,34 @@
+{
+  "fields": [
+    {
+      "name": "taskId",
+      "type": "String",
+      "isArray": false,
+      "description": "Unique id of the task the link belongs to."
+    },
+    {
+      "name": "factoryId",
+      "type": "String",
+      "isArray": false,
+      "description": "Id of the factory the task belongs to."
+    },
+    {
+      "name": "json",
+      "type": "String",
+      "isArray": false,
+      "description": "JSON text of the GitHub link (issue, PR and sync state)."
+    },
+    {
+      "name": "version",
+      "type": "Int",
+      "isArray": false,
+      "description": "Row version; bumped on every update."
+    },
+    {
+      "name": "writeId",
+      "type": "String",
+      "isArray": false,
+      "description": "Id of the write that produced this version."
+    }
+  ]
+}
