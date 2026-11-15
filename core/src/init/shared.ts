@@ -45,8 +45,9 @@ export async function takenFactoryIds(d: InitDeps): Promise<string[]> {
   return [...new Set([...folders, ...defs])];
 }
 
-/** Step 1: the gh login (gh auth login when there is none, a pick when there are several) with the project scope. */
-export async function chooseLogin(d: InitDeps): Promise<string> {
+/** Step 1: the gh login (gh auth login when there is none, a pick when there are several) with the project scope.
+ * `preset`, when it is one of the logins, is taken without the question. */
+export async function chooseLogin(d: InitDeps, preset?: string): Promise<string> {
   let logins = await d.gh.logins();
   if (logins.length === 0) {
     d.prompt.say('gh has no GitHub login; starting gh auth login.');
@@ -54,7 +55,7 @@ export async function chooseLogin(d: InitDeps): Promise<string> {
     logins = await d.gh.logins();
     if (logins.length === 0) throw new InitStopError('Still no GitHub login. Run: gh auth login --hostname github.com, then ./factory init');
   }
-  const login = logins.length === 1
+  const login = preset && logins.includes(preset) ? preset : logins.length === 1
     ? logins[0]!
     : await d.prompt.choose('Which GitHub login should the factory use?', logins.map((l) => ({ value: l, label: l })));
   const hasScope = async () => (await (d.freshBoardFor ?? d.boardFor)(login).tokenScopes())?.includes('project') === true;
@@ -127,7 +128,7 @@ async function readRepoLines(d: InitDeps, setup: GitHubSetup, login: string): Pr
 }
 
 /** Asks a base branch until it is not main and exists on GitHub. */
-async function askBase(d: InitDeps, setup: GitHubSetup, ref: RepoRef, question: string, def?: string): Promise<string> {
+export async function askBase(d: InitDeps, setup: GitHubSetup, ref: RepoRef, question: string, def?: string): Promise<string> {
   for (;;) {
     const b = await d.prompt.ask(question, {
       ...(def ? { default: def } : {}),
@@ -161,7 +162,7 @@ async function detected(d: InitDeps, setup: GitHubSetup, r: FoundRepo, id: strin
   return checks;
 }
 
-const checkLine = (c: Check): string => `${c.name}: ${c.run}${c.cwd !== '.' ? ` (in ${c.cwd})` : ''}${c.needs ? ` [needs ${c.needs}]` : ''}`;
+export const checkLine = (c: Check): string => `${c.name}: ${c.run}${c.cwd !== '.' ? ` (in ${c.cwd})` : ''}${c.needs ? ` [needs ${c.needs}]` : ''}`;
 function showChecks(d: InitDeps, checks: Check[]): void {
   checks.forEach((c, i) => d.prompt.say(`  ${i + 1}. ${checkLine(c)}`));
 }
@@ -181,7 +182,7 @@ async function askCheck(d: InitDeps, others: Check[], from?: Check): Promise<Che
 }
 
 /** The custom checks menu: keep, add, edit or remove, starting from the detected list; keep validates the list. */
-async function editChecks(d: InitDeps, id: string, start: Check[]): Promise<Check[]> {
+export async function editChecks(d: InitDeps, id: string, start: Check[]): Promise<Check[]> {
   let checks = [...start];
   for (;;) {
     d.prompt.say(checks.length ? `Checks for ${id}:` : `Checks for ${id}: none`);

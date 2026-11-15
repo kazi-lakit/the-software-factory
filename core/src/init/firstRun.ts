@@ -1,6 +1,7 @@
 // `factory init` when there is no factory yet (design section 7.2): questions first, then one write, then GitHub setup and doctor.
 import { join } from 'node:path';
 import { PROTECTED_BRANCHES } from '../branches.js';
+import { DEFAULT_SETTINGS } from '../defaults.js';
 import { AGENT_MODELS, AGENT_STEPS, type AgentModel, type AgentModels } from '../factories.js';
 import { newFactoryFile, saveFactoryFile, type FactoryFile } from '../factoryFile.js';
 import { DEFAULT_LABEL, DEFAULT_STATUS_MAP, STANDARD_STATUS_MAP, validateGitHubSettings, type ProjectRef } from '../githubConfig.js';
@@ -17,7 +18,7 @@ export const CANCELLED = 'setup cancelled; nothing was written';
 const NEW_PROJECT = '\u0000new';
 const NEW_COLUMN = '\u0000column';
 
-type ProjectChoice = { kind: 'existing'; ref: ProjectRef } | { kind: 'new'; owner: string; title: string };
+export type ProjectChoice = { kind: 'existing'; ref: ProjectRef } | { kind: 'new'; owner: string; title: string };
 
 /** Step 3: one of the login's or its orgs' Projects, or a new one (created only at the write). */
 async function askProject(d: InitDeps, login: string, name: string): Promise<ProjectChoice> {
@@ -37,7 +38,7 @@ async function askProject(d: InitDeps, login: string, name: string): Promise<Pro
   return { kind: 'new', owner, title };
 }
 
-function approversProblem(v: string): string | null {
+export function approversProblem(v: string): string | null {
   const list = v.split(',').map((x) => x.trim()).filter(Boolean);
   if (list.length === 0) return 'Enter at least one GitHub login';
   const bad = list.find((x) => !GH_USER_PATTERN.test(x));
@@ -73,7 +74,7 @@ async function askEachStatus(d: InitDeps, login: string, columns: string[]): Pro
 }
 
 /** Step 5: null keeps the default map out of the file. */
-async function askStatusMap(d: InitDeps, login: string, project: ProjectChoice): Promise<Record<Status, string> | null> {
+export async function askStatusMap(d: InitDeps, login: string, project: ProjectChoice): Promise<Record<Status, string> | null> {
   if (project.kind === 'new') return { ...STANDARD_STATUS_MAP };
   const info = await d.boardFor(login).project(project.ref);
   const columns = info?.options.map((o) => o.name) ?? [];
@@ -82,35 +83,42 @@ async function askStatusMap(d: InitDeps, login: string, project: ProjectChoice):
   return askEachStatus(d, login, columns);
 }
 
-async function askGates(d: InitDeps): Promise<Record<Gate, boolean>> {
-  const spec = await d.prompt.confirm('Should a spec wait for your approval?', true);
-  const plan = await d.prompt.confirm('Should a plan wait for your approval?', false);
-  const pr = await d.prompt.confirm('Should a PR wait for your approval before merging?', true);
+/** Step 6; `current` gives the defaults (the first run: spec on, plan off, PR on). */
+export async function askGates(d: InitDeps, current: Record<Gate, boolean> = DEFAULT_SETTINGS.gates): Promise<Record<Gate, boolean>> {
+  const spec = await d.prompt.confirm('Should a spec wait for your approval?', current.spec);
+  const plan = await d.prompt.confirm('Should a plan wait for your approval?', current.plan);
+  const pr = await d.prompt.confirm('Should a PR wait for your approval before merging?', current.pr);
   return { spec, plan, pr };
 }
 
-/** Step 7: the session model, or one of opus/sonnet/haiku/fable per stage (session leaves the stage out). */
-async function askModels(d: InitDeps): Promise<AgentModels> {
+/**
+ * Step 7: the session model, or one of opus/sonnet/haiku/fable per stage (session leaves the stage out). `current`
+ * gives the defaults.
+ */
+export async function askModels(d: InitDeps, current: AgentModels = {}): Promise<AgentModels> {
   const mode = await d.prompt.choose('Models', [
     { value: 'session', label: 'Session model for every stage' }, { value: 'per', label: 'Choose per stage' },
-  ]);
+  ], Object.keys(current).length > 0 ? { default: 'per' } : {});
   const models: AgentModels = {};
   if (mode === 'session') return models;
   for (const step of AGENT_STEPS) {
     const m = await d.prompt.choose(`Model for ${step}`, [
       { value: 'session', label: 'session default' }, ...AGENT_MODELS.map((x) => ({ value: x as string, label: x })),
-    ], { default: 'session' });
+    ], { default: current[step] ?? 'session' });
     if (m !== 'session') models[step] = m as AgentModel;
   }
   return models;
 }
 
-/** Runs the first-run wizard: 0 ready, 1 stopped with failures, 130 cancelled. */
-export async function firstRun(d: InitDeps): Promise<number> {
+/**
+ * Runs the first-run wizard: 0 ready, 1 stopped with failures, 130 cancelled. `login` (the one login other factories
+ * already use) skips the login question.
+ */
+export async function firstRun(d: InitDeps, o: { login?: string } = {}): Promise<number> {
   const say = (t: string) => d.prompt.say(t);
   let written = false;
   try {
-    const login = await chooseLogin(d);
+    const login = await chooseLogin(d, o.login);
     const taken = await takenFactoryIds(d);
     const name = await d.prompt.ask('Factory name', { validate: (v) => (v ? null : 'Enter a name') });
     const id = await d.prompt.ask('Factory id', { default: idFromName(name, taken), validate: (v) => idProblem(v, taken) });
