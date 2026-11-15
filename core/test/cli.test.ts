@@ -7,15 +7,17 @@ import { defFixture, repoFixture, seed, seedBlocksFactories } from './factoryFix
 import type { Exec } from '../src/checks.js';
 import type { ExecFile } from '../src/secrets.js';
 import { buildImport } from '../src/migrate.js';
-import { run, type WireOptions } from '../src/cli.js';
+import { run, type CliDeps, type WireOptions } from '../src/cli.js';
 import { Engine } from '../src/engine.js';
 import { FactoryConfig } from '../src/factories.js';
 import type { GitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
-import { FakeGitHubBoard } from '../src/githubBoard.js';
+import { FakeGitHubBoard, type GitHubBoard } from '../src/githubBoard.js';
 import { BlocksStore } from '../src/blocks/store.js';
 import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
 import { MemoryStore } from '../src/store.js';
+import { emptyPushed } from '../src/githubLink.js';
+import { GhLoginMissingError } from '../src/secrets.js';
 import type { RepoId, Task } from '../src/types.js';
 
 const ROOT = join(tmpdir(), 'factory-cli-test');
@@ -36,7 +38,7 @@ const fakeGh = (logins: string[] = ['gh-blocks'], gh: { code?: number; stdout?: 
   return { code: gh.code ?? 0, stdout: gh.stdout ?? ghStatusJson(logins), stderr: '' };
 };
 
-function setup(factories = seed(), logins?: string[], ghCalls?: string[][], gh?: { code?: number; stdout?: string }, files?: string[], board?: FakeGitHubBoard) {
+function setup(factories = seed(), logins?: string[], ghCalls?: string[][], gh?: { code?: number; stdout?: string }, files?: string[], board?: GitHubBoard) {
   const store = new MemoryStore({ factories });
   const exec: Exec = async () => ({ code: 0, output: '' });
   const engine = new Engine({
@@ -56,8 +58,9 @@ function setup(factories = seed(), logins?: string[], ghCalls?: string[][], gh?:
     files?.push(file);
     return fake(file, args, stdin);
   };
-  const go = (...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine, { exec: exec2, ...(board ? { githubBoardFor: () => board } : {}) });
-  return { store, out, err, go, wired };
+  const goWith = (extra: CliDeps, ...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine, { exec: exec2, ...(board ? { githubBoardFor: () => board } : {}), ...extra });
+  const go = (...argv: string[]) => goWith({}, ...argv);
+  return { store, out, err, go, goWith, wired };
 }
 
 const put = async (store: MemoryStore, patch: Partial<Task>) => {
@@ -677,5 +680,143 @@ describe('factory doctor', () => {
     const { err, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, board([]));
     expect(await go('doctor', '--factory', 'nope')).toBe(1);
     expect(err).toEqual(['error: unknown factory: nope']);
+  });
+});
+
+describe('GitHub pushing from the CLI', () => {
+  const map = { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress',
+    plan_review: 'In progress', build: 'In progress', verify: 'In progress', review: 'In progress',
+    pr_open: 'In review', done: 'Merged', blocked: 'In progress', cancelled: 'Backlog' } as never;
+  const github = { mode: 'github-only' as const, project: { owner: 'o', number: 3 }, label: 'factory', approvers: ['gh-blocks'], statusMap: map };
+  const withGithub = () => ({ defs: [defFixture('blocks', { github })], repos: [repoFixture('blocks', 'app', { remote: 'git@github.com:o/app.git' })] });
+  const newBoard = () => {
+    const b = new FakeGitHubBoard();
+    b.addProject({ owner: 'o', number: 3 }, ['Backlog', 'Todo', 'In progress', 'In review', 'Merged']);
+    return b;
+  };
+  const NEW = ['new', '--repo', 'app', '--title', 'Do it', '--description', 'd'];
+  const direct = (store: MemoryStore) => store.createTask({ factoryId: 'blocks', title: 'Do it', description: 'd', repo: 'app' });
+
+  test('new pushes at once and prints the issue', async () => {
+    const board = newBoard();
+    const { out, err, go } = setup(withGithub(), [], undefined, undefined, undefined, board);
+    expect(await go(...NEW)).toBe(0);
+    expect(out).toEqual(['T-1 created in inbox', 'T-1 issue o/app#1']);
+    expect(err).toEqual([]);
+    expect(board.issue({ owner: 'o', repo: 'app' }, 1).title).toBe('Do it');
+  });
+
+  test('new --json prints only the task JSON', async () => {
+    const { out, go } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
+    expect(await go(...NEW, '--json')).toBe(0);
+    expect(JSON.parse(out.join('\n')).taskId).toBe('T-1');
+  });
+
+  test('new keeps the task when the push fails', async () => {
+    const board = newBoard();
+    board.project = async () => { throw new GhLoginMissingError('kazi-lakit'); };
+    const { err, store, go } = setup(withGithub(), [], undefined, undefined, undefined, board);
+    expect(await go(...NEW)).toBe(0);
+    expect((await store.getTask('T-1')).title).toBe('Do it');
+    expect(err.join('\n')).toContain('github: T-1 not pushed (');
+    expect(err.join('\n')).toContain('factory sync retries');
+  });
+
+  test('new on a factory without github prints no issue line and makes no board call', async () => {
+    const board = newBoard();
+    let calls = 0;
+    const counting = new Proxy(board, { get: (t, p) => { if (typeof (t as never)[p] === 'function') calls++; return Reflect.get(t, p).bind?.(t) ?? Reflect.get(t, p); } });
+    const { out, err, go } = setup(seed(), [], undefined, undefined, undefined, counting);
+    expect(await go('new', '--repo', 'data', '--title', 'x', '--description', 'd')).toBe(0);
+    expect(out).toEqual(['T-1 created in inbox']);
+    expect(err).toEqual([]);
+    expect(calls).toBe(0);
+  });
+
+  test('dev cancel pushes the close', async () => {
+    const board = newBoard();
+    const { go } = setup(withGithub(), [], undefined, undefined, undefined, board);
+    await go(...NEW);
+    expect(await go('dev', 'cancel', 'T-1')).toBe(0);
+    expect(board.issue({ owner: 'o', repo: 'app' }, 1)).toMatchObject({ state: 'closed', stateReason: 'not_planned' });
+  });
+
+  test('no pushing on the blocks store', async () => {
+    const board = newBoard();
+    const { err, go } = setup(withGithub(), [], undefined, undefined, undefined, board);
+    expect(await go('--store', 'blocks', 'new', '--repo', 'app', '--title', 'x', '--description', 'd')).toBe(0);
+    expect(err).toEqual([]);
+    expect(() => board.issue({ owner: 'o', repo: 'app' }, 1)).toThrow();
+  });
+
+  test('sync pushes waiting tasks and summarises', async () => {
+    const { out, store, go } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
+    await direct(store);
+    expect(await go('sync')).toBe(0);
+    expect(out).toEqual(['T-1 o/app#1: created, status Backlog', 'pushed 1, failed 0']);
+  });
+
+  test('sync exits 1 when a task fails', async () => {
+    const board = newBoard();
+    board.project = async () => { throw new Error('boom'); };
+    const { out, store, go } = setup(withGithub(), [], undefined, undefined, undefined, board);
+    await direct(store);
+    expect(await go('sync')).toBe(1);
+    expect(out).toContain('FAIL T-1: boom');
+    expect(out).toContain('pushed 0, failed 1');
+  });
+
+  test('sync with no github-only factory', async () => {
+    const { out, go } = setup(seed(), [], undefined, undefined, undefined, newBoard());
+    expect(await go('sync')).toBe(0);
+    expect(out).toEqual(['no factory uses GitHub-only mode']);
+  });
+
+  test('sync --watch runs passes until watchTicks', async () => {
+    const { out, store, goWith } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
+    const slept: number[] = [];
+    const before = process.listenerCount('SIGINT');
+    const code = await goWith({ watchTicks: 2, sleep: async (ms) => { slept.push(ms); await direct(store); } }, 'sync', '--watch');
+    expect(code).toBe(0);
+    expect(slept).toEqual([5000]);
+    expect(out).toEqual(['T-1 o/app#1: created, status Backlog']);
+    expect(process.listenerCount('SIGINT')).toBe(before);
+    expect(process.listenerCount('SIGTERM')).toBe(process.listenerCount('SIGTERM'));
+  });
+
+  test('sync --watch survives a failing pass', async () => {
+    const { out, store, goWith } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
+    const orig = store.listFactoryDefs.bind(store);
+    let n = 0;
+    store.listFactoryDefs = async () => { if (n++ === 0) throw new Error('locked\nmore'); return orig(); };
+    await direct(store);
+    expect(await goWith({ watchTicks: 2, sleep: async () => {} }, 'sync', '--watch', '--interval', '1')).toBe(0);
+    expect(out[0]).toBe('error: locked');
+    expect(out).toContain('T-1 o/app#1: created, status Backlog');
+  });
+
+  test('sync --interval 0 is refused', async () => {
+    const { go } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
+    expect(await go('sync', '--interval', '0')).toBe(1);
+  });
+
+  test('sync on the blocks store is refused', async () => {
+    const { err, go } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
+    expect(await go('--store', 'blocks', 'sync')).toBe(1);
+    expect(err).toEqual(['error: factory sync needs --store file until connected mode is built']);
+  });
+
+  test('status lists push errors', async () => {
+    const { out, store, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, newBoard());
+    await direct(store);
+    await store.saveGitHubLink(null, {
+      taskId: 'T-1', factoryId: 'blocks', repo: 'o/app', issueNumber: null, issueNodeId: null, project: null, itemId: null,
+      pushed: emptyPushed(), error: { message: 'boom', attempts: 2, nextAttemptAt: '2026-06-01T00:00:10.000Z' }, lease: null, version: 0,
+    });
+    expect(await go('status')).toBe(0);
+    expect(out).toContain('github: T-1 push failing (boom), attempt 2, next try 2026-06-01T00:00:10.000Z');
+    out.length = 0;
+    expect(await go('status', '--json')).toBe(0);
+    expect(JSON.parse(out.join('\n')).githubErrors[0]).toEqual({ taskId: 'T-1', message: 'boom', attempts: 2, nextAttemptAt: '2026-06-01T00:00:10.000Z' });
   });
 });

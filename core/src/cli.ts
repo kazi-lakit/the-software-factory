@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { Command, CommanderError } from 'commander';
 import { parseAgentReply } from './agentReply.js';
@@ -14,6 +14,7 @@ import { ForbiddenError, OwnerOnlyError } from './boardStore.js';
 import type { BoardStore } from './store.js';
 import type { AgentStep, Gate, Mode, RepoId } from './types.js';
 import { doctor } from './doctor.js';
+import { GitHubPusher, type PushResult } from './githubPusher.js';
 import type { GitHubBoardFor } from './githubBoard.js';
 import { findRoot, lazyGitHubBoardFor, wire, type WireOptions } from './wire.js';
 
@@ -76,7 +77,14 @@ export interface CliDeps {
   home?: string;
   /** GitHub client per gh login (`factory doctor`). Default: the real one over the gh logins. Tests pass a fake. */
   githubBoardFor?: GitHubBoardFor;
+  /** Waits between `factory sync --watch` passes. Default: a real timer. Tests pass a fake. */
+  sleep?: (ms: number) => Promise<void>;
+  /** `factory sync --watch` stops after this many passes. Default: run until SIGINT or SIGTERM. Tests set it. */
+  watchTicks?: number;
 }
+
+const firstLine = (e: unknown): string => (e instanceof Error ? e.message : String(e)).split('\n')[0]!;
+const realSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) => wire(o), deps: CliDeps = {}): Promise<number> {
   const exec = deps.exec ?? realExecFile;
@@ -96,6 +104,21 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     return makeEngine({ root: findRoot(), mode, store: kind, log: io.err });
   };
 
+  const boardFor = deps.githubBoardFor ?? lazyGitHubBoardFor(undefined, undefined, exec);
+  const pusherFor = (store: BoardStore) => new GitHubPusher({ store, boardFor, now: () => new Date(), claimant: `cli:${hostname()}` });
+  /** Pushes the touched task to GitHub (file store only). Catches everything: prints one stderr line on failure, never changes the exit code. */
+  const pushAfter = async (cmd: Command, store: BoardStore, taskId: string): Promise<PushResult | null> => {
+    if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') return null;
+    try {
+      const r = await pusherFor(store).pushTask(taskId);
+      if (r.error !== null) io.err(`github: ${taskId} not pushed (${r.error}); factory sync retries`);
+      return r;
+    } catch (e) {
+      io.err(`github: ${taskId} not pushed (${firstLine(e)}); factory sync retries`);
+      return null;
+    }
+  };
+
   const depends = (v?: string) => (v === undefined ? {} : { dependsOn: v.split(',').map((x) => x.trim()).filter(Boolean) });
   const printJson = (v: unknown) => io.out(JSON.stringify(v, null, 2));
 
@@ -107,7 +130,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .option('--peek', 'only check: print "work <task>" and exit 0 if there is work, else the reason and exit 1; claims nothing')
     .action(async (task: string | undefined, o: { json?: boolean; peek?: boolean; factory?: string[] }, cmd: Command) => {
       if (o.peek && o.json) throw new CliExit('--peek prints one line; leave out --json', 1);
-      const { engine } = await open(cmd);
+      const { engine, store } = await open(cmd);
       const outcome = await engine.next(task, factoryFilter(o.factory), { peek: o.peek === true }).catch((e: unknown) => {
         throw e instanceof UnknownFactoryError ? new CliExit(e.message, 1, true) : e;
       });
@@ -122,6 +145,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
         return;
       }
       const { ticket } = outcome;
+      await pushAfter(cmd, store, ticket.taskId);
       if (o.json) return printJson(ticket);
       io.out(`${ticket.taskId} ${ticket.step} (worktree ${ticket.worktree})`);
     });
@@ -134,11 +158,12 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .action(async (task: string, step: string, o: { result?: string; reply?: string }, cmd: Command) => {
       const agentStep = choice<AgentStep>('step', step, STEPS);
       if ((o.result === undefined) === (o.reply === undefined)) throw new CliExit('pass exactly one of --result or --reply', 1);
-      const { engine } = await open(cmd);
+      const { engine, store } = await open(cmd);
       const updated =
         o.reply !== undefined
           ? await engine.completeWith(task, agentStep, parseAgentReply(readOrUndefined(o.reply), agentStep))
           : await engine.complete(task, agentStep, readOrUndefined(o.result!));
+      await pushAfter(cmd, store, updated.taskId);
       io.out(`${updated.taskId} ${updated.status}`);
     });
 
@@ -146,8 +171,9 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .command('check <task>')
     .description('run the repo checks')
     .action(async (task: string, _o: object, cmd: Command) => {
-      const { engine } = await open(cmd);
+      const { engine, store } = await open(cmd);
       const updated = await engine.check(task);
+      await pushAfter(cmd, store, updated.taskId);
       io.out(`${updated.taskId} ${updated.status}`);
     });
 
@@ -155,8 +181,9 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .command('ship <task>')
     .description('push the branch and open (or merge) the PR')
     .action(async (task: string, _o: object, cmd: Command) => {
-      const { engine } = await open(cmd);
+      const { engine, store } = await open(cmd);
       const updated = await engine.ship(task);
+      await pushAfter(cmd, store, updated.taskId);
       io.out(`${updated.taskId} ${updated.status}${updated.prUrl ? ` ${updated.prUrl}` : ''}`);
     });
 
@@ -193,7 +220,11 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
         }
       }
       for (const f of s.factories) f.ghLoggedIn = loggedIn.get(f.factoryId) ?? f.ghLoggedIn;
-      if (o.json) return printJson(s);
+      const wanted = factoryFilter(o.factory);
+      const githubErrors = (await store.listGitHubLinks())
+        .filter((l) => l.error !== null && (!wanted || wanted.includes(l.factoryId)))
+        .map((l) => ({ taskId: l.taskId, message: l.error!.message, attempts: l.error!.attempts, nextAttemptAt: l.error!.nextAttemptAt }));
+      if (o.json) return printJson({ ...s, githubErrors });
       io.out(`paused: ${s.paused}`);
       for (const f of s.factories) {
         const counts = Object.entries(f.counts).filter(([, n]) => n > 0).map(([status, n]) => `${status}=${n}`);
@@ -205,6 +236,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
         const reason = t.blockedReason ? ` (${t.blockedReason})` : '';
         io.out(`blocked: ${t.taskId} at ${t.stage ?? '-'}${reason}, question: ${t.question ?? '-'}`);
       }
+      for (const e of githubErrors) io.out(`github: ${e.taskId} push failing (${e.message}), attempt ${e.attempts}, next try ${e.nextAttemptAt}`);
     });
 
   program
@@ -236,8 +268,10 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       const t = await owner.createTaskAsCore(store, () => new Date(), {
         factoryId: await pickFactory(store, o.factory), title: o.title, description, repo, ...(o.base ? { baseBranch: o.base } : {}), ready: o.ready === true, ...depends(o.dependsOn),
       });
+      const pushed = await pushAfter(cmd, store, t.taskId);
       if (o.json) return printJson(t);
       io.out(`${t.taskId} created in ${t.status}`);
+      if (pushed?.issue && pushed.done.includes('created')) io.out(`${t.taskId} issue ${pushed.issue}`);
     });
 
   program
@@ -312,6 +346,56 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       }
     });
 
+  program
+    .command('sync')
+    .description('push every task of the GitHub-only factories to GitHub (file store only; exit 1 when a task fails)')
+    .option('--factory <id>', 'only this factory (repeat for several)', collect, undefined)
+    .option('--watch', 'keep pushing until Ctrl-C')
+    .option('--interval <seconds>', 'seconds between passes with --watch (1 to 3600)', '5')
+    .action(async (o: { factory?: string[]; watch?: boolean; interval: string }, cmd: Command) => {
+      const only = factoryFilter(o.factory);
+      if (!/^\d+$/.test(o.interval) || Number(o.interval) < 1 || Number(o.interval) > 3600) throw new CliExit('--interval must be a whole number from 1 to 3600', 1);
+      const interval = Number(o.interval);
+      if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') throw new CliExit('factory sync needs --store file until connected mode is built', 1);
+      const { store } = await open(cmd);
+      const pusher = pusherFor(store);
+      const lines = (results: PushResult[]) => {
+        for (const r of results) {
+          if (r.done.length > 0) io.out(`${r.taskId} ${r.issue ?? '-'}: ${r.done.join(', ')}`);
+          if (r.error !== null) io.out(`FAIL ${r.taskId}: ${r.error}`);
+        }
+      };
+      if (!o.watch) {
+        const defs = await store.listFactoryDefs();
+        if (!defs.some((d) => d.github?.mode === 'github-only' && (!only || only.includes(d.factoryId)))) return io.out('no factory uses GitHub-only mode');
+        const results = await pusher.pushAll(only);
+        lines(results);
+        const failed = results.filter((r) => r.error !== null).length;
+        io.out(`pushed ${results.filter((r) => r.done.length > 0).length}, failed ${failed}`);
+        if (failed > 0) throw new CliExit('', 1, true);
+        return;
+      }
+      let stop = false;
+      const onSignal = () => { stop = true; };
+      process.on('SIGINT', onSignal);
+      process.on('SIGTERM', onSignal);
+      const sleep = deps.sleep ?? realSleep;
+      try {
+        for (let tick = 1; !stop; tick++) {
+          try {
+            lines(await pusher.pushAll(only));
+          } catch (e) {
+            io.out(`error: ${firstLine(e)}`);
+          }
+          if (stop || (deps.watchTicks !== undefined && tick >= deps.watchTicks)) break;
+          await sleep(interval * 1000);
+        }
+      } finally {
+        process.off('SIGINT', onSignal);
+        process.off('SIGTERM', onSignal);
+      }
+    });
+
   const dev = program.command('dev').description('stand-ins for the Board page (file store only)');
   const openDev = async (cmd: Command): Promise<BoardStore> => {
     if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') throw new CliExit('dev commands need --store file', 1);
@@ -333,13 +417,16 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       const t = await owner.createTask(store, now, {
         factoryId: await pickFactory(store, o.factory), title: o.title, description: o.description, repo, ...(o.base ? { baseBranch: o.base } : {}), ...depends(o.dependsOn),
       });
+      await pushAfter(cmd, store, t.taskId);
       io.out(t.taskId);
     });
 
   dev
     .command('ready <task>')
     .action(async (id: string, _o: object, cmd: Command) => {
-      await owner.markReady(await openDev(cmd), now, id);
+      const store = await openDev(cmd);
+      await owner.markReady(store, now, id);
+      await pushAfter(cmd, store, id);
       io.out(`${id} ready`);
     });
 
@@ -355,6 +442,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       if (!doc) throw new CliExit(`no current ${kind} doc for ${id}`, 1);
       const decision = o.changes === undefined ? 'approve' : 'changes';
       await owner.decideGate(store, now, id, g, decision, doc.version, o.changes ?? '');
+      await pushAfter(cmd, store, id);
       io.out(`${id} ${g} ${decision} v${doc.version}`);
     });
 
@@ -363,13 +451,16 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .action(async (id: string, text: string, _o: object, cmd: Command) => {
       const store = await openDev(cmd);
       await owner.answerTask(store, now, id, text, (await store.getTask(id)).version);
+      await pushAfter(cmd, store, id);
       io.out(`${id} answered`);
     });
 
   dev
     .command('cancel <task>')
     .action(async (id: string, _o: object, cmd: Command) => {
-      await owner.cancelTask(await openDev(cmd), now, id);
+      const store = await openDev(cmd);
+      await owner.cancelTask(store, now, id);
+      await pushAfter(cmd, store, id);
       io.out(`${id} cancelled`);
     });
 

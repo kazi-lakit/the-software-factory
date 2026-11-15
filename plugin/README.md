@@ -87,6 +87,8 @@ This needs the Blocks rules to let the factory core insert a task (`blocks/data/
 
 If `factory new` fails, the skill shows the error and falls back to one pre-filled Board link: open it, check the form, click **Create task**, then **Mark ready**. The link goes to `https://dfrsgz-eseqz.slsblx.com` unless `FACTORY_BOARD_URL` is set in the shell that starts `claude`, and it works only once the Board page with the pre-fill change is deployed. The draft files are saved under `runs/.drafts/` in the factory folder (ignored by git).
 
+`factory sync [--watch]` pushes every task of the GitHub-only factories to GitHub (the core also pushes the touched task after each step); `--watch` repeats every `--interval` seconds (default 5) until Ctrl-C.
+
 ## Safety layers
 
 No single layer is the boundary. In order:
