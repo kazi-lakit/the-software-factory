@@ -23,3 +23,4 @@ export { diffEvents } from './history.js';
 export * from './owner.js';
 export * from './dependencies.js';
 export * from './githubPull.js';
+export * from './githubPullApply.js';
