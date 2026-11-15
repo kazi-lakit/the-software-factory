@@ -313,3 +313,12 @@ it("a_connected_factory_shows_watcher_seen_not_seen_since_or_not_running", async
   expect(await chip("delta")).toHaveTextContent(/^watcher not seen since /);
   expect(await chip("echo")).toHaveTextContent("watcher not running");
 });
+
+it("a_factory_that_is_not_connected_shows_no_watcher_chip", async () => {
+  const github = { mode: "github-only" as const, project: { owner: "o", number: 3 }, label: "factory", approvers: ["a"], statusMap: DEFAULT_STATUS_MAP };
+  resetFakeBoard(merge(factory("blocks", ["os"]), factory("delta", ["api"], { name: "Delta", github })));
+  await openFactoriesSection();
+  await screen.findByRole("region", { name: "Factory delta" });
+  expect(screen.getByRole("region", { name: "Factory blocks" }).querySelector(".sf-watcher")).toBeNull();
+  expect(screen.getByRole("region", { name: "Factory delta" }).querySelector(".sf-watcher")).toBeNull();
+});

@@ -35,6 +35,13 @@ describe("factoryDraft", () => {
     expect(checked.ok && checked.value.github).toEqual(stored);
   });
 
+  it("a_stored_github_only_block_survives_toFactoryInput_unchanged", () => {
+    const only: GitHubSettings = { ...stored, mode: "github-only" };
+    const base = { ...defFixture("delta"), github: only };
+    const checked = validateFactoryDef(toFactoryInput(draftOf(base), base));
+    expect(checked.ok && checked.value.github).toEqual(only);
+  });
+
   it("off_drops_github_and_connected_with_blank_approvers_leaves_them_to_the_default", () => {
     const base = { ...defFixture("delta"), github: stored };
     expect(toFactoryInput({ ...draftOf(base), github: { ...draftOf(base).github, mode: "off" } }, base).github).toBeUndefined();

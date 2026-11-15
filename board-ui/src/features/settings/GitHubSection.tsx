@@ -46,7 +46,7 @@ export function GitHubSection({ draft, onChange, health, schemaReady, storedMode
           {problems.length > 0 ? (
             <div className="sf-problem" role="status">
               <p>The factory machine reports:</p>
-              <ul className="sf-plain-list">{problems.map((p) => <li key={p}>{p}</li>)}</ul>
+              <ul className="sf-plain-list">{problems.map((p, i) => <li key={`${i}-${p}`}>{p}</li>)}</ul>
             </div>
           ) : null}
           {!health?.watcherSeenAt ? <span className="sf-hint">The factory machine checks these names when factory sync --watch --store blocks runs.</span> : null}
