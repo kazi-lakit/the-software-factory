@@ -3155,6 +3155,13 @@ textarea.sf-input {
 .sf-factory-row { overflow-wrap: anywhere; }
 .sf-factory-row li.sf-actions > div { width: 100%; min-width: 0; }
 
+/* GitHub section of factory settings */
+.sf-github .sf-problem p { margin: 0 0 4px; }
+.sf-status-map th[scope="row"] { background: transparent; color: var(--sf-text); font-weight: 400; }
+.sf-status-map td, .sf-status-map th { padding: 8px 16px; }
+.sf-status-map .sf-input { width: 100%; min-width: 0; }
+.sf-watcher-stale, .sf-watcher-never { color: var(--sf-muted); }
+
 @media (max-width: 639px) {
   .sf-card .sf-button,
   .sf-card .sf-card-cta {
@@ -3601,3 +3608,4 @@ textarea.sf-input {
   .sf-board-page .sf-lane-hint { min-height: 0; margin-bottom: 10px; }
 
 }
+

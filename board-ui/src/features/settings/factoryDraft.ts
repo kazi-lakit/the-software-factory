@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { AGENT_STEPS, ensureMain, saveFactory, validateFactoryDef, VersionConflictError, type AgentModel, type AgentStep, type FactoryDef } from "@factory/core";
+import { AGENT_STEPS, DEFAULT_LABEL, DEFAULT_STATUS_MAP, ensureMain, saveFactory, validateFactoryDef, VersionConflictError, type AgentModel, type AgentStep, type FactoryDef, type GitHubSettings, type Status } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { describeWriteError, now, type WriteProblem } from "../task/writeOutcome";
 
@@ -13,12 +13,21 @@ export function describeDefinitionError(error: unknown, existsText?: string): Wr
   return describeWriteError(error);
 }
 
+/** The GitHub section as typed: the project is `owner/number` text and approvers a comma/space list. */
+export type GitHubDraft = { mode: "off" | "connected" | "github-only"; project: string; label: string; approvers: string; statusMap: Record<Status, string> };
+
+export const githubDraftOf = (g: GitHubSettings | undefined): GitHubDraft =>
+  g
+    ? { mode: g.mode, project: `${g.project.owner}/${g.project.number}`, label: g.label, approvers: g.approvers.join(", "), statusMap: { ...g.statusMap } }
+    : { mode: "off", project: "", label: DEFAULT_LABEL, approvers: "", statusMap: { ...DEFAULT_STATUS_MAP } };
+
 export type Draft = {
   active: boolean;
   docsPath: string;
   factoryId: string;
   gitEmail: string;
   gitName: string;
+  github: GitHubDraft;
   /** The gh CLI login; left empty, the core's validation saves DEFAULT_GH_USER. */
   ghUser: string;
   /** The model per stage; "" is Same as session, left out of the saved agentModels. */
@@ -34,15 +43,18 @@ export const draftOf = (def: FactoryDef | null): Draft =>
   def
     ? {
         active: def.active, docsPath: def.docsPath, factoryId: def.factoryId, gitEmail: def.gitEmail, ghUser: def.ghUser, gitName: def.gitName,
-        models: modelsOf(def), name: def.name, protectedBranches: def.protectedBranches,
+        github: githubDraftOf(def.github), models: modelsOf(def), name: def.name, protectedBranches: def.protectedBranches,
       }
-    : { active: true, docsPath: "", factoryId: "", gitEmail: "", ghUser: "", gitName: "", models: modelsOf(null), name: "", protectedBranches: ensureMain(["dev", "stg"]) };
+    : { active: true, docsPath: "", factoryId: "", gitEmail: "", ghUser: "", gitName: "", github: githubDraftOf(undefined), models: modelsOf(null), name: "", protectedBranches: ensureMain(["dev", "stg"]) };
 
 /** The input validateFactoryDef checks: Same as session ("") leaves the stage out; the core drops an empty map. */
 export function toFactoryInput(draft: Draft, base: FactoryDef | null) {
-  const { models, ...rest } = draft;
+  const { github, models, ...rest } = draft;
   const agentModels = Object.fromEntries(AGENT_STEPS.flatMap((s) => (models[s] ? [[s, models[s]]] : [])));
-  return { ...rest, agentModels, version: base?.version ?? 1 };
+  const approvers = github.approvers.split(/[\s,]+/).filter((a) => a !== "");
+  const input = github.mode === "off" ? undefined
+    : { mode: github.mode, project: github.project.trim(), label: github.label, statusMap: github.statusMap, ...(approvers.length > 0 ? { approvers } : {}) };
+  return { ...rest, agentModels, github: input, version: base?.version ?? 1 };
 }
 
 /** Adds a protected branch: `main` stays last, so a new branch lands before it; blanks and repeats add nothing. */

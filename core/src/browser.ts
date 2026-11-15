@@ -3,7 +3,7 @@ export { BlocksStore, CORE_TASK_FIELDS } from './blocks/store.js';
 export { BlocksForbiddenError, BlocksUnauthorizedError, SdkBlocksData } from './blocks/data.js';
 export type { TokenSource } from './blocks/token.js';
 export { PROTECTED_TASK_FIELDS } from './blocks/schema.js';
-export { assertMove, canMove, IllegalMoveError, STEP_STATUS, TERMINAL } from './status.js';
+export { ALL_STATUSES, assertMove, canMove, IllegalMoveError, STEP_STATUS, TERMINAL } from './status.js';
 export { isMainRef, isProtected } from './branches.js';
 export { AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, ensureMain, validateFactoryDef, validateFactoryRepo, FactoryConfig } from './factories.js';
 export type { AgentModel, AgentModels, FactoryDef, FactoryRepo, FactoryHealth } from './factories.js';

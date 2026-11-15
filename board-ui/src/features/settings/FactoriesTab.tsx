@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
-import type { FactoryHealth, FactoryRepo } from "@factory/core";
+import { watcherState, type FactoryHealth, type FactoryRepo } from "@factory/core";
 import { FACTORIES_KEY, useFactories, useFactoryHealth, useSelectedFactory, type FactoryEntry } from "../factories/useFactories";
 import { HISTORY_KEY } from "../history/useHistory";
 import { FactoryForm } from "./FactoryForm";
@@ -28,6 +28,16 @@ function GhStatus({ health }: { health: FactoryHealth | undefined }) {
       <span className="sf-muted">checked <time dateTime={health.checkedAt}>{formatTime(health.checkedAt)}</time></span>
     </>
   );
+}
+
+/** The sync watcher of a connected factory: seen recently, seen too long ago, or never. */
+function WatcherChip({ health }: { health: FactoryHealth | undefined }) {
+  const state = watcherState(health, new Date());
+  const at = health?.watcherSeenAt;
+  const text = state === "seen" && at ? <>watcher seen <time dateTime={at}>{formatTime(at)}</time></>
+    : state === "stale" && at ? <>watcher not seen since <time dateTime={at}>{formatTime(at)}</time></>
+    : "watcher not running";
+  return <span className={`sf-chip sf-watcher sf-watcher-${state}`}>{text}</span>;
 }
 
 /** Factories and their repos: list, edit, import, and the definitions the Board cannot use. Add factory opens the New factory page. */
@@ -178,6 +188,7 @@ function FactorySection({ editing, entry, form, health, onEdit, open, onToggle, 
         <h3>{def.name}</h3>
         <span className="sf-mono">{`GitHub login ${def.ghUser}`}</span>
         <GhStatus health={health} />
+        {def.github?.mode === "connected" ? <WatcherChip health={health} /> : null}
         <button type="button" className="sf-button" aria-label={`Edit factory ${def.factoryId}`} onClick={() => onEdit({ factoryId: def.factoryId, kind: "edit-factory" })}>Edit factory</button>
       </div>
       <h4>Factory details</h4>

@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { DEFAULT_STATUS_MAP } from "@factory/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { checksFixtureForTests } from "./testChecks";
 import { blocksFactories, factory, merge } from "../../test/factories";
@@ -298,4 +299,17 @@ it("filters factories by id and clears the search", async () => {
   expect(screen.queryByRole("region", { name: "Factory delta" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
   expect(screen.getByRole("region", { name: "Factory delta" })).toBeInTheDocument();
+});
+
+it("a_connected_factory_shows_watcher_seen_not_seen_since_or_not_running", async () => {
+  const github = { mode: "connected" as const, project: { owner: "o", number: 3 }, label: "factory", approvers: ["a"], statusMap: DEFAULT_STATUS_MAP };
+  resetFakeBoard(merge(factory("blocks", ["os"], { github }), factory("delta", ["api"], { name: "Delta", github }), factory("echo", ["api"], { name: "Echo", github })));
+  const recent = new Date(Date.now() - 10_000).toISOString();
+  await fakeBoard().core.setFactoryHealth({ checkedAt: recent, factoryId: "blocks", ghLoggedIn: true, watcherSeenAt: recent });
+  await fakeBoard().core.setFactoryHealth({ checkedAt: recent, factoryId: "delta", ghLoggedIn: true, watcherSeenAt: "2026-01-01T00:00:00.000Z" });
+  await openFactoriesSection();
+  const chip = async (id: string) => (await screen.findByRole("region", { name: `Factory ${id}` })).querySelector(".sf-watcher");
+  await waitFor(() => expect(screen.getByRole("region", { name: "Factory blocks" }).querySelector(".sf-watcher")).toHaveTextContent(/^watcher seen /));
+  expect(await chip("delta")).toHaveTextContent(/^watcher not seen since /);
+  expect(await chip("echo")).toHaveTextContent("watcher not running");
 });

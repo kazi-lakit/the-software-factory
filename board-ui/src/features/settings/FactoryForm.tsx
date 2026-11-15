@@ -1,6 +1,9 @@
 import { useId, useState } from "react";
 import { AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, type AgentModel, type AgentStep, type FactoryDef } from "@factory/core";
+import { useFactoryHealth } from "../factories/useFactories";
+import { useGitHubSchema } from "../github/useGitHub";
 import { WriteProblemNotice } from "../task/writeOutcome";
+import { GitHubSection } from "./GitHubSection";
 import { addProtectedBranch, draftOf, useFactorySave, type Draft } from "./factoryDraft";
 
 export { DEFINITION_CONFLICT, describeDefinitionError } from "./factoryDraft";
@@ -23,6 +26,8 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
   const [base, setBase] = useState<FactoryDef>(before);
   const [draft, setDraft] = useState(() => draftOf(before));
   const [branch, setBranch] = useState("");
+  const health = useFactoryHealth();
+  const schema = useGitHubSchema();
   const saving = useFactorySave({ base, onSaved });
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft((d) => ({ ...d, [key]: value }));
 
@@ -125,6 +130,13 @@ export function FactoryForm({ before, onCancel, onReload, onSaved }: Props) {
         ))}
         <span className="sf-hint">Same as session runs the stage on the model of the session that runs /factory:run.</span>
       </fieldset>
+      <GitHubSection
+        draft={draft.github}
+        onChange={(next) => set("github", next)}
+        health={health.data?.find((h) => h.factoryId === before.factoryId)}
+        schemaReady={schema.data}
+        storedMode={base.github?.mode}
+      />
       {saving.invalidText ? <p className="sf-problem" role="alert">{saving.invalidText}</p> : null}
       <WriteProblemNotice problem={saving.problem} onReload={() => void reload()} />
       <div className="sf-actions">
