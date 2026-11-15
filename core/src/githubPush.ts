@@ -8,10 +8,19 @@ import type { Doc, Gate, Task } from './types.js';
 
 export const markerOf = (taskId: string, factoryId: string): string => `<!-- tsf:task=${taskId} factory=${factoryId} -->`;
 
-/** The issue body: the description, then the marker that ties the issue to its task. */
+/** GitHub allows 65,536 characters in an issue or comment body; stay under it. */
+export const MAX_BODY = 65_000;
+export const TRUNCATED = '\n\n… (truncated; the full text is in tsf)';
+
+/** `text` cut to `max` characters, with the truncation note at the end, when it is longer. */
+export function capText(text: string, max: number = MAX_BODY): string {
+  return text.length <= max ? text : text.slice(0, max - TRUNCATED.length) + TRUNCATED;
+}
+
+/** The issue body: the description (capped), then the marker that ties the issue to its task, always last. */
 export function issueBody(description: string, taskId: string, factoryId: string): string {
   const marker = markerOf(taskId, factoryId);
-  const d = description.trimEnd();
+  const d = capText(description.trimEnd(), MAX_BODY - marker.length - 2);
   return d === '' ? marker : `${d}\n\n${marker}`;
 }
 
@@ -40,8 +49,8 @@ export interface PushInput {
 
 function docComment(kind: 'spec' | 'plan', doc: Doc, i: PushInput): PushAction {
   const name = kind === 'spec' ? 'Spec' : 'Plan';
-  let body = `## ${name} v${doc.version}\n\n${doc.body}`;
-  if (i.settings.mode === 'github-only' && i.gates[kind]) body += '\n\n---\nReply `/approve` to approve, or `/changes <what to change>` to send it back.';
+  const reply = i.settings.mode === 'github-only' && i.gates[kind] ? '\n\n---\nReply `/approve` to approve, or `/changes <what to change>` to send it back.' : '';
+  const body = capText(`## ${name} v${doc.version}\n\n${doc.body}`, MAX_BODY - reply.length) + reply;
   return { kind: 'comment', about: kind, version: doc.version, body };
 }
 
@@ -58,12 +67,13 @@ export function planPush(i: PushInput): PushAction[] {
     out.push({ kind: 'create', title: task.title, body, labels: settings.label === '' ? [] : [settings.label] });
     p.title = task.title; p.bodyHash = bodyHash(task.description); p.label = settings.label === '' ? null : settings.label;
   }
+  const open = !(link?.pushed.closed ?? false);
   const readd = !created || link?.itemId == null || link.project !== projectKey(settings.project);
-  if (readd) out.push({ kind: 'addToProject' });
+  if (open && readd) out.push({ kind: 'addToProject' });
   const option = settings.statusMap[task.status];
-  if (readd || option !== p.option) out.push({ kind: 'setStatus', option });
-  if (settings.label !== '' && settings.label !== p.label) out.push({ kind: 'addLabel', label: settings.label });
-  if (task.title !== p.title || bodyHash(task.description) !== p.bodyHash) out.push({ kind: 'updateIssue', title: task.title, body });
+  if (open && (readd || option !== p.option)) out.push({ kind: 'setStatus', option });
+  if (open && settings.label !== '' && settings.label !== p.label) out.push({ kind: 'addLabel', label: settings.label });
+  if (open && (task.title !== p.title || bodyHash(task.description) !== p.bodyHash)) out.push({ kind: 'updateIssue', title: task.title, body });
   for (const kind of ['spec', 'plan'] as const) {
     const doc = i.docs[kind];
     if (doc && doc.version > p.docs[kind]) out.push(docComment(kind, doc, i));

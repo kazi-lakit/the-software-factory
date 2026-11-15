@@ -855,4 +855,62 @@ describe('GitHub pushing from the CLI', () => {
     expect(await go('status', '--json')).toBe(0);
     expect(JSON.parse(out.join('\n')).githubErrors[0]).toEqual({ taskId: 'T-1', message: 'boom', attempts: 2, nextAttemptAt: '2026-06-01T00:00:10.000Z' });
   });
+
+  const staleLink = (message: string, nextAttemptAt: string) => ({
+    taskId: 'T-1', factoryId: 'blocks', repo: 'o/app', issueNumber: null, issueNodeId: null, project: null, itemId: null,
+    pushed: emptyPushed(), error: { message, attempts: 1, nextAttemptAt }, lease: null, version: 0,
+  });
+
+  test('F2: next pushes the other tasks it moved too', async () => {
+    const board = newBoard();
+    const { store, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, board);
+    await direct(store);
+    const b = await direct(store);
+    await go('sync');
+    await store.updateTask(b.taskId, (await store.getTask(b.taskId)).version, { status: 'done' });
+    await store.updateTask('T-1', (await store.getTask('T-1')).version, { status: 'ready' });
+    expect(await go('next', '--json')).toBe(0);
+    expect(board.issue({ owner: 'o', repo: 'app' }, 2)).toMatchObject({ state: 'closed', stateReason: 'completed' });
+  });
+
+  test('F4: a manual sync retries a task in backoff', async () => {
+    const { out, store, go } = setup(withGithub(), [], undefined, undefined, undefined, newBoard());
+    await direct(store);
+    await store.saveGitHubLink(null, staleLink('boom', '2099-01-01T00:00:00.000Z'));
+    expect(await go('sync')).toBe(0);
+    expect(out).toContain('T-1 o/app#1: created, status Backlog');
+    expect((await store.getGitHubLink('T-1'))!.error).toBeNull();
+  });
+
+  test('M4: status hides stale errors of a factory that is not github-only any more', async () => {
+    const { out, store, go } = setup(seed(), ['gh-blocks'], undefined, undefined, undefined, newBoard());
+    await direct(store);
+    await store.saveGitHubLink(null, staleLink('boom', '2026-06-01T00:00:10.000Z'));
+    expect(await go('status', '--json')).toBe(0);
+    expect(JSON.parse(out.join('\n'))).not.toHaveProperty('githubErrors');
+  });
+
+  test('M6: a failing health write is redacted', async () => {
+    const token = `ghp_${'a1B2'.repeat(9)}`;
+    const { err, store, go } = setup();
+    store.setFactoryHealth = async () => { throw new Error(`nope ${token}`); };
+    await go('status');
+    expect(err.join('\n')).toContain('health of blocks not written: nope [redacted]');
+  });
+
+  test('M7: sync --watch with no github-only factory says so once and keeps watching', async () => {
+    const { out, goWith } = setup(seed(), [], undefined, undefined, undefined, newBoard());
+    const slept: number[] = [];
+    expect(await goWith({ watchTicks: 3, sleep: async (ms) => { slept.push(ms); } }, 'sync', '--watch')).toBe(0);
+    expect(out).toEqual(['no factory uses GitHub-only mode']);
+    expect(slept).toHaveLength(2);
+  });
+
+  test('M4b: status still lists errors of github-only factories', async () => {
+    const { out, store, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, newBoard());
+    await direct(store);
+    await store.saveGitHubLink(null, staleLink('boom', '2026-06-01T00:00:10.000Z'));
+    await go('status', '--json');
+    expect(JSON.parse(out.join('\n')).githubErrors).toHaveLength(1);
+  });
 });

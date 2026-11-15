@@ -220,4 +220,58 @@ describe('GitHubPusher', () => {
     expect(backoffMs(1)).toBe(5000);
     expect(backoffMs(30)).toBe(600_000);
   });
+
+  test('M1: every progress save renews the lease', async () => {
+    const s = setup();
+    const t = await add(s);
+    let seen: string | undefined;
+    const spy = new Proxy(s.board, { get(tg, p, r) {
+      const v = Reflect.get(tg, p, r);
+      if (typeof v !== 'function') return v;
+      return async (...a: unknown[]) => {
+        if (p === 'addToProject') s.advance(30_000);
+        if (p === 'setStatus') seen = (await s.store.getGitHubLink(t.taskId))!.lease!.until;
+        return v.apply(tg, a);
+      };
+    } }) as GitHubBoard;
+    await s.make('x', spy).pushTask(t.taskId);
+    expect(Date.parse(seen!)).toBe(NOW.getTime() + 30_000 + LEASE_MS);
+  });
+
+  test('M2: a missing repo is recorded with backoff, then skipped', async () => {
+    const s = setup();
+    const t = await s.store.createTask({ factoryId: 'f', title: 'x', description: 'd', repo: 'gone' });
+    const first = await s.pusher.pushTask(t.taskId);
+    expect(first.error).toContain('gone');
+    expect((await s.store.getGitHubLink(t.taskId))!.error!.attempts).toBe(1);
+    expect(await s.pusher.pushTask(t.taskId)).toMatchObject({ skipped: 'backoff' });
+  });
+
+  test('F4: pushAll can ignore backoff', async () => {
+    const s = setup();
+    const t = await add(s);
+    const flaky = s.make('x', throwing(s.board, 'addToProject', 1));
+    await flaky.pushTask(t.taskId);
+    expect((await s.pusher.pushAll())[0]).toMatchObject({ skipped: 'backoff' });
+    const r = (await s.pusher.pushAll(undefined, { ignoreBackoff: true }))[0]!;
+    expect(r.error).toBeNull();
+    expect((await s.store.getGitHubLink(t.taskId))!.error).toBeNull();
+  });
+
+  test('F5: two factories on one GitHub repo push nothing and report an error each', async () => {
+    const store = new MemoryStore({ factories: {
+      defs: [defFixture('a', { github: hub() }), defFixture('b', { github: hub() })],
+      repos: [repoFixture('a', 'app', { remote: 'git@github.com:o/app.git' }), repoFixture('b', 'app', { remote: 'git@github.com:o/app.git' })],
+    } });
+    const board = new FakeGitHubBoard();
+    board.addProject({ owner: 'o', number: 3 }, OPTIONS);
+    const pusher = new GitHubPusher({ store, boardFor: () => board, now: () => NOW, claimant: 'x' });
+    await store.createTask({ factoryId: 'a', title: 'x', description: 'd', repo: 'app' });
+    await store.createTask({ factoryId: 'b', title: 'y', description: 'd', repo: 'app' });
+    const rs = await pusher.pushAll();
+    expect(rs).toHaveLength(2);
+    for (const r of rs) expect(r.error).toContain('only one factory repo');
+    expect(() => board.issue(REPO, 1)).toThrow();
+    expect((await store.listGitHubLinks()).every((l) => l.error !== null && l.issueNumber === null)).toBe(true);
+  });
 });

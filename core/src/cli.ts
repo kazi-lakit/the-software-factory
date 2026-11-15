@@ -124,6 +124,18 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     }
   };
 
+  /** Pushes every GitHub-only task (next also moves other tasks while it syncs). Same never-fail, stderr-only behaviour as pushAfter. */
+  const pushAllAfter = async (cmd: Command, store: BoardStore, factories: string[] | undefined): Promise<void> => {
+    if ((cmd.optsWithGlobals() as { store: string }).store !== 'file') return;
+    try {
+      for (const r of await pusherFor(store).pushAll(factories)) {
+        if (r.error !== null) io.err(`github: ${r.taskId} not pushed (${r.error}); factory sync retries`);
+      }
+    } catch (e) {
+      io.err(`github: not pushed (${firstLine(e)}); factory sync retries`);
+    }
+  };
+
   const depends = (v?: string) => (v === undefined ? {} : { dependsOn: v.split(',').map((x) => x.trim()).filter(Boolean) });
   const printJson = (v: unknown) => io.out(JSON.stringify(v, null, 2));
 
@@ -142,6 +154,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       if (outcome.kind === 'work') return io.out(`work ${outcome.taskId}`);
       // Paused and inactive factories also return no ticket: say so, so a loop's owner is not left guessing.
       if (outcome.kind === 'none') {
+        if (!o.peek) await pushAllAfter(cmd, store, factoryFilter(o.factory)); // next moved other tasks while it synced
         const line = outcome.reason === 'waiting' ? `${outcome.taskId} is waiting on ${outcome.waitingOn.join(', ')}`
           : outcome.reason === 'no-factories' ? NO_FACTORIES : outcome.reason;
         io.out(line);
@@ -150,7 +163,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
         return;
       }
       const { ticket } = outcome;
-      await pushAfter(cmd, store, ticket.taskId);
+      await pushAllAfter(cmd, store, factoryFilter(o.factory));
       if (o.json) return printJson(ticket);
       io.out(`${ticket.taskId} ${ticket.step} (worktree ${ticket.worktree})`);
     });
@@ -221,13 +234,14 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
         try {
           await store.setFactoryHealth({ factoryId: d.factoryId, ghLoggedIn: ok, checkedAt: new Date().toISOString() });
         } catch (e) {
-          io.err(`health of ${d.factoryId} not written: ${(e instanceof Error ? e.message : String(e)).split('\n')[0]}`);
+          io.err(`health of ${d.factoryId} not written: ${firstLine(e)}`);
         }
       }
       for (const f of s.factories) f.ghLoggedIn = loggedIn.get(f.factoryId) ?? f.ghLoggedIn;
       const wanted = factoryFilter(o.factory);
+      const githubOnly = new Set((await store.listFactoryDefs()).filter((d) => d.github?.mode === 'github-only').map((d) => d.factoryId));
       const githubErrors = (await store.listGitHubLinks())
-        .filter((l) => l.error !== null && (!wanted || wanted.includes(l.factoryId)))
+        .filter((l) => l.error !== null && githubOnly.has(l.factoryId) && (!wanted || wanted.includes(l.factoryId)))
         .map((l) => ({ taskId: l.taskId, message: l.error!.message, attempts: l.error!.attempts, nextAttemptAt: l.error!.nextAttemptAt }));
       if (o.json) return printJson(githubErrors.length > 0 ? { ...s, githubErrors } : s);
       io.out(`paused: ${s.paused}`);
@@ -373,13 +387,14 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       if (!o.watch) {
         const defs = await store.listFactoryDefs();
         if (!defs.some((d) => d.github?.mode === 'github-only' && (!only || only.includes(d.factoryId)))) return io.out('no factory uses GitHub-only mode');
-        const results = await pusher.pushAll(only);
+        const results = await pusher.pushAll(only, { ignoreBackoff: true });
         lines(results);
         const failed = results.filter((r) => r.error !== null).length;
         io.out(`pushed ${results.filter((r) => r.done.length > 0).length}, failed ${failed}`);
         if (failed > 0) throw new CliExit('', 1, true);
         return;
       }
+      let noticed = false;
       let stop = false;
       let wakeUp: () => void = () => {};
       const wake = new Promise<void>((resolve) => { wakeUp = resolve; });
@@ -389,6 +404,11 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       try {
         for (let tick = 1; !stop; tick++) {
           try {
+            if (!noticed) {
+              const defs = await store.listFactoryDefs();
+              noticed = true;
+              if (!defs.some((d) => d.github?.mode === 'github-only' && (!only || only.includes(d.factoryId)))) io.out('no factory uses GitHub-only mode');
+            }
             lines(await pusher.pushAll(only));
           } catch (e) {
             io.out(`error: ${firstLine(e)}`);

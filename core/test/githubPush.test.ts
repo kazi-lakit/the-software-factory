@@ -121,4 +121,33 @@ describe('planPush', () => {
   it('bodyHash is stable sha256 hex', () => {
     expect(bodyHash('abc')).toBe('ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
   });
+
+  it('F1: a 70,000-char spec comment is capped with the truncation note', () => {
+    const big: Doc = { ...doc('spec', 1), body: 'x'.repeat(70_000) };
+    const a = planPush(input(task(), link(pushedFor(task())), { docs: { spec: big } }));
+    const c = a.find((x) => x.kind === 'comment')! as { body: string };
+    expect(c.body.length).toBeLessThanOrEqual(65_536);
+    expect(c.body.endsWith('\n\n… (truncated; the full text is in tsf)') || c.body.includes('Reply `/approve`')).toBe(true);
+    expect(c.body).toContain('(truncated; the full text is in tsf)');
+  });
+
+  it('F1: a 70,000-char description gives an issue body capped, ending with the marker', () => {
+    const t = task({ description: 'y'.repeat(70_000) });
+    const [create] = planPush(input(t, undefined)) as { body: string }[];
+    expect(create!.body.length).toBeLessThanOrEqual(65_536);
+    expect(create!.body.endsWith(markerOf('T-1', 'f'))).toBe(true);
+    expect(create!.body).toContain('(truncated; the full text is in tsf)');
+    const upd = planPush(input(t, link(pushedFor(task())))).find((x) => x.kind === 'updateIssue') as { body: string };
+    expect(upd.body.length).toBeLessThanOrEqual(65_536);
+    expect(upd.body.endsWith(markerOf('T-1', 'f'))).toBe(true);
+  });
+
+  it('F3: a closed task plans nothing even when project, label or statusMap changed', () => {
+    const t = task({ status: 'done' });
+    const l = link(pushedFor(t, { closed: true }));
+    expect(planPush(input(t, l, { settings: { ...settings, project: { owner: 'o', number: 9 } } }))).toEqual([]);
+    expect(planPush(input(t, l, { settings: { ...settings, label: 'new' } }))).toEqual([]);
+    expect(planPush(input(t, l, { settings: { ...settings, statusMap: { ...statusMap, done: 'Shipped' } } }))).toEqual([]);
+    expect(planPush(input({ ...t, title: 'Changed' }, l))).toEqual([]);
+  });
 });
