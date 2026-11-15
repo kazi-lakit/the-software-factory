@@ -1,7 +1,7 @@
 import { build } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 
-const FORBIDDEN = /(^|\/)(credential|secrets|token|wire|cli|git|github|githubBoard|checks|engine|claims|repoConfig|githubPusher|githubPuller)\.ts$|src\/store\.ts$/;
+const FORBIDDEN = /(^|\/)(credential|secrets|token|wire|cli|git|github|githubBoard|checks|engine|claims|repoConfig|githubPusher|githubPuller|githubWatcher)\.ts$|src\/store\.ts$/;
 
 describe('browser entry', () => {
   it('bundles for the browser with no Node-only or credential module', async () => {
