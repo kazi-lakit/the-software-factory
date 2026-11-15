@@ -21,8 +21,9 @@ export const WATCHER_HEALTH_MS = 30_000;
 export interface WatcherDeps {
   store: BoardStore; boardFor: GitHubBoardFor; githubFor: GitHubFor; now: () => Date; claimant: string;
   /** The factory pull lock; when it also has `held` (the file lock), pushes wait while a plan holds it. */
-  lock?: PullLock; loggedIn: () => Promise<ReadonlySet<string>>;
+  lock?: PullLock & { held?: (factoryId: string) => boolean }; loggedIn: () => Promise<ReadonlySet<string>>;
 }
+/** `requestId` is '' when a store error came before a request was picked. */
 export interface SyncHandled { factoryId: string; requestId: string; state: 'planned' | 'failed'; actions: number; notApplied: number; error: string | null }
 export interface WatchTick { schemaMissing: boolean; pushed: PushResult[]; synced: SyncHandled[]; superseded: string[] }
 
@@ -51,7 +52,7 @@ export class GitHubWatcher {
 
   constructor(private readonly d: WatcherDeps) {
     this.lock = d.lock ?? noLock;
-    const held = (d.lock as { held?: (factoryId: string) => boolean } | undefined)?.held;
+    const held = d.lock?.held;
     this.pusher = new GitHubPusher({
       store: d.store, boardFor: d.boardFor, now: d.now, claimant: d.claimant, storeKind: 'blocks', ...(held ? { pullBusy: held } : {}),
     });
@@ -69,7 +70,14 @@ export class GitHubWatcher {
       .sort((a, b) => a.factoryId.localeCompare(b.factoryId, undefined, { numeric: true }));
     if (connected.length === 0) return out;
     out.pushed = await this.pusher.pushAll(connected.map((f) => f.factoryId));
-    for (const def of connected) await this.requests(def, defs, repos, out);
+    for (const def of connected) {
+      // A store error for one factory is reported; the others and the health write still run.
+      try {
+        await this.requests(def, defs, repos, out);
+      } catch (e) {
+        out.synced.push({ factoryId: def.factoryId, requestId: '', state: 'failed', actions: 0, notApplied: 0, error: firstLine(e) });
+      }
+    }
     await this.health(connected, defs, repos);
     return out;
   }
@@ -89,6 +97,8 @@ export class GitHubWatcher {
     for (const r of rows) {
       if (r === target || !((r.state === 'queued') || (r.state === 'planned' && older(r, target)))) continue;
       if (await this.saveRow(r, { ...r, state: 'failed', error: SUPERSEDED })) out.superseded.push(r.requestId);
+      // A planned row that moved meanwhile was probably claimed by the Board: wait, the next tick sees it applying.
+      else if (r.state === 'planned') return;
     }
 
     let release: PullRelease | null = null;
@@ -142,16 +152,17 @@ export class GitHubWatcher {
   /** Issues the Board will create or has created without the link yet: never planned again. */
   private async pendingIssues(factoryId: string): Promise<string[]> {
     const { store } = this.d;
-    const links = new Map((await store.listGitHubLinks(factoryId)).map((l) => [l.taskId, l]));
-    const unlinked = (await store.listTasks()).filter((t) => t.factoryId === factoryId && links.get(t.taskId)?.issueNumber == null);
     const out: string[] = [];
-    for (const t of unlinked) {
-      const from = createdFromIssue(await store.listEvents(t.taskId));
-      if (from) out.push(issueName(from));
-    }
+    // Requests first: a row applied after this read has created its tasks by the time the tasks are read below.
     for (const r of await store.listSyncRequests(factoryId)) {
       if ((r.state !== 'planned' && r.state !== 'applying') || !r.plan) continue;
       for (const a of r.plan.actions) if (a.kind === 'create') out.push(issueName(a.issue));
+    }
+    const links = new Map((await store.listGitHubLinks(factoryId)).map((l) => [l.taskId, l]));
+    const unlinked = (await store.listTasks()).filter((t) => t.factoryId === factoryId && links.get(t.taskId)?.issueNumber == null);
+    for (const t of unlinked) {
+      const from = createdFromIssue(await store.listEvents(t.taskId));
+      if (from) out.push(issueName(from));
     }
     return out;
   }

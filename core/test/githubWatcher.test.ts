@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest';
 import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
 import { GITHUB_SCHEMA } from '../src/blocks/schema.js';
 import { BlocksStore } from '../src/blocks/store.js';
+import type { BoardStore } from '../src/boardStore.js';
 import { FakeGitHub } from '../src/github.js';
 import { FakeGitHubBoard, type GitHubBoard } from '../src/githubBoard.js';
 import { DEFAULT_STATUS_MAP, type GitHubSettings } from '../src/githubConfig.js';
@@ -19,7 +20,7 @@ const hub = (statusMap: Record<Status, string> = DEFAULT_STATUS_MAP, project = P
   mode: 'connected', project, label: 'factory', approvers: ['me'], statusMap,
 });
 
-function setup(opts: { statusMap?: Record<Status, string>; project?: { owner: string; number: number }; missing?: boolean; lock?: PullLock; board?: (b: FakeGitHubBoard) => GitHubBoard } = {}) {
+function setup(opts: { statusMap?: Record<Status, string>; project?: { owner: string; number: number }; missing?: boolean; lock?: PullLock; board?: (b: FakeGitHubBoard) => GitHubBoard; wrap?: (core: BoardStore, owner: BlocksStore) => BoardStore } = {}) {
   let t = new Date('2026-11-15T10:00:00Z');
   const now = () => t;
   const storage = newFakeStorage();
@@ -37,7 +38,7 @@ function setup(opts: { statusMap?: Record<Status, string>; project?: { owner: st
   const seen = opts.board ? opts.board(board) : board;
   let boardCalls = 0;
   const deps: WatcherDeps = {
-    store: core, boardFor: () => { boardCalls++; return seen; }, githubFor: () => new FakeGitHub(), now, claimant: 'watcher',
+    store: opts.wrap ? opts.wrap(core, owner) : core, boardFor: () => { boardCalls++; return seen; }, githubFor: () => new FakeGitHub(), now, claimant: 'watcher',
     loggedIn: async () => new Set(['me']), ...(opts.lock ? { lock: opts.lock } : {}),
   };
   const watcher = new GitHubWatcher(deps);
@@ -58,6 +59,14 @@ async function issueOnProject(s: S, status: string, title = 'From GitHub'): Prom
   return made.number;
 }
 const row = async (s: S, requestId: string): Promise<SyncRequest> => (await s.owner.listSyncRequests('f')).find((r) => r.requestId === requestId)!;
+/** The store, with `method` replaced by `fn` (which gets the real method). */
+const intercept = <K extends keyof BoardStore>(store: BoardStore, method: K, fn: (real: BoardStore[K], ...a: Parameters<BoardStore[K]>) => ReturnType<BoardStore[K]>): BoardStore =>
+  new Proxy(store, { get(target, p, r) {
+    const v = Reflect.get(target, p, r);
+    if (typeof v !== 'function') return v;
+    const real = v.bind(target);
+    return p === method ? (...a: Parameters<BoardStore[K]>) => fn(real, ...a) : real;
+  } });
 /** The board, but `method` throws on its next `fails.n` calls (set `fails.n` to arm it). */
 const failing = (b: FakeGitHubBoard, method: keyof GitHubBoard, fails: { n: number }): GitHubBoard =>
   new Proxy(b, { get(target, p, r) {
@@ -260,12 +269,49 @@ describe('GitHubWatcher', () => {
     const s = setup();
     const t = await own(s, 'g', 'web');
     const q = await s.owner.requestSync('g', 'me');
-    const tick = await s.watcher.tick(['g']);
-    expect(tick).toEqual({ schemaMissing: false, pushed: [], synced: [], superseded: [] });
+    const u = await own(s);
+    const tick = await s.watcher.tick();
+    expect(tick.pushed.map((p) => p.taskId)).toEqual([u.taskId]);
     expect((await s.owner.listSyncRequests('g'))[0]).toMatchObject({ requestId: q.requestId, state: 'queued' });
     expect(await s.core.getGitHubLink(t.taskId)).toBeUndefined();
-    expect(await s.owner.listFactoryHealth()).toEqual([]);
-    expect(s.boardCalls()).toBe(0);
+    expect((await s.owner.listFactoryHealth()).map((h) => h.factoryId)).toEqual(['f']);
+  });
+
+  test('a Board claim racing the supersede stops planning for this tick', async () => {
+    let owner: BlocksStore | undefined;
+    const s = setup({
+      wrap: (core, o) => {
+        owner = o;
+        return intercept(core, 'saveSyncRequest', async (real, before, after) => {
+          if (before.state === 'planned' && after.error === 'superseded by a newer Sync') {
+            await owner!.saveSyncRequest(before, { ...before, state: 'applying', applyingSince: new Date().toISOString() });
+          }
+          return real(before, after);
+        });
+      },
+    });
+    await issueOnProject(s, 'Todo');
+    const a = await s.owner.requestSync('f', 'me');
+    await s.watcher.tick();
+    s.advance(1000);
+    const b = await s.owner.requestSync('f', 'me');
+    const tick = await s.watcher.tick();
+    expect(tick.synced).toEqual([]);
+    expect(tick.superseded).toEqual([]);
+    expect((await row(s, a.requestId)).state).toBe('applying');
+    expect((await row(s, b.requestId)).state).toBe('queued');
+  });
+
+  test('a store error for one factory is reported and health is still written', async () => {
+    const s = setup({
+      wrap: (core) => intercept(core, 'listSyncRequests', async (real, factoryId) => {
+        if (factoryId === 'f') throw new Error('blocks down\nmore');
+        return real(factoryId);
+      }),
+    });
+    const tick = await s.watcher.tick();
+    expect(tick.synced).toEqual([{ factoryId: 'f', requestId: '', state: 'failed', actions: 0, notApplied: 0, error: 'blocks down' }]);
+    expect((await s.owner.listFactoryHealth()).map((h) => h.factoryId)).toEqual(['f']);
   });
 });
 
