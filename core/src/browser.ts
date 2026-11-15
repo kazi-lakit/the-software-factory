@@ -22,3 +22,4 @@ export type { BoardStore, StoredSettings } from './boardStore.js';
 export { diffEvents } from './history.js';
 export * from './owner.js';
 export * from './dependencies.js';
+export * from './githubPull.js';
