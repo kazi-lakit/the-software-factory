@@ -28,6 +28,8 @@ export function parseCommand(body: string): PullCommand | null {
 export interface PullTaskView {
   task: Task; link: GitHubLink; docs: { spec?: number; plan?: number; review?: number }; approvals: Approval[];
   comments?: IssueComment[]; reviews?: { headSha: string; reviews: PrReview[] }; prState?: PrState;
+  /** When the task last moved to pr_open (its latest move event): only reviews submitted after it count. */
+  prOpenAt?: string;
 }
 
 export interface PullInput {
@@ -52,7 +54,7 @@ export type PullAction =
   | { kind: 'block'; taskId: string; version: number; issue: IssueRef; reason: 'label removed' }
   | { kind: 'decide'; taskId: string; version: number; issue: IssueRef; gate: Gate; decision: 'approve' | 'changes';
       docVersion: number; comment: string; approvalId: string; by: string; commentId: number | null }
-  | { kind: 'answer'; taskId: string; version: number; issue: IssueRef; text: string; by: string; unblock: boolean; commentId: number };
+  | { kind: 'answer'; taskId: string; version: number; issue: IssueRef; text: string; by: string; unblock: boolean; commentId: number; onApplied: Partial<PushedState> };
 
 export interface NotApplied { taskId: string | null; issue: string; change: string; reason: string; link?: { option?: string; report?: string } }
 export interface PullPlan { factoryId: string; actions: PullAction[]; notApplied: NotApplied[] }
@@ -131,7 +133,13 @@ function closeOrLabel(i: PullInput, v: PullTaskView, it: ProjectItem, base: { ta
   const { task, link: { pushed: p } } = v;
   const { label } = i.settings;
   if (it.issue.state === 'closed' && !p.closed) {
-    if (v.prState === 'merged') return 'skip';
+    if (v.prState === 'merged') {
+      // The engine finishes a merged PR only from pr_open or the ship step; anywhere else say so instead of waiting forever.
+      if (task.status !== 'pr_open' && task.stage !== 'ship') {
+        out.notApplied.push({ taskId: task.taskId, issue: issueName(base.issue), change: 'issue closed', reason: `PR merged but task is ${task.status}` });
+      }
+      return 'skip';
+    }
     // A PR whose state could not be read may have merged and closed the issue (Closes #n): never cancel then.
     if (task.prUrl && v.prState === undefined) {
       out.notApplied.push({ taskId: task.taskId, issue: issueName(base.issue), change: 'issue closed', reason: 'PR state unknown' });
@@ -211,18 +219,21 @@ function commands(i: PullInput, v: PullTaskView, base: { taskId: string; version
     }
     if (!target.gate && (cmd.cmd === 'answer' || cmd.cmd === 'unblock')) {
       const text = cmd.cmd === 'unblock' && cmd.text === '' ? `unblocked by ${c.author}` : cmd.text;
-      return { kind: 'answer', ...base, text, by: c.author, unblock: cmd.cmd === 'unblock', commentId: c.id };
+      // Later commands are read only after this one, so it is not replayed if the task blocks again with the same key.
+      return { kind: 'answer', ...base, text, by: c.author, unblock: cmd.cmd === 'unblock', commentId: c.id, onApplied: { blockedAt: c.createdAt } };
     }
   }
   return null;
 }
 
-/** Rule 6: the latest approver review on the PR's head commit. */
+/** Rule 6: the latest approver review on the PR's head commit, submitted after the task last moved to pr_open. */
 function prReview(i: PullInput, v: PullTaskView, base: { taskId: string; version: number; issue: IssueRef }, out: Out): PullAction | null {
   if (i.settings.mode !== 'github-only' || v.task.status !== 'pr_open' || !v.reviews) return null;
   const { headSha, reviews } = v.reviews;
+  const since = v.prOpenAt === undefined ? null : Date.parse(v.prOpenAt);
+  const fresh = (r: PrReview): boolean => since === null || (r.submittedAt !== null && Date.parse(r.submittedAt) > since);
   const latest = reviews
-    .filter((r) => isApprover(i.settings, r.author) && (r.state === 'approved' || r.state === 'changes_requested') && r.commitId === headSha)
+    .filter((r) => isApprover(i.settings, r.author) && (r.state === 'approved' || r.state === 'changes_requested') && r.commitId === headSha && fresh(r))
     .sort((a, b) => Date.parse(b.submittedAt ?? '') - Date.parse(a.submittedAt ?? '') || b.id - a.id)[0];
   if (!latest) return null;
   if (v.docs.review === undefined) {

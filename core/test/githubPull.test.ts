@@ -148,6 +148,18 @@ describe('planPull: close and label', () => {
     const plan = planPull(input({ tasks: [view(t, { prState: 'merged' })], items: [item({ state: 'closed', status: 'In review' })] }));
     expect(plan).toEqual({ factoryId: 'f', actions: [], notApplied: [] });
   });
+  it('a merged PR on a task at stage ship is left to the engine', () => {
+    const t = task({ status: 'blocked', stage: 'ship', prUrl: 'https://github.com/o/app/pull/9' });
+    const plan = planPull(input({ tasks: [view(t, { prState: 'merged' })], items: [item({ state: 'closed', status: 'In progress' })] }));
+    expect(plan).toEqual({ factoryId: 'f', actions: [], notApplied: [] });
+  });
+  it('a merged PR on a task that is not pr_open and not at ship is not applied, with the task status', () => {
+    const t = task({ status: 'build', stage: 'build', prUrl: 'https://github.com/o/app/pull/9' });
+    const plan = planPull(input({ tasks: [view(t, { prState: 'merged' })], items: [item({ state: 'closed', status: 'In progress' })] }));
+    expect(plan).toEqual({
+      factoryId: 'f', actions: [], notApplied: [{ taskId: 'T-1', issue: 'o/app#7', change: 'issue closed', reason: 'PR merged but task is build' }],
+    });
+  });
   it('a closed issue whose PR state is unknown is not cancelled', () => {
     const t = task({ status: 'pr_open', prUrl: 'https://github.com/o/app/pull/9' });
     const plan = planPull(input({ tasks: [view(t)], items: [item({ state: 'closed', status: 'In review' })] }));
@@ -256,6 +268,7 @@ describe('planPull: commands', () => {
     expect(pullNeeds(input({ tasks: [blockedView([])], items: [item({ status: 'In progress' })] })).comments).toEqual([{ taskId: 'T-1', since: T0 }]);
     expect(runB([comment(5, '/approve', 1), comment(6, '/answer Postgres', 2)])).toEqual([{
       kind: 'answer', taskId: 'T-1', version: 4, issue: { repo: 'o/app', number: 7 }, text: 'Postgres', by: 'kazi-lakit', unblock: false, commentId: 6,
+      onApplied: { blockedAt: later(2) },
     }]);
     expect(runB([comment(7, '/unblock', 1)])).toMatchObject([{ kind: 'answer', text: 'unblocked by kazi-lakit', unblock: true, commentId: 7 }]);
     expect(runB([comment(7, '/unblock go on', 1)])).toMatchObject([{ kind: 'answer', text: 'go on', unblock: true }]);
@@ -280,6 +293,16 @@ describe('planPull: PR reviews', () => {
     expect(runR([review({ commitId: 'old' }), review({ author: 'other', submittedAt: later(5) }), review({ state: 'commented', submittedAt: later(6) })]).actions).toEqual([]);
     const latest = runR([review({ id: 21, submittedAt: later(1) }), review({ id: 22, state: 'changes_requested', body: 'fix it', submittedAt: later(2) })]);
     expect(latest.actions).toMatchObject([{ kind: 'decide', gate: 'pr', decision: 'changes', comment: 'fix it', approvalId: 'github:review:22' }]);
+  });
+  it('a review submitted before the task last moved to pr_open is not counted; one after it is', () => {
+    const runAt = (reviews: PrReview[], prOpenAt: string) =>
+      planPull(input({ tasks: [view(pr, { docs: { review: 2 }, prOpenAt, reviews: { headSha: 'head', reviews } })], items: [item({ status: 'In review' })] }));
+    const old = review({ id: 21, state: 'changes_requested', submittedAt: later(1) });
+    expect(runAt([old], later(5)).actions).toEqual([]);
+    expect(runAt([old, review({ id: 22, submittedAt: later(6) })], later(5)).actions).toMatchObject([
+      { kind: 'decide', gate: 'pr', decision: 'approve', docVersion: 2, approvalId: 'github:review:22' },
+    ]);
+    expect(runAt([review({ id: 23, submittedAt: null })], later(5)).actions).toEqual([]);
   });
   it('a review with no review doc is not applied', () => {
     expect(runR([review()], {}).notApplied).toEqual([{ taskId: 'T-1', issue: 'o/app#7', change: 'PR review', reason: 'no review doc to decide on' }]);

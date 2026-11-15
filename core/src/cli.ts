@@ -84,6 +84,8 @@ export interface CliDeps {
   githubFor?: GitHubFor;
   /** One pull per factory at a time. Default: a lock file under `<root>/.factory/`. Tests pass an in-memory lock. */
   pullLock?: PullLock;
+  /** True while a factory's pull runs; the push then skips it. Default: the lock file's probe (none with an injected `pullLock`). */
+  pullBusy?: (factoryId: string) => boolean;
   /** Waits between `factory sync --watch` passes. Default: a real timer. Tests pass a fake. */
   sleep?: (ms: number) => Promise<void>;
   /** `factory sync --watch` stops after this many passes. Default: run until SIGINT or SIGTERM. Tests set it. */
@@ -127,9 +129,12 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   };
 
   const boardFor = deps.githubBoardFor ?? lazyGitHubBoardFor(undefined, undefined, exec);
-  const pusherFor = (store: BoardStore) => new GitHubPusher({ store, boardFor, now: () => new Date(), claimant: `cli:${hostname()}` });
+  const lockFile = fileLock(() => findRoot());
+  const pullLock = deps.pullLock ?? lockFile;
+  const pullBusy = deps.pullBusy ?? (deps.pullLock ? undefined : lockFile.held);
+  const pusherFor = (store: BoardStore) =>
+    new GitHubPusher({ store, boardFor, now: () => new Date(), claimant: `cli:${hostname()}`, ...(pullBusy ? { pullBusy } : {}) });
   const githubFor = deps.githubFor ?? lazyGitHubFor(undefined, undefined, exec);
-  const pullLock = deps.pullLock ?? fileLock(() => findRoot());
   const pullerFor = (store: BoardStore) => new GitHubPuller({ store, boardFor, githubFor, now: () => new Date(), lock: pullLock });
   /** Pulls GitHub changes before `next` (file store only). Never throws and never changes the exit code; lines go to stderr so stdout stays the ticket. */
   const pullBefore = async (cmd: Command, store: BoardStore, factories: string[] | undefined): Promise<void> => {

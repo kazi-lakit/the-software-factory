@@ -21,9 +21,14 @@ export interface PushResult {
   /** One short phrase per action taken, e.g. "created", "status Todo", "spec v2 comment", "closed". */
   done: string[];
   error: string | null;
-  skipped: 'not-github' | 'leased' | 'backoff' | null;
+  /** `busy`: the factory's pull holds its lock, so a task it is creating may not have its link yet. */
+  skipped: 'not-github' | 'leased' | 'backoff' | 'busy' | null;
 }
-export interface PusherDeps { store: BoardStore; boardFor: GitHubBoardFor; now: () => Date; claimant: string }
+export interface PusherDeps {
+  store: BoardStore; boardFor: GitHubBoardFor; now: () => Date; claimant: string;
+  /** True while a pull of the factory runs (its lock is held). Default: never. */
+  pullBusy?: (factoryId: string) => boolean;
+}
 
 export const LEASE_MS = 60_000;
 export const backoffMs = (attempts: number): number => Math.min(5_000 * 2 ** (attempts - 1), 600_000);
@@ -96,6 +101,7 @@ export class GitHubPusher {
     const def = snap.defs.find((f) => f.factoryId === task.factoryId);
     const settings = def?.github;
     if (!def || !settings || settings.mode !== 'github-only') return { ...result, skipped: 'not-github' };
+    if (this.d.pullBusy?.(task.factoryId)) return { ...result, skipped: 'busy' }; // the next push, after the pull, does it
     const link = snap.links.get(taskId);
     if (link) result.issue = this.issueName(link);
     // Nothing more to push for a closed issue, or for a task that ended before it was ever pushed: no config check, no write.

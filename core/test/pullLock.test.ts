@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, utimesSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
@@ -73,5 +73,50 @@ describe('fileLock races', () => {
     aged(root);
     (await lock('f'))!();
     expect(readdirSync(join(root, '.factory'))).toEqual([]);
+  });
+});
+
+describe('fileLock held probe and heartbeat', () => {
+  const dir = () => mkdtempSync(join(tmpdir(), 'factory-lock-'));
+  const file = (root: string) => join(root, '.factory', 'pull-f.lock');
+  const age = (root: string, ms: number) => { const t = new Date(Date.now() - ms); utimesSync(file(root), t, t); };
+
+  test('held is true only while a non-stale lock file exists, and never takes the lock', async () => {
+    const root = dir();
+    const lock = fileLock(() => root);
+    expect(lock.held('f')).toBe(false);
+    const release = await lock('f');
+    expect(lock.held('f')).toBe(true);
+    expect(lock.held('g')).toBe(false);
+    age(root, 121_000);
+    expect(lock.held('f')).toBe(false);
+    expect(existsSync(file(root))).toBe(true);
+    age(root, 0);
+    release!();
+    expect(lock.held('f')).toBe(false);
+    expect(readdirSync(join(root, '.factory'))).toEqual([]);
+  });
+
+  test('touch refreshes the lock so a long pull is not taken over as stale', async () => {
+    const root = dir();
+    const lock = fileLock(() => root);
+    const release = await lock('f');
+    age(root, 100_000);
+    expect(release!.touch!()).toBe(true);
+    expect(Date.now() - statSync(file(root)).mtimeMs).toBeLessThan(5_000);
+    expect(await lock('f')).toBeNull();
+  });
+
+  test('touch after another holder took over leaves the new lock alone', async () => {
+    const root = dir();
+    const lock = fileLock(() => root);
+    const first = await lock('f');
+    age(root, 121_000);
+    const second = await lock('f');
+    expect(second).not.toBeNull();
+    age(root, 50_000);
+    const before = statSync(file(root)).mtimeMs;
+    expect(first!.touch!()).toBe(false);
+    expect(statSync(file(root)).mtimeMs).toBe(before);
   });
 });

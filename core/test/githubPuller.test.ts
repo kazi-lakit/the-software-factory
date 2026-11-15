@@ -147,6 +147,85 @@ describe('GitHubPuller', () => {
     expect(released).toBe(1);
   });
 
+  test('each created task has its link saved before the next create', async () => {
+    const seenAtSecond: (GitHubLink | undefined)[] = [];
+    let creates = 0;
+    const s = setup({ wrap: (st) => new Proxy(st, { get(t, p, r) {
+      const v = Reflect.get(t, p, r);
+      if (p !== 'createTask') return typeof v === 'function' ? v.bind(t) : v;
+      return async (...a: unknown[]) => {
+        if (++creates === 2) seenAtSecond.push(await t.getGitHubLink('T-1'));
+        return (v as (...x: unknown[]) => unknown).apply(t, a);
+      };
+    } }) });
+    for (const n of [1, 2]) {
+      const made = await s.board.createIssue(REPO, { title: `New ${n}`, body: '', labels: ['factory'] });
+      await s.board.addToProject(await project(s), made.nodeId);
+    }
+    const [r] = await s.puller.pull();
+    expect(r!.errors).toEqual([]);
+    expect(r!.created.map((c) => c.taskId)).toEqual(['T-1', 'T-2']);
+    expect(seenAtSecond).toMatchObject([{ taskId: 'T-1', issueNumber: 1 }]);
+    expect(await s.store.getGitHubLink('T-2')).toMatchObject({ issueNumber: 2 });
+  });
+
+  test('the lock is touched after the GitHub reads and before anything is applied', async () => {
+    const order: string[] = [];
+    const lock: PullLock = async () => Object.assign(() => { order.push('release'); }, { touch: () => { order.push('touch'); return true; } });
+    const s = setup({ lock, board: (b) => new Proxy(b, { get(t, p, r) {
+      const v = Reflect.get(t, p, r);
+      if (typeof v !== 'function') return v;
+      return (...a: unknown[]) => { if (p === 'listItems') order.push('read'); return v.apply(t, a); };
+    } }) });
+    const made = await s.board.createIssue(REPO, { title: 'New', body: '', labels: ['factory'] });
+    await s.board.addToProject(await project(s), made.nodeId);
+    const orig = s.store.createTask.bind(s.store);
+    s.store.createTask = async (x) => { order.push('apply'); return orig(x); };
+    const [r] = await s.puller.pull();
+    expect(r!.created).toHaveLength(1);
+    expect(order).toEqual(['read', 'touch', 'apply', 'release']);
+  });
+
+  test('a lock lost before applying stops the pull with an error and changes nothing', async () => {
+    const lock: PullLock = async () => Object.assign(() => undefined, { touch: () => false });
+    const s = setup({ lock });
+    const made = await s.board.createIssue(REPO, { title: 'New', body: '', labels: ['factory'] });
+    await s.board.addToProject(await project(s), made.nodeId);
+    const [r] = await s.puller.pull();
+    expect(r!.created).toEqual([]);
+    expect(r!.errors).toMatchObject([{ taskId: null, message: 'pull lock taken over by another pull; nothing applied' }]);
+    expect(await s.store.listTasks()).toEqual([]);
+  });
+
+  test('a PR review from before the task last moved to pr_open is not counted again', async () => {
+    const s = setup();
+    const t = await add(s);
+    const pr = await s.gh.openPr({ remote: 'git@github.com:o/app.git', head: 'h', base: 'dev', title: 't', body: 'b' });
+    await s.store.addDoc(t.taskId, 'review', 'review v1', 'agent');
+    await s.store.updateTask(t.taskId, 1, { status: 'pr_open', prUrl: pr.url });
+    await s.pusher.pushTask(t.taskId);
+    const old = s.gh.addReview(pr.url, { author: 'kazi-lakit', state: 'changes_requested', body: 'fix it' });
+    // The task went back through build (no new commit) and review wrote doc v2, then returned to pr_open.
+    await s.store.addDoc(t.taskId, 'review', 'review v2', 'agent');
+    const moved = new Date(Date.parse(old.submittedAt!) + 1_000).toISOString();
+    await s.store.addEvents([{ taskId: t.taskId, factoryId: 'f', actor: 'core', action: 'move', field: 'status', from: 'review', to: 'pr_open', reason: 'shipped', at: moved }]);
+    const [r] = await s.puller.pull();
+    expect(r!.errors).toEqual([]);
+    expect(r!.applied).toEqual([]);
+    expect(await s.store.listApprovals(t.taskId)).toEqual([]);
+  });
+
+  test('an /answer moves pushed.blockedAt to that comment, so it is not read again if the task blocks again', async () => {
+    const s = setup();
+    const t = await add(s);
+    await s.store.updateTask(t.taskId, 1, { status: 'blocked', stage: 'spec', blockedReason: 'need info', question: 'Which DB?' });
+    await s.pusher.pushTask(t.taskId);
+    const c = await s.board.addComment(REPO, 1, '/answer Postgres', 'kazi-lakit');
+    const [r] = await s.puller.pull();
+    expect(r!.applied).toMatchObject([{ change: 'answered by kazi-lakit' }]);
+    expect((await s.store.getGitHubLink(t.taskId))!.pushed.blockedAt).toBe(c.createdAt);
+  });
+
   test('factory without github is not pulled', async () => {
     const s = setup({ github: false });
     expect(await s.puller.pull()).toEqual([]);

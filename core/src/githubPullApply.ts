@@ -15,6 +15,8 @@ export interface PullApplied { taskId: string; issue: string; change: string; co
 export interface PullCreated { taskId: string; issue: string; status: 'inbox' | 'ready'; action: Extract<PullAction, { kind: 'create' }> }
 export interface PullError { taskId: string | null; issue: string | null; message: string }
 export interface ApplyResult { created: PullCreated[]; applied: PullApplied[]; notApplied: NotApplied[]; errors: PullError[] }
+/** `onCreated` runs right after each create (the core saves the new task's link there); a throw is an error for that task. */
+export interface ApplyHooks { onCreated?: (created: PullCreated) => Promise<void> }
 
 type Linked = Exclude<PullAction, { kind: 'create' }>;
 type Done = { task: Task; change: string };
@@ -62,22 +64,26 @@ async function run(store: BoardStore, now: () => Date, task: Task, a: Linked): P
 }
 
 /** Applies the plan's actions in order; a refused action is "not applied", any other error is reported and the run goes on. */
-export async function applyPull(store: BoardStore, now: () => Date, plan: PullPlan): Promise<ApplyResult> {
+export async function applyPull(store: BoardStore, now: () => Date, plan: PullPlan, hooks: ApplyHooks = {}): Promise<ApplyResult> {
   const out: ApplyResult = { created: [], applied: [], notApplied: [...plan.notApplied], errors: [] };
   /** The version each task has after this plan's earlier actions. */
   const versions = new Map<string, number>();
   for (const a of plan.actions) {
     const issue = issueName(a.issue);
     if (a.kind === 'create') {
+      let created: PullCreated;
       try {
         const t = await createTaskFromGitHub(
           store, now, { factoryId: plan.factoryId, title: a.title, description: a.description, repo: a.repoId, baseBranch: a.baseBranch, status: a.status }, issue,
         );
-        out.created.push({ taskId: t.taskId, issue, status: a.status, action: a });
+        created = { taskId: t.taskId, issue, status: a.status, action: a };
+        out.created.push(created);
       } catch (e) {
         if (refused(e)) out.notApplied.push({ taskId: null, issue, change: 'create', reason: firstLine(e) });
         else out.errors.push({ taskId: null, issue, message: firstLine(e) });
+        continue;
       }
+      try { await hooks.onCreated?.(created); } catch (e) { out.errors.push({ taskId: created.taskId, issue, message: firstLine(e) }); }
       continue;
     }
     const na = (reason: string, change = a.kind): void => void out.notApplied.push({ taskId: a.taskId, issue, change, reason });

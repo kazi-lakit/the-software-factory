@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
@@ -1049,6 +1049,34 @@ describe('GitHub pulling from the CLI', () => {
     expect(await failing.goWith(wire(bad), '--store', 'file', 'sync')).toBe(1);
     expect(failing.out.join('\n')).toContain('PULL FAIL');
     expect(failing.out.join('\n')).toContain('failed 1');
+  });
+
+  test('sync pushes nothing, silently, for a factory whose pull is busy', async () => {
+    const board = newBoard();
+    const { out, store, goWith } = setup(withGithub());
+    const t = await store.createTask({ factoryId: 'blocks', title: 'Do it', description: 'd', repo: 'app' });
+    expect(await goWith(wire(board, { pullBusy: (f) => f === 'blocks' }), '--store', 'file', 'sync')).toBe(0);
+    expect(out.slice(1)).toEqual(['pushed 0, failed 0']);
+    expect(await store.getGitHubLink(t.taskId)).toBeUndefined();
+  });
+
+  test('by default a held pull lock file also holds back the push', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'factory-root-'));
+    mkdirSync(join(root, '.factory'));
+    writeFileSync(join(root, '.factory', 'pull-blocks.lock'), 'someone-else');
+    const prev = process.env.FACTORY_ROOT;
+    process.env.FACTORY_ROOT = root;
+    try {
+      const board = newBoard();
+      const { out, store, goWith } = setup(withGithub());
+      const t = await store.createTask({ factoryId: 'blocks', title: 'Do it', description: 'd', repo: 'app' });
+      expect(await goWith({ githubFor: () => new FakeGitHub(), githubBoardFor: () => board }, '--store', 'file', 'sync')).toBe(0);
+      expect(out).toContain('github: pull of blocks skipped (another pull is running)');
+      expect(out.at(-1)).toBe('pushed 0, failed 0');
+      expect(await store.getGitHubLink(t.taskId)).toBeUndefined();
+    } finally {
+      if (prev === undefined) delete process.env.FACTORY_ROOT; else process.env.FACTORY_ROOT = prev;
+    }
   });
 
   test('sync --watch prints a NOT APPLIED line once across ticks', async () => {

@@ -401,3 +401,25 @@ describe('GitHubPusher', () => {
     expect((await s.pusher.pushTask(t.taskId)).done).toEqual([]);
   });
 });
+
+describe('GitHubPusher while a pull runs', () => {
+  test('a github-only factory whose pull lock is held is skipped as busy, with no GitHub call and no link', async () => {
+    const s = setup();
+    const t = await add(s);
+    let busy = true;
+    const pusher = new GitHubPusher({ store: s.store, boardFor: () => s.board, now: () => NOW, claimant: 'x', pullBusy: (f) => busy && f === 'f' });
+    expect(await pusher.pushAll()).toMatchObject([{ taskId: t.taskId, skipped: 'busy', done: [], error: null }]);
+    expect(await pusher.pushTask(t.taskId)).toMatchObject({ skipped: 'busy', done: [] });
+    expect(await s.store.getGitHubLink(t.taskId)).toBeUndefined();
+    expect(await items(s)).toEqual([]);
+    busy = false;
+    expect(await pusher.pushTask(t.taskId)).toMatchObject({ issue: 'o/app#1', skipped: null });
+  });
+
+  test('a factory without github is still reported not-github while busy', async () => {
+    const s = setup(null);
+    const t = await add(s);
+    const pusher = new GitHubPusher({ store: s.store, boardFor: () => s.board, now: () => NOW, claimant: 'x', pullBusy: () => true });
+    expect(await pusher.pushTask(t.taskId)).toMatchObject({ skipped: 'not-github' });
+  });
+});
