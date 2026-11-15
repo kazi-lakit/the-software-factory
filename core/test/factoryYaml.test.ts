@@ -130,6 +130,8 @@ describe('normaliseFactoryYaml: new shape', () => {
     [{ board: { source: 'jira' } }, 'board.source: jira is not supported yet'],
     [{ board: { source: 'factory-app' } }, 'board.source: factory-app needs factory.source factory-app'],
     [{ board: { source: 'github', mirror: 'github', project: 'a/1' } }, 'board.mirror: github needs board.source factory-app'],
+    [{ factory: { source: 'factory-app' } }, 'board.source: github needs factory.source local'],
+    [{ factory: { source: 'factory-app' }, board: { source: 'none' } }, 'board.source: must be factory-app when factory.source is factory-app (the app is its board)'],
     [{ accounts: {} }, 'accounts.github is required (used by: board, repos)'],
     [{ repos: { host: 'gitlab' } }, 'repos.host: gitlab is not supported yet'],
     [{ repos: { list: [{ ...REPO, host: 'gitlab' }] } }, 'repos.list[0].host: gitlab is not supported yet'],
@@ -144,6 +146,16 @@ describe('normaliseFactoryYaml: new shape', () => {
     [{ repos: { list: [{ ...REPO, remote: '' }] } }, 'repos.list[0].remote: must not be blank'],
     [{ gates: { spec: 'yes' } }, 'gates.spec: must be true or false'],
   ])('refuses %j', (patch, error) => expect(normaliseFactoryYaml(merge(BASE, patch))).toEqual({ ok: false, error }));
+
+  test('a factory-app factory with no board section is refused too', () => {
+    expect(normaliseFactoryYaml({ factory: { id: 'app', source: 'factory-app' } }))
+      .toEqual({ ok: false, error: 'board.source: must be factory-app when factory.source is factory-app (the app is its board)' });
+  });
+
+  test('a blank host counts as left out', () => {
+    const v = ok(merge(BASE, { repos: { host: '', list: [{ ...REPO, host: '  ' }] } }));
+    expect(v.repos.map((r) => r.repoId)).toEqual(['web']);
+  });
 
   test('a board-only GitHub use names only the board', () => {
     expect(normaliseFactoryYaml(merge(BASE, { accounts: {}, repos: { list: [] } }))).toEqual({ ok: false, error: 'accounts.github is required (used by: board)' });
@@ -187,6 +199,14 @@ describe('normaliseFactoryYaml: legacy shape', () => {
     expect(c.source).toBe('factory-app');
     expect(c.board).toMatchObject({ source: 'factory-app', mirror: 'github', project: { owner: 'old-login', number: 3 } });
     expect(c.def.github).toMatchObject({ mode: 'connected' });
+  });
+
+  test('a legacy github block with no ghUser still records the github account it resolves to', () => {
+    const { ghUser: _, ...noUser } = LEGACY;
+    const v = ok({ ...noUser, github: { mode: 'github-only', project: 'kazi-lakit/3', statusMap: DEFAULT_STATUS_MAP } });
+    expect(v.def.ghUser).toBe('kazi-lakit');
+    expect(v.accounts).toEqual({ github: 'kazi-lakit' });
+    expect(ok(noUser).accounts).toEqual({});
   });
 
   test('a legacy file with no github block is local with board none', () => {

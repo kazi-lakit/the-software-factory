@@ -74,9 +74,9 @@ function choiceAt<T extends string>(v: unknown, path: string, choices: readonly 
   return (choices as readonly unknown[]).includes(v) ? { ok: true, value: v as T } : fail(`${path}: must be one of ${choices.join(', ')}`);
 }
 
-/** A repo host: only github in v1. */
+/** A repo host: only github in v1. Blank counts as left out. */
 function hostAt(v: unknown, path: string): Validated<'github'> {
-  if (!given(v) || v === 'github') return { ok: true, value: 'github' };
+  if (!given(v) || v === 'github' || (typeof v === 'string' && v.trim() === '')) return { ok: true, value: 'github' };
   return typeof v === 'string' ? fail(`${path}: ${v} is not supported yet`) : fail(`${path}: must be text`);
 }
 
@@ -121,7 +121,8 @@ function fromLegacy(raw: unknown): Validated<FactoryYaml> {
     ok: true,
     value: {
       shape: 'legacy', source: connected ? 'factory-app' : 'local', def, repos: [], gates: null,
-      accounts: typeof rawGhUser === 'string' && rawGhUser.trim() !== '' ? { github: def.ghUser } : {},
+      // The resolved login whenever GitHub is used, even if the file left ghUser out (it falls back as today).
+      accounts: def.github || (typeof rawGhUser === 'string' && rawGhUser.trim() !== '') ? { github: def.ghUser } : {},
       board: def.github ? boardOf(connected ? 'factory-app' : 'github', connected ? 'github' : 'none', def.github) : boardOf('none', 'none', undefined),
     },
   };
@@ -133,6 +134,7 @@ function sourcesFit(source: FactorySource, board: BoardSource, mirror: 'none' | 
   if (board === 'factory-app' && source !== 'factory-app') return 'board.source: factory-app needs factory.source factory-app';
   if (board === 'github' && source !== 'local') return 'board.source: github needs factory.source local';
   if (mirror !== 'none' && board !== 'factory-app') return `board.mirror: ${mirror} needs board.source factory-app`;
+  if (source === 'factory-app' && board !== 'factory-app') return 'board.source: must be factory-app when factory.source is factory-app (the app is its board)';
   return null;
 }
 
