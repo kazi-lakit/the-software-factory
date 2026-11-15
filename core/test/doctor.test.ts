@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 import { doctor } from '../src/doctor.js';
+import { FakeGitHubSetup } from '../src/githubSetup.js';
 import { FakeGitHubBoard, type GitHubBoard } from '../src/githubBoard.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
 
@@ -190,5 +191,64 @@ describe('doctor on the Blocks store (connected mode)', () => {
   test('github-only on file: no new checks', async () => {
     const out = await runB({ store: 'file', mode: 'github-only' });
     expect(names(out)).toEqual(['gh login', 'config', 'scope', 'project', 'status options', 'label api']);
+  });
+
+  describe('factory.yaml and repo access', () => {
+    const setupFake = (...repos: [string, string[]][]) => {
+      const f = new FakeGitHubSetup();
+      for (const [k, branches] of repos) f.repos.set(k, { defaultBranch: 'main', branches });
+      return f;
+    };
+    const withSetup = (f: FakeGitHubSetup, defs: ReturnType<typeof def>[], repos: ReturnType<typeof repoFixture>[], more: object = {}) =>
+      doctor({ defs, repos, store: 'file', loggedIn: LOGGED, boardFor: () => setup(), setupFor: () => f, ...more });
+
+    test('a factory.yaml problem is a failing config file check with the fix', async () => {
+      const out = await doctor({
+        defs: [def('a')], repos: [], store: 'file', loggedIn: LOGGED, boardFor: () => setup(),
+        fileProblems: [{ factoryId: 'gone', file: '/f/gone/factory.yaml', reason: 'factory.agents.build: bad model' }, { factoryId: 'a', file: '/f/a/factory.yaml', reason: 'x: y' }],
+      });
+      expect(out).toEqual([
+        { factoryId: 'a', check: 'config file', ok: false, detail: '/f/a/factory.yaml: x: y; fix the file or run ./factory init' },
+        { factoryId: 'a', check: 'gh login', ok: true, detail: 'kazi-lakit logged in' },
+        { factoryId: 'gone', check: 'config file', ok: false, detail: '/f/gone/factory.yaml: factory.agents.build: bad model; fix the file or run ./factory init' },
+      ]);
+    });
+
+    test('repo and base checks per repo, in repoId order, for a factory without github', async () => {
+      const f = setupFake(['org/api', ['dev']], ['org/web', []]);
+      const out = await withSetup(f, [def('a')], [repoFixture('a', 'web'), repoFixture('a', 'api')]);
+      expect(out.map((c) => [c.check, c.ok, c.detail])).toEqual([
+        ['gh login', true, 'kazi-lakit logged in'],
+        ['repo api', true, 'org/api reachable as kazi-lakit'],
+        ['base api', true, 'dev exists'],
+        ['repo web', true, 'org/web reachable as kazi-lakit'],
+        ['base web', false, 'base branch dev not found on org/web'],
+      ]);
+    });
+
+    test('an unreachable repo fails repo and skips base', async () => {
+      const out = await withSetup(setupFake(), [def('a')], [repoFixture('a', 'api'), repoFixture('a', 'x', { remote: 'git@gitlab.com:o/x.git' })]);
+      expect(out.map((c) => [c.check, c.ok, c.detail])).toEqual([
+        ['gh login', true, 'kazi-lakit logged in'],
+        ['repo api', false, 'org/api not found or not visible to kazi-lakit'],
+        ['repo x', false, 'remote is not a GitHub repo (only GitHub is supported)'],
+      ]);
+    });
+
+    test('a client error fails the repo check with its first line', async () => {
+      const f = setupFake();
+      f.repo = async () => { throw new Error('boom ghp_abc123\nmore'); };
+      const out = await withSetup(f, [def('a')], [repoFixture('a', 'api')]);
+      expect(out[1]).toEqual({ factoryId: 'a', check: 'repo api', ok: false, detail: 'boom [redacted]' });
+    });
+
+    test('without setupFor no repo checks run (old callers unchanged)', async () => {
+      expect(names(await run(setup(), [def('a')]))).toEqual(['gh login']);
+    });
+
+    test('not logged in skips the repo checks', async () => {
+      const out = await withSetup(setupFake(['org/api', ['dev']]), [def('a', undefined, 'someone')], [repoFixture('a', 'api')]);
+      expect(names(out)).toEqual(['gh login']);
+    });
   });
 });

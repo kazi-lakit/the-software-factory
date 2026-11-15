@@ -1,3 +1,4 @@
+import { FakeGitHubSetup } from '../src/githubSetup.js';
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -62,7 +63,9 @@ function setup(factories = seed(), logins?: string[], ghCalls?: string[][], gh?:
     files?.push(file);
     return fake(file, args, stdin);
   };
-  const goWith = (extra: CliDeps, ...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine, { exec: exec2, ...(board ? { githubBoardFor: () => board } : {}), ...extra });
+  const fakeSetup = new FakeGitHubSetup();
+  fakeSetup.repos.set('org/data', { defaultBranch: 'main', branches: ['dev'] });
+  const goWith = (extra: CliDeps, ...argv: string[]) => run(argv, { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine, { exec: exec2, githubSetupFor: () => fakeSetup, ...(board ? { githubBoardFor: () => board } : {}), ...extra });
   const go = (...argv: string[]) => goWith({}, ...argv);
   return { store, out, err, go, goWith, wired };
 }
@@ -677,6 +680,8 @@ describe('factory doctor', () => {
     expect(await go('doctor')).toBe(0);
     expect(out).toEqual([
       'ok blocks gh login: gh-blocks logged in',
+      'ok blocks repo data: org/data reachable as gh-blocks',
+      'ok blocks base data: dev exists',
       'ok blocks config: ok',
       'ok blocks scope: project scope present',
       'ok blocks project: kazi-lakit/3 found',
@@ -697,6 +702,13 @@ describe('factory doctor', () => {
     const { out, go } = setup(withGithub(), [], undefined, undefined, undefined, board([]));
     expect(await go('doctor', '--json')).toBe(1);
     expect(JSON.parse(out.join('\n'))).toEqual({ checks: [{ factoryId: 'blocks', check: 'gh login', ok: false, detail: 'gh-blocks is not logged in (run: gh auth login --hostname github.com)' }] });
+  });
+
+  test('prints FAIL for an invalid factory.yaml and exits 1', async () => {
+    const { out, store, go } = setup(withGithub(), ['gh-blocks'], undefined, undefined, undefined, board(['Backlog', 'Todo', 'In progress', 'In review', 'Merged']));
+    (store as unknown as { factoryFileProblems: () => unknown }).factoryFileProblems = () => [{ factoryId: 'broken', file: '/f/broken/factory.yaml', reason: 'factory.agents.build: bad model' }];
+    expect(await go('--store', 'file', 'doctor')).toBe(1);
+    expect(out).toContain('FAIL broken config file: /f/broken/factory.yaml: factory.agents.build: bad model; fix the file or run ./factory init');
   });
 
   test('an unknown --factory exits 1', async () => {

@@ -22,6 +22,7 @@ import { GitHubWatcher, type SyncHandled, type WatchTick } from './githubWatcher
 import { GITHUB_SCHEMA_MISSING } from './githubSync.js';
 import type { GitHubFor } from './github.js';
 import type { GitHubBoardFor } from './githubBoard.js';
+import { lazyGitHubSetupFor, type GitHubSetupFor } from './githubSetup.js';
 import { parseStoreKind, storeDirPath, storeForFactories, type StoreKind } from './storeSelect.js';
 import { findRoot, lazyGitHubBoardFor, lazyGitHubFor, wire, type WireOptions } from './wire.js';
 
@@ -83,6 +84,8 @@ export interface CliDeps {
   home?: string;
   /** GitHub client per gh login (`factory doctor`). Default: the real one over the gh logins. Tests pass a fake. */
   githubBoardFor?: GitHubBoardFor;
+  /** Setup client per login (`factory doctor` repo and base branch checks). Default: the real one over the logins. Tests pass a fake. */
+  githubSetupFor?: GitHubSetupFor;
   /** GitHub client per login for the pull (reviews, comments, PR state). Default: the real one over the gh logins. Tests pass a fake. */
   githubFor?: GitHubFor;
   /** One pull per factory at a time. Default: a lock file in the local store dir (`<root>/.factory/`, or FACTORY_STORE_LOCAL_PATH). Tests pass an in-memory lock. */
@@ -373,6 +376,8 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       if (unknown.length > 0) throw new CliExit(`unknown factory: ${unknown.join(', ')}`, 1);
       const checks = await doctor({
         defs, repos, store: kind, ...(kind === 'blocks' ? { schemaReady: await store.githubSchemaReady(), health: await store.listFactoryHealth() } : {}), loggedIn: await ghLoggedInUsers(exec), boardFor: deps.githubBoardFor ?? lazyGitHubBoardFor(undefined, undefined, exec),
+        setupFor: deps.githubSetupFor ?? lazyGitHubSetupFor(undefined, exec),
+        ...(kind === 'file' && 'factoryFileProblems' in store ? { fileProblems: (store as unknown as { factoryFileProblems(): { factoryId: string; file: string; reason: string }[] }).factoryFileProblems() } : {}),
         ...(only ? { only } : {}),
       });
       if (o.json) printJson({ checks });

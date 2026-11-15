@@ -1,3 +1,4 @@
+import type { GitHubSetupFor } from './githubSetup.js';
 import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
 import { githubConfigProblems } from './githubConfig.js';
 import type { GitHubBoardFor, ProjectInfo } from './githubBoard.js';
@@ -24,11 +25,20 @@ export async function doctor(o: {
   only?: string[];
   /** Blocks store: whether the GitHub tables exist, each factory's health, and the clock (the connected checks). */
   schemaReady?: boolean; health?: FactoryHealth[]; now?: Date;
+  /** With this, each repo's access and base branch are checked (after the login check passes). */
+  setupFor?: GitHubSetupFor;
+  /** factory.yaml files that failed to load; each is a failing `config file` check, even for a factory with no def. */
+  fileProblems?: { factoryId: string; file: string; reason: string }[];
 }): Promise<DoctorCheck[]> {
   const problems = githubConfigProblems(o.defs, o.repos, o.store);
   const out: DoctorCheck[] = [];
+  const fileChecks = (factoryId: string) => {
+    for (const p of (o.fileProblems ?? []).filter((x) => x.factoryId === factoryId))
+      out.push({ factoryId, check: 'config file', ok: false, detail: redactSecrets(`${p.file}: ${p.reason}; fix the file or run ./factory init`) });
+  };
   for (const def of o.defs.filter((d) => !o.only || o.only.includes(d.factoryId))) {
     const factoryId = def.factoryId;
+    fileChecks(factoryId);
     const add = (check: string, ok: boolean, detail: string): boolean => { out.push({ factoryId, check, ok, detail: redactSecrets(detail) }); return ok; };
     /** Runs a check; a thrown error fails it with the first line of the message. */
     const attempt = async <T>(check: string, fn: () => Promise<T>): Promise<T | undefined> => {
@@ -40,6 +50,8 @@ export async function doctor(o: {
       continue;
     }
     add('gh login', true, `${def.ghUser} logged in`);
+    const myRepos = o.repos.filter((r) => r.factoryId === factoryId).sort((a, b) => byId(a.repoId, b.repoId));
+    if (o.setupFor) await repoChecks(def.ghUser, myRepos, o.setupFor(def.ghUser), add, attempt);
     const github = def.github;
     if (!github) continue;
 
@@ -76,7 +88,7 @@ export async function doctor(o: {
         else add('status options', false, `missing on the Project: ${missing.join(', ')}`);
       }
     }
-    for (const repo of o.repos.filter((r) => r.factoryId === factoryId).sort((a, b) => byId(a.repoId, b.repoId))) {
+    for (const repo of myRepos) {
       let remote: { owner: string; repo: string };
       try { remote = parseRemote(repo.remote); } catch { continue; }
       const check = `label ${repo.repoId}`;
@@ -92,5 +104,29 @@ export async function doctor(o: {
       else add('watcher', false, 'never seen; run factory sync --watch --store blocks');
     }
   }
+  const defIds = new Set(o.defs.map((d) => d.factoryId));
+  const orphans = [...new Set((o.fileProblems ?? []).map((p) => p.factoryId))].filter((id) => !defIds.has(id) && (!o.only || o.only.includes(id)));
+  for (const id of orphans.sort(byId)) fileChecks(id);
   return out;
+}
+
+/** `repo <id>` and `base <id>` per repo; an unreachable repo skips its base check. */
+async function repoChecks(
+  login: string, repos: FactoryRepo[], setup: ReturnType<GitHubSetupFor>,
+  add: (check: string, ok: boolean, detail: string) => boolean,
+  attempt: <T>(check: string, fn: () => Promise<T>) => Promise<T | undefined>,
+): Promise<void> {
+  for (const repo of repos) {
+    let ref: { owner: string; repo: string };
+    try { ref = parseRemote(repo.remote); } catch { add(`repo ${repo.repoId}`, false, 'remote is not a GitHub repo (only GitHub is supported)'); continue; }
+    const name = `${ref.owner}/${ref.repo}`;
+    const info = await attempt(`repo ${repo.repoId}`, () => setup.repo(ref));
+    if (info === undefined) continue;
+    if (info === null) { add(`repo ${repo.repoId}`, false, `${name} not found or not visible to ${login}`); continue; }
+    add(`repo ${repo.repoId}`, true, `${name} reachable as ${login}`);
+    const exists = await attempt(`base ${repo.repoId}`, () => setup.branchExists(ref, repo.baseBranch));
+    if (exists === undefined) continue;
+    if (exists) add(`base ${repo.repoId}`, true, `${repo.baseBranch} exists`);
+    else add(`base ${repo.repoId}`, false, `base branch ${repo.baseBranch} not found on ${name}`);
+  }
 }
