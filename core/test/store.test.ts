@@ -3,7 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
-import { FileStore, ForbiddenError, MemoryStore, RereadAfterUpdateError, updateHeld, VersionConflictError } from '../src/store.js';
+import { FileStore, ForbiddenError, MemoryStore, RereadAfterUpdateError, updateHeld, VersionConflictError, type StoredSettings } from '../src/store.js';
+import { parse } from 'yaml';
+import { DEFAULT_STATUS_MAP } from '../src/githubConfig.js';
 import { runStoreContract } from './storeContract.js';
 import { yamlVersion } from '../src/factoriesFs.js';
 import { emptyPushed, type GitHubLink } from '../src/githubLink.js';
@@ -343,5 +345,160 @@ describe.each([
 
   test('restoreTask is core only', async () => {
     await expect(make('owner').restoreTask(task('T-1'))).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+describe('FileStore writes YAML-backed definitions through factory.yaml', () => {
+  const NEW = [
+    '# Delta factory',
+    'factory:',
+    '  id: delta',
+    '  name: Delta # the display name',
+    '  source: local',
+    'accounts:',
+    '  github: kazi-lakit',
+    'board:',
+    '  source: none',
+    'repos:',
+    '  protectedBranches: [dev, stg, main]',
+    '  list:',
+    '    - id: api',
+    '      remote: git@github.com:o/api.git',
+    '      baseBranch: dev',
+    '      protectedBranches: [dev, main]',
+    '      checks:',
+    '        - { name: test, cwd: ., run: npm test }',
+    '',
+  ].join('\n');
+  const LEGACY = 'factoryId: delta\nname: Delta\n';
+  const HINT = /factories[\\/]delta[\\/]factory\.yaml is in the old format; run \.\/factory init to convert it/;
+  const setup = (yaml: string, stored: { defs?: unknown[]; settings?: unknown } = {}) => {
+    const root = mkdtempSync(join(tmpdir(), 'fs-yw-'));
+    mkdirSync(join(root, 'factories', 'delta'), { recursive: true });
+    const file = join(root, 'factories', 'delta', 'factory.yaml');
+    writeFileSync(file, yaml);
+    const board = join(root, '.factory', 'board.json');
+    mkdirSync(join(root, '.factory'), { recursive: true });
+    writeFileSync(board, JSON.stringify({ factoryDefs: stored.defs ?? [], settings: stored.settings ?? null }));
+    return { file, board, store: new FileStore(board, { factoriesDir: join(root, 'factories') }) };
+  };
+  const rawBoard = (board: string) => JSON.parse(readFileSync(board, 'utf8')) as { factoryDefs: { factoryId: string }[]; factoryRepos: unknown[]; settings: StoredSettings };
+
+  test('saveFactoryDef on a YAML-backed factory writes the YAML and returns the new hash version', async () => {
+    const { file, board, store } = setup(NEW);
+    const [def] = await store.listFactoryDefs();
+    const saved = await store.saveFactoryDef(def!, { ...def!, name: 'Delta Two', gitName: 'Bot', gitEmail: 'bot@x.io', agentModels: { build: 'sonnet' } });
+    const text = readFileSync(file, 'utf8');
+    expect(text).toContain('# Delta factory');
+    expect(text).toContain('name: Delta Two # the display name');
+    expect(text).toMatch(/git:\n {4}name: Bot\n {4}email: bot@x.io/);
+    expect(saved).toMatchObject({ name: 'Delta Two', gitName: 'Bot', agentModels: { build: 'sonnet' }, version: yamlVersion(text) });
+    expect(await store.listFactoryDefs()).toEqual([saved]);
+    expect(rawBoard(board).factoryDefs).toEqual([]);
+  });
+
+  test('saveFactoryDef writes accounts, protected branches and the GitHub board', async () => {
+    const { file, store } = setup(NEW);
+    const [def] = await store.listFactoryDefs();
+    const github = { mode: 'github-only' as const, project: { owner: 'o', number: 7 }, label: 'factory', approvers: ['ana'], statusMap: { ...DEFAULT_STATUS_MAP } };
+    const saved = await store.saveFactoryDef(def!, { ...def!, ghUser: 'ana', protectedBranches: ['dev', 'main'], github });
+    const y = parse(readFileSync(file, 'utf8')) as Record<string, Record<string, unknown>>;
+    expect(y.accounts).toEqual({ github: 'ana' });
+    expect(y.repos!.protectedBranches).toEqual(['dev', 'main']);
+    expect(y.board).toEqual({ source: 'github', project: 'o/7', label: 'factory', approvers: ['ana'] });
+    expect(saved).toMatchObject({ ghUser: 'ana', github });
+    const back = await store.saveFactoryDef(saved, { ...saved, github: undefined });
+    expect((parse(readFileSync(file, 'utf8')) as Record<string, unknown>).board).toEqual({ source: 'none' });
+    expect(back).not.toHaveProperty('github');
+    await expect(store.saveFactoryDef(back, { ...back, github: { ...github, mode: 'connected' } })).rejects.toThrow(/needs factory.source factory-app/);
+  });
+
+  test('saveFactoryDef with a stale version throws VersionConflictError', async () => {
+    const { file, store } = setup(NEW);
+    const [def] = await store.listFactoryDefs();
+    writeFileSync(file, NEW.replace('# Delta factory', '# edited by hand'));
+    await expect(store.saveFactoryDef(def!, { ...def!, name: 'X' })).rejects.toBeInstanceOf(VersionConflictError);
+    expect(readFileSync(file, 'utf8')).toContain('# edited by hand');
+    await expect(store.saveFactoryDef(null, { ...def!, name: 'X' })).rejects.toThrow('factory delta already exists; reload and save again');
+    await expect(store.saveFactoryDef(null, { ...def!, name: 'X' })).rejects.toBeInstanceOf(VersionConflictError);
+  });
+
+  test('saveFactoryRepo adds a repo to repos.list', async () => {
+    const { file, board, store } = setup(NEW);
+    const repo = { factoryId: 'delta', repoId: 'web', remote: 'git@github.com:o/web.git', baseBranch: 'dev', checks: [{ name: 'lint', cwd: '.', run: 'npm run lint' }], version: 0 };
+    const saved = await store.saveFactoryRepo(null, repo);
+    const text = readFileSync(file, 'utf8');
+    expect(text).toContain('    - id: web');
+    expect(text).toContain('{ name: lint, cwd: ., run: npm run lint }');
+    expect(saved).toMatchObject({ repoId: 'web', remote: repo.remote, checks: repo.checks, version: yamlVersion(text) });
+    expect((await store.listFactoryRepos('delta')).map((r) => r.repoId)).toEqual(['api', 'web']);
+    expect(rawBoard(board).factoryRepos).toEqual([]);
+    await expect(store.saveFactoryRepo(null, repo)).rejects.toThrow('repo delta/web already exists; reload and save again');
+  });
+
+  test('saveFactoryRepo updates a repo and keeps the fields the caller did not send', async () => {
+    const { file, store } = setup(NEW);
+    const [api] = await store.listFactoryRepos('delta');
+    expect(api!.protectedBranches).toEqual(['dev', 'main']);
+    // The Board's repo form rebuilds the repo without protectedBranches.
+    const { protectedBranches: _p, ...fromForm } = api!;
+    const saved = await store.saveFactoryRepo(api!, { ...fromForm, baseBranch: 'stg' });
+    expect(saved).toMatchObject({ baseBranch: 'stg', protectedBranches: ['dev', 'main'] });
+    expect(readFileSync(file, 'utf8')).toContain('      protectedBranches: [dev, main]');
+    await expect(store.saveFactoryRepo(api!, { ...api!, baseBranch: 'dev' })).rejects.toBeInstanceOf(VersionConflictError);
+  });
+
+  test('updateSettingsScope writes gates to the YAML and the rest to board.json', async () => {
+    const { file, board, store } = setup(NEW);
+    const before = (await store.getSettings()).factories.delta?.factory ?? DEFAULT_SETTINGS;
+    const gates = { spec: false, plan: true, pr: true };
+    await store.updateSettingsScope('delta', before, { ...before, gates, maxParallel: 5 });
+    expect((parse(readFileSync(file, 'utf8')) as Record<string, unknown>).gates).toEqual(gates);
+    expect((await store.getSettings()).factories.delta!.factory).toEqual({ ...DEFAULT_SETTINGS, gates, maxParallel: 5 });
+    // board.json keeps no copy of the YAML's gates: removing them from the YAML falls back to the defaults.
+    const stored = rawBoard(board).settings.factories.delta!.factory;
+    expect(stored).toEqual({ ...DEFAULT_SETTINGS, maxParallel: 5 });
+    writeFileSync(file, NEW);
+    expect((await store.getSettings()).factories.delta!.factory).toEqual({ ...DEFAULT_SETTINGS, maxParallel: 5 });
+  });
+
+  test('updateSettingsScope leaves factory.yaml alone when the gates do not change', async () => {
+    const { file, store } = setup(NEW);
+    const before = (await store.getSettings()).factories.delta?.factory ?? DEFAULT_SETTINGS;
+    await store.updateSettingsScope('delta', before, { ...before, paused: true });
+    expect(readFileSync(file, 'utf8')).toBe(NEW);
+    expect((await store.getSettings()).factories.delta!.factory.paused).toBe(true);
+  });
+
+  test('writes to a legacy-shape YAML factory are refused with the convert hint', async () => {
+    const { file, store } = setup(LEGACY);
+    const [def] = await store.listFactoryDefs();
+    await expect(store.saveFactoryDef(def!, { ...def!, name: 'X' })).rejects.toThrow(HINT);
+    const repo = { factoryId: 'delta', repoId: 'web', remote: 'git@github.com:o/web.git', baseBranch: 'dev', checks: [], version: 0 };
+    await expect(store.saveFactoryRepo(null, repo)).rejects.toThrow(HINT);
+    const before = (await store.getSettings()).factories.delta?.factory ?? DEFAULT_SETTINGS;
+    await expect(store.updateSettingsScope('delta', before, { ...before, gates: { ...before.gates, plan: true } })).rejects.toThrow(HINT);
+    expect(readFileSync(file, 'utf8')).toBe(LEGACY);
+    expect(await store.listFactoryRepos('delta')).toEqual([]);
+    // Settings the YAML does not own (pause, limits) still save to board.json.
+    await store.updateSettingsScope('delta', before, { ...before, paused: true });
+    expect((await store.getSettings()).factories.delta!.factory).toEqual({ ...DEFAULT_SETTINGS, paused: true });
+  });
+
+  test('a board.json-only factory still saves to board.json', async () => {
+    const { board, store } = setup(NEW);
+    const def = { factoryId: 'echo', name: 'Echo', protectedBranches: ['main'], gitName: '', gitEmail: '', docsPath: '', ghUser: 'kazi-lakit', active: true, version: 0 };
+    const saved = await store.saveFactoryDef(null, def);
+    expect(saved.version).toBe(1);
+    const repo = { factoryId: 'echo', repoId: 'web', remote: 'git@github.com:o/web.git', baseBranch: 'dev', checks: [], version: 0 };
+    expect((await store.saveFactoryRepo(null, repo)).version).toBe(1);
+    const before = (await store.getSettings()).factories.echo?.factory ?? DEFAULT_SETTINGS;
+    const gates = { spec: false, plan: false, pr: false };
+    await store.updateSettingsScope('echo', before, { ...before, gates });
+    const raw = rawBoard(board);
+    expect(raw.factoryDefs.map((d) => d.factoryId)).toEqual(['echo']);
+    expect(raw.factoryRepos).toHaveLength(1);
+    expect(raw.settings.factories.echo!.factory.gates).toEqual(gates);
+    expect(existsSync(join(board, '..', '..', 'factories', 'echo'))).toBe(false);
   });
 });

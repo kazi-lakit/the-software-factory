@@ -4,10 +4,13 @@ import { dirname, join } from 'node:path';
 import { DEFAULT_SETTINGS } from './defaults.js';
 import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
 import { loadFactoriesFromDir, type FactoryDirLoad, type FactoryFileProblem } from './factoriesFs.js';
+import { applyChange, loadFactoryFile, saveFactoryFile, type ConfigChange, type FactoryFile } from './factoryFile.js';
+import type { FactoryYaml } from './factoryYaml.js';
+import { DEFAULT_STATUS_MAP, type GitHubSettings } from './githubConfig.js';
 import { canSyncMove, type SyncRequest } from './githubSync.js';
 import { withLinkDefaults, type GitHubLink } from './githubLink.js';
 import type {
-  Approval, Doc, DocKind, FactoryEvent, Mode, RepoSettings, Run, Settings, Step, Task,
+  Approval, Doc, DocKind, FactoryEvent, Gate, Mode, RepoSettings, Run, Settings, Step, Task,
 } from './types.js';
 
 export {
@@ -216,26 +219,32 @@ export class MemoryStore implements BoardStore {
 
   async saveFactoryDef(before: FactoryDef | null, after: FactoryDef) {
     this.ownerOnly('saveFactoryDef');
-    return this.write(() => {
-      const defs = this.state.factoryDefs;
-      const i = defs.findIndex((d) => d.factoryId === after.factoryId);
-      const stored = versionedSave(`factory ${after.factoryId}`, defs[i], before, after);
-      if (i < 0) defs.push(stored);
-      else defs[i] = stored;
-      return clone(stored);
-    });
+    return this.write(() => this.putFactoryDef(before, after));
+  }
+
+  /** The compare-and-set save of a definition, run inside write(). */
+  protected putFactoryDef(before: FactoryDef | null, after: FactoryDef): FactoryDef {
+    const defs = this.state.factoryDefs;
+    const i = defs.findIndex((d) => d.factoryId === after.factoryId);
+    const stored = versionedSave(`factory ${after.factoryId}`, defs[i], before, after);
+    if (i < 0) defs.push(stored);
+    else defs[i] = stored;
+    return clone(stored);
   }
 
   async saveFactoryRepo(before: FactoryRepo | null, after: FactoryRepo) {
     this.ownerOnly('saveFactoryRepo');
-    return this.write(() => {
-      const repos = this.state.factoryRepos;
-      const i = repos.findIndex((r) => r.factoryId === after.factoryId && r.repoId === after.repoId);
-      const stored = versionedSave(`repo ${after.factoryId}/${after.repoId}`, repos[i], before, after);
-      if (i < 0) repos.push(stored);
-      else repos[i] = stored;
-      return clone(stored);
-    });
+    return this.write(() => this.putFactoryRepo(before, after));
+  }
+
+  /** The compare-and-set save of a repo, run inside write(). */
+  protected putFactoryRepo(before: FactoryRepo | null, after: FactoryRepo): FactoryRepo {
+    const repos = this.state.factoryRepos;
+    const i = repos.findIndex((r) => r.factoryId === after.factoryId && r.repoId === after.repoId);
+    const stored = versionedSave(`repo ${after.factoryId}/${after.repoId}`, repos[i], before, after);
+    if (i < 0) repos.push(stored);
+    else repos[i] = stored;
+    return clone(stored);
   }
 
   listGitHubLinks(factoryId?: string) {
@@ -349,11 +358,16 @@ export class MemoryStore implements BoardStore {
       const current = repoId === undefined ? (entry?.factory ?? DEFAULT_SETTINGS) : entry?.repos[repoId];
       if (canonicalJson(current) !== canonicalJson(before)) throw settingsConflict(scope);
       const target = (s.factories[factoryId] ??= { factory: clone(DEFAULT_SETTINGS), repos: {} });
-      if (repoId === undefined) target.factory = clone(after as Settings);
+      if (repoId === undefined) target.factory = this.storedFactorySettings(factoryId, current as Settings, clone(after as Settings));
       else if (after === null) delete target.repos[repoId];
       else target.repos[repoId] = clone(after as RepoSettings);
       this.state.settings = s;
     });
+  }
+
+  /** What the store keeps of a factory scope save (`current` is the merged view it replaces); FileStore moves YAML gates out. */
+  protected storedFactorySettings(_factoryId: string, _current: Settings, after: Settings): Settings {
+    return after;
   }
 
   startRun(r: { taskId: string; step: Step; mode: Mode; agent: string }) {
@@ -408,6 +422,49 @@ export class MemoryStore implements BoardStore {
 /** Until `factory migrate` runs, what a store written before factories holds is the Blocks factory's. */
 const LEGACY_FACTORY = 'blocks';
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** A seeded key that matches no directory: the next load reads the factory files again. */
+const STALE_YAML = '\0stale';
+const differs = (a: unknown, b: unknown): boolean => canonicalJson(a ?? null) !== canonicalJson(b ?? null);
+const oldYaml = (factoryId: string): string => `factories/${factoryId}/factory.yaml is in the old format; run ./factory init to convert it`;
+
+/** The named changes that turn the file's definition into `after`; only the fields that differ are written. */
+function defChanges(config: FactoryYaml, after: FactoryDef): ConfigChange[] {
+  const cur = config.def;
+  const out: ConfigChange[] = [];
+  const factory: Extract<ConfigChange, { kind: 'setFactory' }> = { kind: 'setFactory' };
+  if (after.name !== cur.name) factory.name = after.name;
+  if (after.docsPath !== cur.docsPath) factory.docsPath = after.docsPath;
+  if (after.active !== cur.active) factory.active = after.active;
+  if (after.gitName !== cur.gitName || after.gitEmail !== cur.gitEmail) factory.git = { name: after.gitName, email: after.gitEmail };
+  if (Object.keys(factory).length > 1) out.push(factory);
+  if (differs(after.agentModels ?? {}, cur.agentModels ?? {})) out.push({ kind: 'setModels', models: after.agentModels ?? {} });
+  if (after.ghUser !== cur.ghUser) out.push({ kind: 'setAccounts', accounts: { ...config.accounts, github: after.ghUser } });
+  if (differs(after.protectedBranches, cur.protectedBranches)) out.push({ kind: 'setProtectedBranches', branches: after.protectedBranches });
+  if (differs(after.github, cur.github)) out.push(...boardChanges(after.github));
+  return out;
+}
+
+/** A local factory's board: none, or a GitHub Project (github-only). Connected mode belongs to a factory-app factory. */
+function boardChanges(gh: GitHubSettings | undefined): ConfigChange[] {
+  if (!gh) return [{ kind: 'setBoard', board: { source: 'none' } }];
+  if (gh.mode !== 'github-only') throw new Error(`github.mode ${gh.mode} needs factory.source factory-app; a local factory's GitHub board is github-only`);
+  return [
+    { kind: 'setBoard', board: { source: 'github', project: `${gh.project.owner}/${gh.project.number}`, label: gh.label } },
+    { kind: 'setApprovers', approvers: gh.approvers },
+    { kind: 'setStatusMap', statusMap: differs(gh.statusMap, DEFAULT_STATUS_MAP) ? gh.statusMap : null },
+  ];
+}
+
+/** The fields of `after` that differ from the stored repo. A protectedBranches the caller left out is kept as it is. */
+function repoPatch(cur: FactoryRepo, after: FactoryRepo): Extract<ConfigChange, { kind: 'updateRepo' }>['patch'] {
+  return {
+    ...(after.remote !== cur.remote ? { remote: after.remote } : {}),
+    ...(after.baseBranch !== cur.baseBranch ? { baseBranch: after.baseBranch } : {}),
+    ...(differs(after.checks, cur.checks) ? { checks: after.checks } : {}),
+    ...(after.protectedBranches !== undefined && differs(after.protectedBranches, cur.protectedBranches) ? { protectedBranches: after.protectedBranches } : {}),
+  };
+}
 
 export interface FileStoreOptions extends Omit<MemoryStoreOptions, 'factories'> {
   /** How long a write waits for the lock before it gives up (default 5 s). */
@@ -469,6 +526,76 @@ export class FileStore extends MemoryStore {
   factoryFileProblems(): FactoryFileProblem[] {
     this.reload();
     return clone(this.seeded?.problems ?? []);
+  }
+
+  /** The owned factory's file, loaded inside the write lock; undefined when board.json holds the factory. An old-format file is refused. */
+  private ownedFile(factoryId: string): FactoryFile | undefined {
+    if (this.factoriesDir === undefined || !this.seeded?.owned.includes(factoryId)) return undefined;
+    const file = loadFactoryFile(join(this.factoriesDir, factoryId));
+    if (!file.ok) throw new Error(file.error);
+    if (file.value.shape === 'legacy') throw new Error(oldYaml(factoryId));
+    return file.value;
+  }
+
+  /** Applies the changes and saves the file (nothing is written when there are none); the next load reads the files again. */
+  private saveYaml(file: FactoryFile, changes: ConfigChange[]): FactoryFile {
+    if (changes.length === 0) return file;
+    let next = file;
+    for (const change of changes) {
+      const r = applyChange(next, change);
+      if (!r.ok) throw new Error(r.error);
+      next = r.value;
+    }
+    const saved = saveFactoryFile(next);
+    if (this.seeded) this.seeded.key = STALE_YAML;
+    return saved;
+  }
+
+  /** An owned definition is saved into its factory.yaml; its version is the file's content hash. */
+  protected override putFactoryDef(before: FactoryDef | null, after: FactoryDef): FactoryDef {
+    const file = this.ownedFile(after.factoryId);
+    if (!file) return super.putFactoryDef(before, after);
+    const what = `factory ${after.factoryId}`;
+    if (before === null) throw new VersionConflictError(what, 0, file.version, `${what} already exists; reload and save again`);
+    if (before.version !== file.version) throw new VersionConflictError(what, before.version, file.version, `${what} changed since it was read; reload and save again`);
+    return clone(this.saveYaml(file, defChanges(file.config, after)).config.def);
+  }
+
+  /** An owned factory's repo is added to, or updated in, its factory.yaml. */
+  protected override putFactoryRepo(before: FactoryRepo | null, after: FactoryRepo): FactoryRepo {
+    const file = this.ownedFile(after.factoryId);
+    if (!file) return super.putFactoryRepo(before, after);
+    const what = `repo ${after.factoryId}/${after.repoId}`;
+    const cur = file.config.repos.find((r) => r.repoId === after.repoId);
+    const changes: ConfigChange[] = [];
+    if (before === null) {
+      if (cur) throw new VersionConflictError(what, 0, cur.version, `${what} already exists; reload and save again`);
+      const { repoId: id, remote, baseBranch, checks, protectedBranches } = after;
+      changes.push({ kind: 'addRepo', repo: { id, remote, baseBranch, checks, ...(protectedBranches ? { protectedBranches } : {}) } });
+    } else {
+      if (!cur || cur.version !== before.version) {
+        throw new VersionConflictError(what, before.version, cur?.version ?? 0, `${what} changed since it was read; reload and save again`);
+      }
+      const patch = repoPatch(cur, after);
+      if (Object.keys(patch).length > 0) changes.push({ kind: 'updateRepo', repoId: after.repoId, patch });
+    }
+    return clone(this.saveYaml(file, changes).config.repos.find((r) => r.repoId === after.repoId)!);
+  }
+
+  /**
+   * An owned factory's gates go to its factory.yaml when they changed. board.json keeps the rest, with the defaults in
+   * place of the gates the YAML holds, so a gate later removed from the YAML falls back to its default, not a stale copy.
+   */
+  protected override storedFactorySettings(factoryId: string, current: Settings, after: Settings): Settings {
+    if (!this.seeded?.owned.includes(factoryId)) return after;
+    let yamlGates = Object.keys(this.seeded.gates[factoryId] ?? {}) as Gate[];
+    if (differs(after.gates, current.gates)) {
+      this.saveYaml(this.ownedFile(factoryId)!, [{ kind: 'setGates', gates: after.gates }]);
+      yamlGates = Object.keys(after.gates) as Gate[];
+    }
+    const gates = { ...after.gates };
+    for (const g of yamlGates) gates[g] = DEFAULT_SETTINGS.gates[g];
+    return { ...after, gates };
   }
 
   /** Owned factories' YAML gates win over the stored ones per gate; a missing factory scope starts from the defaults. */
