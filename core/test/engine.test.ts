@@ -1257,7 +1257,7 @@ describe('sync', () => {
     expect((await store.getTask('T-3')).status).toBe('blocked');
   });
 
-  const GH_ONLY = { mode: 'github-only' as const, project: 'o/1' as never, label: 'factory', approvers: ['kazi-lakit'],
+  const GH_ONLY = { mode: 'github-only' as const, project: { owner: 'o', number: 1 }, label: 'factory', approvers: ['kazi-lakit'],
     statusMap: { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress', plan_review: 'In progress',
       build: 'In progress', verify: 'In progress', review: 'In progress', pr_open: 'In review', done: 'Merged', blocked: 'In progress', cancelled: 'Backlog' } as never };
 

@@ -31,6 +31,13 @@ export function parseProjectRef(v: string): ProjectRef | null {
   return Number.isSafeInteger(number) && number > 0 ? { owner: m[1]!, number } : null;
 }
 
+/** `owner/number` text, or the parsed `{ owner, number }` a stored definition already holds; both pass the same checks. */
+function projectOf(v: unknown): ProjectRef | null {
+  if (typeof v === 'string') return parseProjectRef(v);
+  if (!isObject(v) || typeof v.owner !== 'string' || typeof v.number !== 'number') return null;
+  return Number.isSafeInteger(v.number) ? parseProjectRef(`${v.owner}/${v.number}`) : null;
+}
+
 function statusMapOf(v: unknown): Validated<Record<Status, string>> {
   if (!isObject(v)) return fail('github.statusMap must map statuses to Project Status options');
   for (const k of Object.keys(v)) {
@@ -57,7 +64,7 @@ export function validateGitHubSettings(input: unknown, ghUser: string): Validate
   if (!isObject(input)) return fail('github must be an object');
   if (input.mode === undefined || input.mode === null) return fail('github.mode is required');
   if (input.mode !== 'github-only' && input.mode !== 'connected') return fail('github.mode must be github-only or connected');
-  const project = typeof input.project === 'string' ? parseProjectRef(input.project) : null;
+  const project = projectOf(input.project);
   if (!project) return fail('github.project must be owner/number');
   let label = DEFAULT_LABEL;
   if (input.label !== undefined && input.label !== null) {

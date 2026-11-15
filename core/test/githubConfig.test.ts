@@ -104,3 +104,18 @@ describe('githubConfigProblems', () => {
     expect(githubConfigProblems([b, a], repos, 'file').map((p) => [p.factoryId, p.repoId])).toEqual([['a', undefined], ['a', 'x'], ['b', undefined], ['b', 'y']]);
   });
 });
+
+describe('an object project', () => {
+  test('validates the same as its string form', () => {
+    expect(validateGitHubSettings(input({ project: { owner: 'kazi-lakit', number: 3 } }), 'u')).toEqual(validateGitHubSettings(input(), 'u'));
+  });
+  test.each([
+    [{ owner: 'not a login', number: 3 }],
+    [{ owner: 'kazi-lakit', number: 0 }],
+    [{ owner: 'kazi-lakit', number: 1.5 }],
+    [{ owner: 'kazi-lakit', number: '3' }],
+    [{ owner: 'kazi-lakit' }],
+  ])('refuses %j', (project) => {
+    expect(validateGitHubSettings(input({ project }), 'u')).toEqual({ ok: false, error: 'github.project must be owner/number' });
+  });
+});

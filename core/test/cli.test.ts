@@ -9,7 +9,7 @@ import type { ExecFile } from '../src/secrets.js';
 import { buildImport } from '../src/migrate.js';
 import { run, type CliDeps, type WireOptions } from '../src/cli.js';
 import { Engine } from '../src/engine.js';
-import { FactoryConfig, type FactoryDef } from '../src/factories.js';
+import { FactoryConfig } from '../src/factories.js';
 import type { GitRepos } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
 import { FakeGitHubBoard, type GitHubBoard } from '../src/githubBoard.js';
@@ -39,17 +39,11 @@ const fakeGh = (logins: string[] = ['gh-blocks'], gh: { code?: number; stdout?: 
   return { code: gh.code ?? 0, stdout: gh.stdout ?? ghStatusJson(logins), stderr: '' };
 };
 
-/** The engine validates the raw definition (project as `owner/number`); the store holds the parsed one. */
-const rawDef = (d: FactoryDef): FactoryDef => {
-  const p = d.github?.project as unknown;
-  return d.github && typeof p === 'object' && p !== null ? { ...d, github: { ...d.github, project: `${(p as { owner: string }).owner}/${(p as { number: number }).number}` as never } } : d;
-};
-
 function setup(factories = seed(), logins?: string[], ghCalls?: string[][], gh?: { code?: number; stdout?: string }, files?: string[], board?: GitHubBoard) {
   const store = new MemoryStore({ factories });
   const exec: Exec = async () => ({ code: 0, output: '' });
   const engine = new Engine({
-    store, git, githubFor: () => new FakeGitHub(), factories: async () => new FactoryConfig(factories.defs.map(rawDef), factories.repos),
+    store, git, githubFor: () => new FakeGitHub(), factories: async () => new FactoryConfig(factories.defs, factories.repos),
     exec, now: () => new Date(), mode: 'session', claimant: 'me',
   });
   const wired: WireOptions[] = [];

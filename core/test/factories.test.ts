@@ -202,6 +202,18 @@ describe('loadFactoriesFromDir', () => {
     expect(repos.map((r) => `${r.factoryId}/${r.repoId}`).sort()).toEqual(['delta/api', 'mods/api']);
     expect(repos[0]!.baseBranch).toBe('dev');
   });
+  test('a factory.yaml with a github block stays in the config the engine builds', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'factories-'));
+    mkdirSync(join(dir, 'f', 'repos'), { recursive: true });
+    const statuses = ['inbox', 'ready', 'spec', 'spec_review', 'plan', 'plan_review', 'build', 'verify', 'review', 'pr_open', 'done', 'blocked', 'cancelled'];
+    const opt = (s: string) => (s === 'inbox' ? 'Backlog' : s === 'ready' ? 'Todo' : s === 'done' ? 'Merged' : s === 'cancelled' ? 'Backlog' : s === 'pr_open' ? 'In review' : 'In progress');
+    writeFileSync(join(dir, 'f', 'factory.yaml'), `factoryId: f\nname: f\nprotectedBranches: [dev]\ngithub:\n  mode: github-only\n  project: o/3\n  statusMap:\n${statuses.map((s) => `    ${s}: ${opt(s)}`).join('\n')}\n`);
+    const { defs, repos } = loadFactoriesFromDir(dir);
+    expect(defs[0]!.github!.project).toEqual({ owner: 'o', number: 3 });
+    const cfg = new FactoryConfig(defs, repos);
+    expect(cfg.skipped()).toEqual([]);
+    expect(cfg.factories().map((f) => f.factoryId)).toEqual(['f']);
+  });
   test('a missing directory is empty', () => {
     expect(loadFactoriesFromDir(join(tmpdir(), 'no-such-factories-dir'))).toEqual({ defs: [], repos: [] });
   });
