@@ -22,7 +22,7 @@ import { GitHubWatcher, type SyncHandled, type WatchTick } from './githubWatcher
 import { GITHUB_SCHEMA_MISSING } from './githubSync.js';
 import type { GitHubFor } from './github.js';
 import type { GitHubBoardFor } from './githubBoard.js';
-import { localStoreDir, parseStoreKind, storeForFactories, type StoreKind } from './storeSelect.js';
+import { parseStoreKind, storeDirPath, storeForFactories, type StoreKind } from './storeSelect.js';
 import { findRoot, lazyGitHubBoardFor, lazyGitHubFor, wire, type WireOptions } from './wire.js';
 
 export type { WireOptions } from './wire.js';
@@ -85,7 +85,7 @@ export interface CliDeps {
   githubBoardFor?: GitHubBoardFor;
   /** GitHub client per login for the pull (reviews, comments, PR state). Default: the real one over the gh logins. Tests pass a fake. */
   githubFor?: GitHubFor;
-  /** One pull per factory at a time. Default: a lock file under `<root>/.factory/`. Tests pass an in-memory lock. */
+  /** One pull per factory at a time. Default: a lock file in the local store dir (`<root>/.factory/`, or FACTORY_STORE_LOCAL_PATH). Tests pass an in-memory lock. */
   pullLock?: PullLock;
   /** True while a factory's pull runs; the push then skips it. Default: the lock file's probe (none with an injected `pullLock`). */
   pullBusy?: (factoryId: string) => boolean;
@@ -133,7 +133,7 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   };
 
   const boardFor = deps.githubBoardFor ?? lazyGitHubBoardFor(undefined, undefined, exec);
-  const lockFile = fileLock(() => localStoreDir(findRoot()));
+  const lockFile = fileLock(() => storeDirPath(findRoot()));
   const pullLock = deps.pullLock ?? lockFile;
   const pullBusy = deps.pullBusy ?? (deps.pullLock ? undefined : lockFile.held);
   const pusherFor = (store: BoardStore, storeKind: 'file' | 'blocks' = 'file') =>

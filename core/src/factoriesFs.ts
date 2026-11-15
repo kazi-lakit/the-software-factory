@@ -53,7 +53,6 @@ export function loadFactoriesFromDir(dir: string, onSkip?: (file: string, reason
       const text = readFileSync(file, 'utf8');
       return { text, value: parse(text) };
     } catch (e) {
-      if (!onSkip) throw e;
       bad(factoryId, file, e instanceof Error ? e.message : String(e));
       return null;
     }

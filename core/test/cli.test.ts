@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vitest';
@@ -73,7 +73,7 @@ const put = async (store: MemoryStore, patch: Partial<Task>) => {
 };
 
 // The CLI reads these from the environment; clear them so the suite passes with or without them exported.
-const AMBIENT = ['FACTORY_STORE', 'FACTORY_ROOT', 'FACTORY_CLAIMANT'] as const;
+const AMBIENT = ['FACTORY_STORE', 'FACTORY_STORE_LOCAL_PATH', 'FACTORY_ROOT', 'FACTORY_CLAIMANT'] as const;
 const ambient: Partial<Record<(typeof AMBIENT)[number], string>> = {};
 beforeAll(() => {
   for (const k of AMBIENT) {
@@ -1121,6 +1121,31 @@ describe('GitHub pulling from the CLI', () => {
       expect(await store.getGitHubLink(t.taskId)).toBeUndefined();
     } finally {
       if (prev === undefined) delete process.env.FACTORY_ROOT; else process.env.FACTORY_ROOT = prev;
+    }
+  });
+
+  test('by default the pull lock file lives in FACTORY_STORE_LOCAL_PATH, not in <root>/.factory', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'factory-root-'));
+    const custom = mkdtempSync(join(tmpdir(), 'factory-store-'));
+    mkdirSync(join(root, '.factory'));
+    writeFileSync(join(root, '.factory', 'pull-blocks.lock'), 'not-the-store-dir'); // ignored: the lock is in the store dir
+    writeFileSync(join(custom, 'pull-blocks.lock'), 'someone-else');
+    const prev = { r: process.env.FACTORY_ROOT, p: process.env.FACTORY_STORE_LOCAL_PATH };
+    process.env.FACTORY_ROOT = root;
+    process.env.FACTORY_STORE_LOCAL_PATH = custom;
+    try {
+      const { out, goWith } = setup(withGithub());
+      expect(await goWith({ githubFor: () => new FakeGitHub(), githubBoardFor: () => newBoard() }, '--store', 'file', 'sync')).toBe(0);
+      expect(out).toContain('github: pull of blocks skipped (another pull is running)');
+      rmSync(join(custom, 'pull-blocks.lock'));
+      out.length = 0;
+      await goWith({ githubFor: () => new FakeGitHub(), githubBoardFor: () => newBoard() }, '--store', 'file', 'sync');
+      expect(out.join('\n')).not.toContain('another pull is running');
+      expect(readdirSync(join(root, '.factory'))).toEqual(['pull-blocks.lock']);
+    } finally {
+      for (const [k, v] of [['FACTORY_ROOT', prev.r], ['FACTORY_STORE_LOCAL_PATH', prev.p]] as const) {
+        if (v === undefined) delete process.env[k]; else process.env[k] = v;
+      }
     }
   });
 

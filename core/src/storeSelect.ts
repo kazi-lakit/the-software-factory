@@ -15,11 +15,16 @@ export function parseStoreKind(value: string): StoreKind {
   throw new Error('--store must be one of local, factory-app (or file, blocks)');
 }
 
-/** The folder of board.json and the lock files: `FACTORY_STORE_LOCAL_PATH` (absolute), else `<root>/.factory`. Created when missing. */
-export function localStoreDir(root: string, env: NodeJS.ProcessEnv = process.env): string {
+/** The folder of board.json and the lock files: `FACTORY_STORE_LOCAL_PATH` (absolute), else `<root>/.factory`. Not created. */
+export function storeDirPath(root: string, env: NodeJS.ProcessEnv = process.env): string {
   const custom = env.FACTORY_STORE_LOCAL_PATH;
   if (custom && !isAbsolute(custom)) throw new Error('FACTORY_STORE_LOCAL_PATH must be an absolute path');
-  const dir = custom ? resolve(custom) : join(root, '.factory');
+  return custom ? resolve(custom) : join(root, '.factory');
+}
+
+/** `storeDirPath`, created when missing. */
+export function localStoreDir(root: string, env: NodeJS.ProcessEnv = process.env): string {
+  const dir = storeDirPath(root, env);
   mkdirSync(dir, { recursive: true });
   return dir;
 }

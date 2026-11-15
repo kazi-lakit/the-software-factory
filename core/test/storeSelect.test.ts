@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
-import { localStoreDir, parseStoreKind, storeForFactories } from '../src/storeSelect.js';
+import { localStoreDir, storeDirPath, parseStoreKind, storeForFactories } from '../src/storeSelect.js';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'store-select-'));
 const yaml = (dir: string, id: string, text: string) => {
@@ -34,6 +34,18 @@ describe('localStoreDir', () => {
     const abs = join(tmp(), 'a', 'b');
     expect(localStoreDir(tmp(), { FACTORY_STORE_LOCAL_PATH: abs })).toBe(abs);
     expect(existsSync(abs)).toBe(true);
+  });
+});
+
+describe('storeDirPath', () => {
+  test('resolves the same folder without creating it', () => {
+    const root = tmp();
+    expect(storeDirPath(root, {})).toBe(join(root, '.factory'));
+    expect(existsSync(join(root, '.factory'))).toBe(false);
+    const abs = join(tmp(), 'x');
+    expect(storeDirPath(root, { FACTORY_STORE_LOCAL_PATH: abs })).toBe(abs);
+    expect(existsSync(abs)).toBe(false);
+    expect(() => storeDirPath(root, { FACTORY_STORE_LOCAL_PATH: 'rel' })).toThrow('FACTORY_STORE_LOCAL_PATH must be an absolute path');
   });
 });
 

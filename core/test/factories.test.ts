@@ -298,7 +298,7 @@ describe('loadFactoriesFromDir', () => {
     expect(got.owned).toEqual(['broken', 'delta']);
     expect(got.problems.map((p) => p.file)).toEqual([join(dir, 'broken', 'factory.yaml'), join(dir, 'delta', 'repos', 'x.yaml')]);
     expect(skipped).toHaveLength(2);
-    expect(() => loadFactoriesFromDir(dir)).toThrow(/EISDIR/);
+    expect(() => loadFactoriesFromDir(dir)).toThrow(new RegExp(`${join(dir, 'broken', 'factory.yaml').replace(/[\\^$.*+?()[\]{}|]/g, '\\$&')}: .*EISDIR`));
   });
   test('an invalid factory.yaml is owned and reported with the field path', () => {
     const dir = mkdtempSync(join(tmpdir(), 'factories-'));

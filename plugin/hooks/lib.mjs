@@ -26,8 +26,26 @@ export function isFactoryRoot(dir, exists = fs.existsSync, read = (p) => fs.read
 }
 
 /**
+ * The clone a user-scoped install came from: the `the-software-factory` entry of
+ * `<config dir>/plugins/known_marketplaces.json` (installLocation, else source.path). Null when the record is
+ * missing or garbled; the caller still checks the folder is a factory root.
+ */
+export function marketplaceClone(env, home, read = (p) => fs.readFileSync(p, 'utf8')) {
+  try {
+    const cfg = env.CLAUDE_CONFIG_DIR || (home && path.join(home, '.claude'));
+    if (!cfg) return null;
+    const entry = JSON.parse(read(path.join(cfg, 'plugins', 'known_marketplaces.json')))?.['the-software-factory'];
+    const dir = entry?.installLocation ?? entry?.source?.path;
+    return typeof dir === 'string' && dir ? path.resolve(dir) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Finds the factory root: FACTORY_ROOT if set (null when it is not a factory root), else
  * CLAUDE_PROJECT_DIR, else the clone that holds the plugin (pluginRoot), else
+ * the clone a user-scoped install came from (marketplace record), else
  * <home>/scratchpad/selise/the-software-factory. projectMode is true
  * when the root is the session's project dir, that is, the session started in the factory folder.
  */
@@ -38,7 +56,7 @@ export function resolveFactoryRoot(env, home, exists = fs.existsSync, read, plug
     const dir = path.resolve(env.FACTORY_ROOT);
     return isFactoryRoot(dir, exists, read) ? found(dir) : null;
   }
-  for (const dir of [project, pluginRoot && path.resolve(pluginRoot), home && path.join(home, 'scratchpad', 'selise', 'the-software-factory')]) {
+  for (const dir of [project, pluginRoot && path.resolve(pluginRoot), marketplaceClone(env, home), home && path.join(home, 'scratchpad', 'selise', 'the-software-factory')]) {
     if (dir && isFactoryRoot(dir, exists, read)) return found(dir);
   }
   return null;

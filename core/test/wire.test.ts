@@ -1,4 +1,6 @@
-import { resolve } from 'node:path';
+import { existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 import type { BlocksCredential } from '../src/blocks/credential.js';
 import { GhLoginMissingError, SecretMissingError, type ExecFile } from '../src/secrets.js';
@@ -204,5 +206,22 @@ describe('lazyGitHubBoardFor', () => {
     expect(err).toMatchObject({ user: 'user-a' });
     await expect(b.tokenScopes()).resolves.toEqual(['repo', 'project']);
     expect(read).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('wire local store path', () => {
+  test('an absolute FACTORY_STORE_LOCAL_PATH holds board.json', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'wire-root-'));
+    const custom = join(mkdtempSync(join(tmpdir(), 'wire-store-')), 'data');
+    const prev = process.env.FACTORY_STORE_LOCAL_PATH;
+    process.env.FACTORY_STORE_LOCAL_PATH = custom;
+    try {
+      const { store } = await wire({ root, mode: 'session', store: 'file' });
+      await store.setSettings(await store.getSettings());
+      expect(existsSync(join(custom, 'board.json'))).toBe(true);
+      expect(existsSync(join(root, '.factory', 'board.json'))).toBe(false);
+    } finally {
+      if (prev === undefined) delete process.env.FACTORY_STORE_LOCAL_PATH; else process.env.FACTORY_STORE_LOCAL_PATH = prev;
+    }
   });
 });

@@ -91,7 +91,7 @@ const bareHome = path.join(tmp, 'home');
 fs.mkdirSync(bareHome);
 const baseEnv = () => {
   const env = { ...process.env, HOME: bareHome };
-  for (const k of ['FACTORY_ROOT', 'FACTORY_STORE', 'CLAUDE_PROJECT_DIR', 'CLAUDE_ENV_FILE']) delete env[k];
+  for (const k of ['FACTORY_ROOT', 'FACTORY_STORE', 'CLAUDE_PROJECT_DIR', 'CLAUDE_ENV_FILE', 'CLAUDE_CONFIG_DIR']) delete env[k];
   return env;
 };
 // The hooks find the clone that holds them; run a copy outside any factory clone so each test controls the root.
@@ -112,6 +112,50 @@ describe('resolveFactoryRoot from the plugin clone', () => {
   });
   it('the default plugin root is two levels above lib.mjs', () => {
     expect(resolveFactoryRoot({}, null)?.root).toBe(path.resolve(hooks, '..', '..'));
+  });
+});
+
+describe('resolveFactoryRoot through the marketplace record', () => {
+  const cfgWith = (name, content) => {
+    const cfg = fs.mkdtempSync(path.join(tmp, 'cfg-'));
+    if (content !== undefined) {
+      fs.mkdirSync(path.join(cfg, 'plugins'), { recursive: true });
+      fs.writeFileSync(path.join(cfg, 'plugins', 'known_marketplaces.json'), typeof content === 'string' ? content : JSON.stringify(content));
+    }
+    return cfg;
+  };
+  const clone = makeRoot(path.join(tmp, 'mclone'));
+  const home = path.join(tmp, 'home4');
+  fs.mkdirSync(home, { recursive: true });
+  const find = (cfg, extra = {}) => resolveFactoryRoot({ CLAUDE_CONFIG_DIR: cfg, CLAUDE_PROJECT_DIR: plain, ...extra }, home, undefined, undefined, plain);
+
+  it('uses installLocation or source.path of the the-software-factory entry', () => {
+    expect(find(cfgWith('a', { 'the-software-factory': { installLocation: clone } }))).toEqual({ root: clone, projectMode: false });
+    expect(find(cfgWith('b', { 'the-software-factory': { source: { path: clone } } }))?.root).toBe(clone);
+  });
+  it('defaults the config dir to ~/.claude', () => {
+    fs.mkdirSync(path.join(home, '.claude', 'plugins'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude', 'plugins', 'known_marketplaces.json'), JSON.stringify({ 'the-software-factory': { installLocation: clone } }));
+    expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: plain }, home, undefined, undefined, plain)?.root).toBe(clone);
+  });
+  it('a missing, garbled or non-factory record falls through without throwing', () => {
+    const none = path.join(tmp, 'nohome');
+    const noRoot = (cfg) => resolveFactoryRoot({ CLAUDE_CONFIG_DIR: cfg, CLAUDE_PROJECT_DIR: plain }, none, undefined, undefined, plain);
+    expect(noRoot(cfgWith('c'))).toBeNull();
+    expect(noRoot(cfgWith('d', '{oops'))).toBeNull();
+    expect(noRoot(cfgWith('e', '[1]'))).toBeNull();
+    expect(noRoot(cfgWith('f', { 'the-software-factory': 7 }))).toBeNull();
+    expect(noRoot(cfgWith('g', { 'the-software-factory': { installLocation: plain } }))).toBeNull();
+    expect(noRoot(cfgWith('h', { other: { installLocation: clone } }))).toBeNull();
+  });
+  it('a hook run from the plugin cache finds the clone through the record', () => {
+    const cfg = cfgWith('i', { 'the-software-factory': { installLocation: clone } });
+    const cached = path.join(cfg, 'plugins', 'cache', 'the-software-factory', 'factory', '0.2.0', 'hooks');
+    fs.cpSync(hooks, cached, { recursive: true });
+    const file = path.join(fs.mkdtempSync(path.join(tmp, 'ss-')), 'env');
+    const r = runHook('session-start.mjs', { session_id: 'abcdef123456' }, { ...baseEnv(), CLAUDE_CONFIG_DIR: cfg, CLAUDE_ENV_FILE: file, CLAUDE_PROJECT_DIR: plain }, cached);
+    expect(r.status).toBe(0);
+    expect(fs.readFileSync(file, 'utf8')).toContain(`export FACTORY_ROOT="${clone}"\n`);
   });
 });
 
