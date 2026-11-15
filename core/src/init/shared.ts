@@ -16,6 +16,11 @@ import type { Prompter } from './prompts.js';
 
 export interface InitDeps {
   root: string; prompt: Prompter; gh: GhCli; boardFor: GitHubBoardFor; setupFor: GitHubSetupFor;
+  /**
+   * A board client made anew on each call (no cached token), for the login's scope checks: after the scope refresh a
+   * cached client may still hold the old token. Defaults to `boardFor`.
+   */
+  freshBoardFor?: GitHubBoardFor;
   /** The local FileStore (localStoreDir). */
   openStore: () => Promise<BoardStore>;
   doctor: (factoryId: string) => Promise<DoctorCheck[]>;
@@ -52,7 +57,7 @@ export async function chooseLogin(d: InitDeps): Promise<string> {
   const login = logins.length === 1
     ? logins[0]!
     : await d.prompt.choose('Which GitHub login should the factory use?', logins.map((l) => ({ value: l, label: l })));
-  const hasScope = async () => (await d.boardFor(login).tokenScopes())?.includes('project') === true;
+  const hasScope = async () => (await (d.freshBoardFor ?? d.boardFor)(login).tokenScopes())?.includes('project') === true;
   if (!(await hasScope())) {
     d.prompt.say(`${login} needs the project scope; starting gh auth refresh.`);
     await d.gh.refreshProjectScope(login);

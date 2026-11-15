@@ -2,7 +2,7 @@
 import { join } from 'node:path';
 import { PROTECTED_BRANCHES } from '../branches.js';
 import { AGENT_MODELS, AGENT_STEPS, type AgentModel, type AgentModels } from '../factories.js';
-import { newFactoryFile, saveFactoryFile } from '../factoryFile.js';
+import { newFactoryFile, saveFactoryFile, type FactoryFile } from '../factoryFile.js';
 import { DEFAULT_LABEL, DEFAULT_STATUS_MAP, STANDARD_STATUS_MAP, validateGitHubSettings, type ProjectRef } from '../githubConfig.js';
 import { parseRemote } from '../remote.js';
 import { ALL_STATUSES } from '../status.js';
@@ -123,20 +123,32 @@ export async function firstRun(d: InitDeps): Promise<number> {
     const protectedBranches = [...PROTECTED_BRANCHES];
     const repos = await askRepos(d, login, protectedBranches, []);
 
-    // Step 9: nothing was created or written before this point.
+    // Step 9: nothing was created or written before this point. The file is checked (a placeholder number for a new
+    // Project) before the Project is created, so a bad answer cannot leave an orphan Project behind.
     const setup = d.setupFor(login);
-    const ref: ProjectRef = project.kind === 'existing' ? project.ref : await setup.createProject(project.owner, project.title);
-    if (project.kind === 'new') say(`Created the Project ${ref.owner}/${ref.number}.`);
-    const file = newFactoryFile(join(factoriesDir(d.root), id), {
+    const fileFor = (r: ProjectRef) => newFactoryFile(join(factoriesDir(d.root), id), {
       id, name, accounts: { github: login },
-      board: { source: 'github', project: `${ref.owner}/${ref.number}`, label: DEFAULT_LABEL, approvers, statusMap },
+      board: { source: 'github', project: `${r.owner}/${r.number}`, label: DEFAULT_LABEL, approvers, statusMap },
       gates, models, protectedBranches, repos,
     });
-    if (!file.ok) {
-      say(file.error);
+    const precheck = fileFor(project.kind === 'existing' ? project.ref : { owner: project.owner, number: 1 });
+    if (!precheck.ok) {
+      say(precheck.error);
       return 1;
     }
-    const saved = saveFactoryFile(file.value);
+    const ref: ProjectRef = project.kind === 'existing' ? project.ref : await setup.createProject(project.owner, project.title);
+    const created = project.kind === 'new' ? `Created the Project ${ref.owner}/${ref.number}` : null;
+    if (created) say(`${created}.`);
+    let saved: FactoryFile;
+    try {
+      const file = fileFor(ref);
+      if (!file.ok) throw new Error(file.error);
+      saved = saveFactoryFile(file.value);
+    } catch (e) {
+      const why = e instanceof Error ? e.message : String(e);
+      say(created ? `${created}, but factory.yaml was not written: ${why}` : `factory.yaml was not written: ${why}`);
+      return 1;
+    }
     written = true;
     say(`Wrote ${saved.path}.`);
 

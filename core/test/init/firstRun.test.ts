@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -239,6 +239,41 @@ describe('firstRun', () => {
     const d2 = deps([...SCRIPT_DEFAULT_PATH, '']);
     expect(await firstRun(d2)).toBe(0);
     expect(doctorCalls).toBe(2);
+  });
+
+  test('an invalid factory file is refused before a new Project is created', async () => {
+    fakeSetup.me = { login: 'me', orgs: ['bad_org'] };
+    // name, id, project 1 = Create a new Project, owner 2 = bad_org, title, approvers, gates x3, models, repo, setup
+    const d = deps(['My App', '', '1', '2', '', '', '', '', '', '1', 'o/web', '', '1']);
+    expect(await firstRun(d)).toBe(1);
+    expect(fakeSetup.projects.size).toBe(0);
+    expect(existsSync(join(root, 'factories'))).toBe(false);
+    expect(d.transcript.at(-1)).toContain('project');
+  });
+
+  test('a save that fails after the Project was created names that Project', async () => {
+    class RacingSetup extends FakeGitHubSetup {
+      override async createProject(owner: string, title: string) {
+        mkdirSync(join(root, 'factories', 'my-app'), { recursive: true });
+        writeFileSync(join(root, 'factories', 'my-app', 'factory.yaml'), 'factory: { id: my-app }\n');
+        return super.createProject(owner, title);
+      }
+    }
+    const racing = new RacingSetup();
+    racing.repos.set('o/web', { defaultBranch: 'main', branches: ['dev'] });
+    const d = deps(SCRIPT_DEFAULT_PATH, { setupFor: () => racing });
+    expect(await firstRun(d)).toBe(1);
+    expect(d.transcript.at(-1)).toMatch(/^Created the Project me\/1, but factory\.yaml was not written: /);
+  });
+
+  test('after the scope refresh the re-check uses a fresh board client, not the cached one', async () => {
+    fakeBoard.scopes = ['repo']; // the cached client keeps the old token's scopes
+    let current = ['repo'];
+    gh = new FakeGh([['me']], () => { current = ['repo', 'project']; });
+    const fresh = () => Object.assign(new FakeGitHubBoard(), { scopes: [...current] });
+    const d = deps(SCRIPT_DEFAULT_PATH, { freshBoardFor: fresh });
+    expect(await firstRun(d)).toBe(0);
+    expect(gh.calls).toEqual(['logins', 'refresh me']);
   });
 
   test('on win32 the Windows note follows Ready', async () => {

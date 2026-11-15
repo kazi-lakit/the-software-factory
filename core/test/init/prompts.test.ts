@@ -77,4 +77,22 @@ describe('readlinePrompter', () => {
     p.close();
     await expect(pending).rejects.toBeInstanceOf(PromptClosedError);
   });
+
+  test('on a terminal the question is the readline prompt, so a redraw (backspace) keeps it', async () => {
+    const input = new PassThrough();
+    const output = Object.assign(new PassThrough(), { isTTY: true, columns: 80 });
+    let out = '';
+    output.on('data', (c: Buffer) => (out += c.toString()));
+    const p = readlinePrompter(input, output);
+    const pending = p.ask('Name');
+    await new Promise((r) => setImmediate(r));
+    input.write('ab');
+    input.write('\x7f');
+    input.write('c\r');
+    expect(await pending).toBe('ac');
+    const redraws = out.split('\x1b[1G\x1b[0J');
+    expect(redraws.length).toBeGreaterThan(1);
+    expect(redraws.at(-1)!.startsWith('Name: a')).toBe(true);
+    p.close();
+  });
 });

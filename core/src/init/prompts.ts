@@ -99,13 +99,20 @@ export function readlinePrompter(
   rl.on('close', shut);
   rl.on('SIGINT', shut);
   rl.pause();
+  // The question is readline's own prompt while it waits, so a redraw on a terminal (backspace, line wrap) keeps it.
   const raw = (prompt: string): Promise<string> => {
-    output.write(prompt);
-    if (queue.length) return Promise.resolve(queue.shift()!);
-    if (closed) return Promise.reject(new PromptClosedError());
+    if (queue.length) {
+      output.write(prompt);
+      return Promise.resolve(queue.shift()!);
+    }
+    if (closed) {
+      output.write(prompt);
+      return Promise.reject(new PromptClosedError());
+    }
     return new Promise((resolve, reject) => {
       waiting = { resolve, reject };
-      rl.resume();
+      rl.setPrompt(prompt);
+      rl.prompt();
     });
   };
   return { ...prompter(raw, (t) => output.write(`${t}\n`)), close: shut };
