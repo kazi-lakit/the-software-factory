@@ -218,7 +218,7 @@ describe('FileStore factories', () => {
 
 const link = (taskId: string, factoryId: string): GitHubLink => ({
   taskId, factoryId, repo: 'o/r', issueNumber: null, issueNodeId: null, project: null, itemId: null,
-  pushed: emptyPushed(), error: null, lease: null, version: 0,
+  pushed: emptyPushed(), error: null, lease: null, reported: [], version: 0,
 });
 
 describe.each([
@@ -242,6 +242,18 @@ describe.each([
     expect(b.version).toBe(2);
     await expect(s.saveGitHubLink(a, { ...a, issueNumber: 6 })).rejects.toBeInstanceOf(VersionConflictError);
     await expect(s.saveGitHubLink(null, link('T-1', 'a'))).rejects.toBeInstanceOf(VersionConflictError);
+  });
+  test('a stage 2 link loads with defaults', async () => {
+    const s = make();
+    const old = link('T-1', 'a');
+    const { docAt: _d, blockedAt: _b, ...pushed } = old.pushed;
+    const { reported: _r, ...rest } = old;
+    await s.saveGitHubLink(null, { ...rest, pushed } as unknown as GitHubLink);
+    const got = (await s.getGitHubLink('T-1'))!;
+    expect(got.pushed.docAt).toEqual({ spec: null, plan: null });
+    expect(got.pushed.blockedAt).toBeNull();
+    expect(got.reported).toEqual([]);
+    expect((await s.listGitHubLinks())[0]!.reported).toEqual([]);
   });
   test('owner identity may not save links', async () => {
     await expect(make('owner').saveGitHubLink(null, link('T-1', 'a'))).rejects.toBeInstanceOf(ForbiddenError);

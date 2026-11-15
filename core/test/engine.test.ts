@@ -972,7 +972,7 @@ describe('ship', () => {
 
   const linkFor = (repo: string, issueNumber: number | null) => ({
     taskId: 'T-1', factoryId: 'blocks', repo, issueNumber, issueNodeId: null, project: null, itemId: null,
-    pushed: emptyPushed(), error: null, lease: null, version: 1,
+    pushed: emptyPushed(), error: null, lease: null, reported: [], version: 1,
   });
 
   test('ship adds Closes #n when the task has an issue', async () => {

@@ -844,7 +844,7 @@ describe('GitHub pushing from the CLI', () => {
     await direct(store);
     await store.saveGitHubLink(null, {
       taskId: 'T-1', factoryId: 'blocks', repo: 'o/app', issueNumber: null, issueNodeId: null, project: null, itemId: null,
-      pushed: emptyPushed(), error: { message: 'boom', attempts: 2, nextAttemptAt: '2026-06-01T00:00:10.000Z' }, lease: null, version: 0,
+      pushed: emptyPushed(), error: { message: 'boom', attempts: 2, nextAttemptAt: '2026-06-01T00:00:10.000Z' }, lease: null, reported: [], version: 0,
     });
     expect(await go('status', '--json')).toBe(0);
     expect(JSON.parse(out.join('\n')).githubErrors).toHaveLength(1);
@@ -858,7 +858,7 @@ describe('GitHub pushing from the CLI', () => {
 
   const staleLink = (message: string, nextAttemptAt: string) => ({
     taskId: 'T-1', factoryId: 'blocks', repo: 'o/app', issueNumber: null, issueNodeId: null, project: null, itemId: null,
-    pushed: emptyPushed(), error: { message, attempts: 1, nextAttemptAt }, lease: null, version: 0,
+    pushed: emptyPushed(), error: { message, attempts: 1, nextAttemptAt }, lease: null, reported: [], version: 0,
   });
 
   test('F2: next pushes the other tasks it moved too', async () => {

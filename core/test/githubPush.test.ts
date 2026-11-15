@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GitHubSettings } from '../src/githubConfig.js';
 import { emptyPushed, type GitHubLink, type PushedState } from '../src/githubLink.js';
-import { bodyHash, blockedKey, issueBody, markerOf, planPush, projectKey, type PushInput } from '../src/githubPush.js';
+import { bodyHash, blockedKey, issueBody, issueText, markerIn, markerOf, planPush, projectKey, stripMarker, type PushInput } from '../src/githubPush.js';
 import type { Doc, Status, Task } from '../src/types.js';
 
 const statusMap: Record<Status, string> = {
@@ -18,7 +18,7 @@ const pushedFor = (t: Task, o: Partial<PushedState> = {}): PushedState => ({
   ...emptyPushed(), status: t.status, option: statusMap[t.status], title: t.title, bodyHash: bodyHash(t.description), label: 'factory', ...o,
 });
 const link = (pushed: PushedState, o: Partial<GitHubLink> = {}): GitHubLink => ({
-  taskId: 'T-1', factoryId: 'f', repo: 'o/r', issueNumber: 7, issueNodeId: 'I', project: 'o/3', itemId: 'it', pushed, error: null, lease: null, version: 1, ...o,
+  taskId: 'T-1', factoryId: 'f', repo: 'o/r', issueNumber: 7, issueNodeId: 'I', project: 'o/3', itemId: 'it', pushed, error: null, lease: null, reported: [], version: 1, ...o,
 });
 const doc = (kind: 'spec' | 'plan', version: number): Doc => ({ taskId: 'T-1', kind, version, body: 'Body', author: 'x', status: 'current' });
 const input = (t: Task, l: GitHubLink | undefined, o: Partial<PushInput> = {}): PushInput =>
@@ -149,5 +149,34 @@ describe('planPush', () => {
     expect(planPush(input(t, l, { settings: { ...settings, label: 'new' } }))).toEqual([]);
     expect(planPush(input(t, l, { settings: { ...settings, statusMap: { ...statusMap, done: 'Shipped' } } }))).toEqual([]);
     expect(planPush(input({ ...t, title: 'Changed' }, l))).toEqual([]);
+  });
+
+  it('stripMarker normalises CRLF, drops the marker and trailing space', () => {
+    expect(stripMarker('a\r\nb  \n\n<!-- tsf:task=T-1 factory=f -->\n')).toBe('a\nb');
+  });
+  it('markerIn finds the marker', () => {
+    expect(markerIn('x\n\n<!-- tsf:task=T-1 factory=f -->')).toEqual({ taskId: 'T-1', factoryId: 'f' });
+    expect(markerIn('no marker')).toBeNull();
+  });
+  it('issueBody is issueText plus the marker', () => {
+    expect(issueBody('D\n', 'T-1', 'f')).toBe(`${issueText('D\n', 'T-1', 'f')}\n\n${markerOf('T-1', 'f')}`);
+    expect(issueBody('', 'T-1', 'f')).toBe(markerOf('T-1', 'f'));
+  });
+  it('a description with trailing newline pushes nothing more once pushed', () => {
+    const t = task({ description: 'D\n' });
+    const l = link(pushedFor(t, { bodyHash: bodyHash(issueText('D\n', t.taskId, t.factoryId)) }));
+    expect(planPush(input(t, l))).toEqual([]);
+  });
+  it('blocked comment is capped', () => {
+    const t = task({ status: 'blocked', blockedReason: 'r'.repeat(70_000), question: 'q?' });
+    const a = planPush(input(t, link(pushedFor(t, { status: 'build', option: 'In progress' }))));
+    const c = a.find((x) => x.kind === 'comment') as { body: string };
+    expect(c.body.length).toBeLessThanOrEqual(65_000);
+    expect(c.body.endsWith('\n\nReply `/answer <text>` to answer, or `/unblock` to resume.')).toBe(true);
+  });
+  it('blocked without question asks for /unblock; with question for /answer or /unblock', () => {
+    const p = (t: Task) => (planPush(input(t, link(pushedFor(t, { status: 'build', option: 'In progress' })))).find((x) => x.kind === 'comment') as { body: string }).body;
+    expect(p(task({ status: 'blocked', blockedReason: 'why' })).endsWith('\n\nReply `/unblock` to resume.')).toBe(true);
+    expect(p(task({ status: 'blocked', blockedReason: 'why', question: 'q?' })).endsWith('\n\nReply `/answer <text>` to answer, or `/unblock` to resume.')).toBe(true);
   });
 });

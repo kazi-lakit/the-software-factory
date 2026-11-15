@@ -104,7 +104,7 @@ export class GitHubPusher {
     if (link?.lease && Date.parse(link.lease.until) > now.getTime()) return { ...result, skipped: 'leased' };
     const base: GitHubLink = link ?? {
       taskId, factoryId: task.factoryId, repo: repoName, issueNumber: null, issueNodeId: null, project: null, itemId: null,
-      pushed: emptyPushed(), error: null, lease: null, version: 0,
+      pushed: emptyPushed(), error: null, lease: null, reported: [], version: 0,
     };
     let cur: GitHubLink;
     try {
@@ -142,7 +142,7 @@ export class GitHubPusher {
     const error = { message, attempts, nextAttemptAt: new Date(now.getTime() + backoffMs(attempts)).toISOString() };
     const base: GitHubLink = link ?? {
       taskId: task.taskId, factoryId: task.factoryId, repo, issueNumber: null, issueNodeId: null, project: null, itemId: null,
-      pushed: emptyPushed(), error: null, lease: null, version: 0,
+      pushed: emptyPushed(), error: null, lease: null, reported: [], version: 0,
     };
     try {
       await this.d.store.saveGitHubLink(link ?? null, { ...base, error, lease: null });

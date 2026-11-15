@@ -787,7 +787,7 @@ describe('BlocksStore GitHub links (connected mode: not stored yet)', () => {
     const s = new BlocksStore(new FakeBlocksData('any'), 'core');
     expect(await s.listGitHubLinks()).toEqual([]);
     expect(await s.getGitHubLink('T-1')).toBeUndefined();
-    const l = { taskId: 'T-1', factoryId: 'a', repo: 'o/r', issueNumber: null, issueNodeId: null, project: null, itemId: null, pushed: emptyPushed(), error: null, lease: null, version: 0 };
+    const l = { taskId: 'T-1', factoryId: 'a', repo: 'o/r', issueNumber: null, issueNodeId: null, project: null, itemId: null, pushed: emptyPushed(), error: null, lease: null, reported: [], version: 0 };
     await expect(s.saveGitHubLink(null, l)).rejects.toBeInstanceOf(ForbiddenError);
   });
 });

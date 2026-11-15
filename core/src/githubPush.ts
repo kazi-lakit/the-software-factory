@@ -17,11 +17,28 @@ export function capText(text: string, max: number = MAX_BODY): string {
   return text.length <= max ? text : text.slice(0, max - TRUNCATED.length) + TRUNCATED;
 }
 
-/** The issue body: the description (capped), then the marker that ties the issue to its task, always last. */
+/** The description as written on GitHub: trailing space trimmed and capped to leave room for the marker. */
+export function issueText(description: string, taskId: string, factoryId: string): string {
+  return capText(description.trimEnd(), MAX_BODY - markerOf(taskId, factoryId).length - 2);
+}
+
+/** The issue body: the visible text, then the marker that ties the issue to its task, always last. */
 export function issueBody(description: string, taskId: string, factoryId: string): string {
+  const d = issueText(description, taskId, factoryId);
   const marker = markerOf(taskId, factoryId);
-  const d = capText(description.trimEnd(), MAX_BODY - marker.length - 2);
   return d === '' ? marker : `${d}\n\n${marker}`;
+}
+
+const MARKER_RE = /<!-- tsf:task=(\S+) factory=(\S+) -->/g;
+
+/** A body as comparable text: CRLF to LF, every marker removed, trailing space trimmed. */
+export const stripMarker = (body: string): string => body.replace(/\r\n/g, '\n').replace(MARKER_RE, '').trimEnd();
+
+/** The last marker in a body, or null. */
+export function markerIn(body: string): { taskId: string; factoryId: string } | null {
+  const all = [...body.matchAll(MARKER_RE)];
+  const m = all[all.length - 1];
+  return m ? { taskId: m[1]!, factoryId: m[2]! } : null;
 }
 
 export const bodyHash = (description: string): string => bytesToHex(sha256(new TextEncoder().encode(description)));
@@ -62,10 +79,11 @@ export function planPush(i: PushInput): PushAction[] {
   if (!created && done) return [];
   const p = { ...emptyPushed(), ...link?.pushed };
   const out: PushAction[] = [];
+  const text = issueText(task.description, task.taskId, task.factoryId);
   const body = issueBody(task.description, task.taskId, task.factoryId);
   if (!created) {
     out.push({ kind: 'create', title: task.title, body, labels: settings.label === '' ? [] : [settings.label] });
-    p.title = task.title; p.bodyHash = bodyHash(task.description); p.label = settings.label === '' ? null : settings.label;
+    p.title = task.title; p.bodyHash = bodyHash(text); p.label = settings.label === '' ? null : settings.label;
   }
   const open = !(link?.pushed.closed ?? false);
   const readd = !created || link?.itemId == null || link.project !== projectKey(settings.project);
@@ -73,7 +91,7 @@ export function planPush(i: PushInput): PushAction[] {
   const option = settings.statusMap[task.status];
   if (open && (readd || option !== p.option)) out.push({ kind: 'setStatus', option });
   if (open && settings.label !== '' && settings.label !== p.label) out.push({ kind: 'addLabel', label: settings.label });
-  if (open && (task.title !== p.title || bodyHash(task.description) !== p.bodyHash)) out.push({ kind: 'updateIssue', title: task.title, body });
+  if (open && (task.title !== p.title || bodyHash(text) !== p.bodyHash)) out.push({ kind: 'updateIssue', title: task.title, body });
   for (const kind of ['spec', 'plan'] as const) {
     const doc = i.docs[kind];
     if (doc && doc.version > p.docs[kind]) out.push(docComment(kind, doc, i));
@@ -81,7 +99,10 @@ export function planPush(i: PushInput): PushAction[] {
   const key = blockedKey(task);
   if (key !== null && key !== p.blocked) {
     let text = `**Blocked:** ${task.blockedReason ?? 'no reason given'}`;
-    if (task.question && settings.mode === 'github-only') text += `\n\n**Question:** ${task.question}\n\nReply \`/answer <text>\` to answer.`;
+    let reply = '';
+    if (task.question) text += `\n\n**Question:** ${task.question}`;
+    if (settings.mode === 'github-only') reply = task.question ? '\n\nReply `/answer <text>` to answer, or `/unblock` to resume.' : '\n\nReply `/unblock` to resume.';
+    text = capText(text, MAX_BODY - reply.length) + reply;
     out.push({ kind: 'comment', about: 'blocked', key, body: text });
   }
   if (done && !p.closed) out.push({ kind: 'close', reason: task.status === 'done' ? 'completed' : 'not_planned' });

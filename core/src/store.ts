@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { DEFAULT_SETTINGS } from './defaults.js';
 import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
 import { loadFactoriesFromDir } from './factoriesFs.js';
-import type { GitHubLink } from './githubLink.js';
+import { withLinkDefaults, type GitHubLink } from './githubLink.js';
 import type {
   Approval, Doc, DocKind, FactoryEvent, Mode, RepoSettings, Run, Settings, Step, Task,
 } from './types.js';
@@ -219,13 +219,13 @@ export class MemoryStore implements BoardStore {
   }
 
   listGitHubLinks(factoryId?: string) {
-    return this.read(() => clone(this.state.githubLinks.filter((l) => factoryId === undefined || l.factoryId === factoryId)));
+    return this.read(() => clone(this.state.githubLinks.filter((l) => factoryId === undefined || l.factoryId === factoryId).map(withLinkDefaults)));
   }
 
   getGitHubLink(taskId: string) {
     return this.read(() => {
       const l = this.state.githubLinks.find((x) => x.taskId === taskId);
-      return l ? clone(l) : undefined;
+      return l ? clone(withLinkDefaults(l)) : undefined;
     });
   }
 
