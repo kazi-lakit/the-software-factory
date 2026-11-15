@@ -5,7 +5,7 @@ import { claim, claimExpired, release, renew } from './claims.js';
 import { AGENT_FOR, DEFAULT_SETTINGS } from './defaults.js';
 import { GATE_DOC, resolveGates, resolveSettings, shouldMerge, validApproval } from './gates.js';
 import type { GitRepos } from './git.js';
-import { PrBaseMismatchError, type GitHub, type GitHubFor } from './github.js';
+import { PrBaseMismatchError, parseRemote, type GitHub, type GitHubFor } from './github.js';
 import { unfinishedDeps } from './dependencies.js';
 import { diffEvents } from './history.js';
 import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
@@ -478,14 +478,27 @@ export class Engine {
     return updated;
   }
 
+  /** The task's issue number when the issue lives in the PR's repo; undefined on no link, another repo or a failed read. */
+  private async linkedIssue(taskId: string, remote: string): Promise<number | undefined> {
+    try {
+      const link = await retry(() => this.deps.store.getGitHubLink(taskId));
+      if (link?.issueNumber == null) return undefined;
+      const { owner, repo } = parseRemote(remote);
+      return link.repo.toLowerCase() === `${owner}/${repo}`.toLowerCase() ? link.issueNumber : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
   private async openPr(github: GitHub, task: Task, cfg: FactoryRepo, branch: string): Promise<{ url: string }> {
     const spec = (await retry(() => this.deps.store.currentDoc(task.taskId, 'spec')))?.body ?? '';
+    const issue = await this.linkedIssue(task.taskId, cfg.remote);
     return github.openPr({
       remote: cfg.remote,
       head: branch,
       base: task.baseBranch,
       title: `[${task.taskId}] ${task.title}`,
-      body: `Factory task ${task.taskId}\n\n${spec.slice(0, 3000)}`,
+      body: `Factory task ${task.taskId}\n\n${spec.slice(0, 3000)}${issue ? `\n\nCloses #${issue}` : ''}`,
     });
   }
 

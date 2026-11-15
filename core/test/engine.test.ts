@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { ClaimError, Engine, StageError, UnknownFactoryError, withRetry, type EngineDeps } from '../src/engine.js';
 import type { Exec } from '../src/checks.js';
 import type { GitRepos } from '../src/git.js';
+import { emptyPushed } from '../src/githubLink.js';
 import { FakeGitHub, type GitHub } from '../src/github.js';
 import { IllegalInputError } from '../src/machine.js';
 import { FactoryConfig, type FactoryDef, type FactoryRepo } from '../src/factories.js';
@@ -967,6 +968,29 @@ describe('ship', () => {
       title: '[T-1] Add widget',
       body: `Factory task T-1\n\n${'S'.repeat(3000)}`,
     });
+  });
+
+  const linkFor = (repo: string, issueNumber: number | null) => ({
+    taskId: 'T-1', factoryId: 'blocks', repo, issueNumber, issueNodeId: null, project: null, itemId: null,
+    pushed: emptyPushed(), error: null, lease: null, version: 1,
+  });
+
+  test('ship adds Closes #n when the task has an issue', async () => {
+    const { engine, github, store } = await atShip('dev', true);
+    await store.saveGitHubLink(null, linkFor('selisedigitalplatforms/Blocks-Data', 12));
+    const openPr = vi.spyOn(github, 'openPr');
+    await engine.ship('T-1');
+    expect(openPr.mock.calls[0]![0].body.endsWith('\n\nCloses #12')).toBe(true);
+  });
+
+  test('ship body unchanged without a link, with another repo, or without an issue number', async () => {
+    for (const link of [undefined, linkFor('other/repo', 12), linkFor('SELISEdigitalplatforms/blocks-data', null)]) {
+      const { engine, github, store } = await atShip('dev', true);
+      if (link) await store.saveGitHubLink(null, link);
+      const openPr = vi.spyOn(github, 'openPr');
+      await engine.ship('T-1');
+      expect(openPr.mock.calls[0]![0].body).toBe(`Factory task T-1\n\n${'S'.repeat(3000)}`);
+    }
   });
 
   test.each(['main', 'origin/main', 'refs/heads/main'])('base %s blocks the task before the gh login check and pushes nothing', async (base) => {
