@@ -14,6 +14,7 @@ const gh = (over: { label?: string; statusMap?: Record<string, string> } = {}) =
 });
 const def = (id: string, github?: ReturnType<typeof gh>, ghUser = 'kazi-lakit') => defFixture(id, { ghUser, ...(github ? { github } : {}) });
 const LOGGED = new Set(['kazi-lakit']);
+const SKIPPED = 'not needed: nothing in this factory uses GitHub';
 
 function setup(options: string[] | null = OPTIONS) {
   const board = new FakeGitHubBoard();
@@ -209,7 +210,7 @@ describe('doctor on the Blocks store (connected mode)', () => {
       });
       expect(out).toEqual([
         { factoryId: 'a', check: 'config file', ok: false, detail: '/f/a/factory.yaml: x: y; fix the file or run ./factory init' },
-        { factoryId: 'a', check: 'gh login', ok: true, detail: 'kazi-lakit logged in' },
+        { factoryId: 'a', check: 'gh login', ok: true, detail: SKIPPED },
         { factoryId: 'gone', check: 'config file', ok: false, detail: '/f/gone/factory.yaml: factory.agents.build: bad model; fix the file or run ./factory init' },
       ]);
     });
@@ -244,6 +245,24 @@ describe('doctor on the Blocks store (connected mode)', () => {
 
     test('without setupFor no repo checks run (old callers unchanged)', async () => {
       expect(names(await run(setup(), [def('a')]))).toEqual(['gh login']);
+    });
+
+    test('a file-store factory where nothing uses GitHub skips the login check (no legacy default login named)', async () => {
+      const out = await doctor({ defs: [def('a', undefined, 'kazi-lakit')], repos: [], store: 'file', loggedIn: new Set(), boardFor: () => setup(), setupFor: () => setupFake() });
+      expect(out).toEqual([{ factoryId: 'a', check: 'gh login', ok: true, detail: SKIPPED }]);
+      expect(JSON.stringify(out)).not.toContain('kazi-lakit');
+    });
+
+    test('a factory with repos or a github block still needs the login', async () => {
+      const repos = await doctor({ defs: [def('a', undefined, 'someone')], repos: [repoFixture('a', 'api')], store: 'file', loggedIn: new Set(), boardFor: () => setup() });
+      expect(repos[0]).toMatchObject({ check: 'gh login', ok: false });
+      const board = await doctor({ defs: [def('a', gh(), 'someone')], repos: [], store: 'file', loggedIn: new Set(), boardFor: () => setup() });
+      expect(board[0]).toMatchObject({ check: 'gh login', ok: false });
+    });
+
+    test('the Blocks store output is unchanged for a factory with no repos', async () => {
+      const out = await doctor({ defs: [def('a', undefined, 'someone')], repos: [], store: 'blocks', loggedIn: new Set(), boardFor: () => setup() });
+      expect(out).toEqual([{ factoryId: 'a', check: 'gh login', ok: false, detail: 'someone is not logged in (run: gh auth login --hostname github.com)' }]);
     });
 
     test('not logged in skips the repo checks', async () => {

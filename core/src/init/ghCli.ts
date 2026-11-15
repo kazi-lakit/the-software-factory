@@ -23,24 +23,33 @@ const runInherit: RunInteractive = (args) =>
 
 const HOST = ['--hostname', 'github.com'];
 
-/** Logins from `gh auth status --json hosts` whose state is success; empty when gh fails or prints something unreadable. */
-async function readLogins(exec: ExecFile): Promise<string[]> {
+interface Accounts { logins: string[]; active: string | null }
+
+/** Logins from `gh auth status --json hosts` whose state is success, and the active one; empty when gh fails or prints something unreadable. */
+async function readAccounts(exec: ExecFile): Promise<Accounts> {
+  const none: Accounts = { logins: [], active: null };
   try {
     const { code, stdout } = await exec('gh', ['auth', 'status', ...HOST, '--json', 'hosts']);
-    if (code !== 0) return [];
+    if (code !== 0) return none;
     const accounts = (JSON.parse(stdout) as { hosts?: Record<string, unknown> } | null)?.hosts?.['github.com'];
-    if (!Array.isArray(accounts)) return [];
-    const out: string[] = [];
-    for (const a of accounts as Array<{ login?: unknown; state?: unknown } | null>) {
-      if (typeof a?.login === 'string' && a.state === 'success' && !out.includes(a.login)) out.push(a.login);
+    if (!Array.isArray(accounts)) return none;
+    const out: Accounts = { logins: [], active: null };
+    for (const a of accounts as Array<{ login?: unknown; state?: unknown; active?: unknown } | null>) {
+      if (typeof a?.login === 'string' && a.state === 'success' && !out.logins.includes(a.login)) out.logins.push(a.login);
+      if (typeof a?.login === 'string' && a.active === true) out.active = a.login;
     }
     return out;
   } catch {
-    return [];
+    return none;
   }
 }
 
-/** The real gh. Login and refresh run with stdio inherited; the refresh switches to the login first when gh has several. */
+const readLogins = async (exec: ExecFile): Promise<string[]> => (await readAccounts(exec)).logins;
+
+/**
+ * The real gh. Login and refresh run with stdio inherited. When gh has several logins and another one is active, the
+ * refresh switches to the login first and back to the previously active account afterwards, also when the refresh fails.
+ */
 export function realGhCli(exec: ExecFile = realExecFile, run: RunInteractive = runInherit): GhCli {
   return {
     logins: () => readLogins(exec),
@@ -48,8 +57,15 @@ export function realGhCli(exec: ExecFile = realExecFile, run: RunInteractive = r
       await run(['auth', 'login', ...HOST]);
     },
     async refreshProjectScope(login) {
-      if ((await readLogins(exec)).length > 1) await exec('gh', ['auth', 'switch', ...HOST, '--user', login]);
-      await run(['auth', 'refresh', ...HOST, '-s', 'project']);
+      const { logins, active } = await readAccounts(exec);
+      const refresh = () => run(['auth', 'refresh', ...HOST, '-s', 'project']);
+      if (logins.length <= 1 || active === login) return void (await refresh());
+      await exec('gh', ['auth', 'switch', ...HOST, '--user', login]);
+      try {
+        await refresh();
+      } finally {
+        if (active !== null) await exec('gh', ['auth', 'switch', ...HOST, '--user', active]);
+      }
     },
   };
 }

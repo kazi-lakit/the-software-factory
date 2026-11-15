@@ -218,8 +218,19 @@ const removeRepo: Handler = async (d, file) => {
   ]);
   if (choice === 'keep') return null;
   assertUnchanged(file);
-  for (const t of open) await cancelTask(store, d.now, t.taskId);
-  d.prompt.say(`Cancelled ${open.map((t) => t.taskId).join(', ')}.`);
+  const cancelled: string[] = [];
+  for (const t of open) {
+    try {
+      await cancelTask(store, d.now, t.taskId);
+    } catch (e) {
+      if (!(e instanceof VersionConflictError)) throw e;
+      // The task moved on (a run or the Board): say which one, and what is already cancelled; the repo stays.
+      d.prompt.say(`${t.taskId} changed while it was being cancelled; ${repo.repoId} was not removed. Already cancelled: ${cancelled.join(', ') || 'none'}. Run the item again.`);
+      return null;
+    }
+    cancelled.push(t.taskId);
+  }
+  d.prompt.say(`Cancelled ${cancelled.join(', ')}.`);
   return [{ kind: 'removeRepo', repoId: repo.repoId }];
 };
 

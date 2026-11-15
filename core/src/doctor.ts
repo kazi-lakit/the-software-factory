@@ -45,6 +45,13 @@ export async function doctor(o: {
       try { return await fn(); } catch (e) { add(check, false, firstLine(e)); return undefined; }
     };
 
+    // On the file store, a factory with no GitHub board and no repos uses no gh login: its ghUser may only be the
+    // legacy default, so it is not named. The Blocks store's output stays as it was.
+    const myRepoCount = o.repos.filter((r) => r.factoryId === factoryId).length;
+    if (o.store === 'file' && !def.github && myRepoCount === 0) {
+      add('gh login', true, 'not needed: nothing in this factory uses GitHub');
+      continue;
+    }
     if (!isGhLoggedIn(o.loggedIn, def.ghUser)) {
       add('gh login', false, `${def.ghUser} is not logged in (run: gh auth login --hostname github.com)`);
       continue;

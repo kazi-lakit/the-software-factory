@@ -15,6 +15,18 @@ const pretty = (value: unknown): string => JSON.stringify(JSON.parse(canonicalJs
 const rowOf = (c: Check): Row => ({ cwd: c.cwd, name: c.name, needs: c.needs ?? "", run: c.run });
 const checkOf = (r: Row): Check => ({ name: r.name, cwd: r.cwd, run: r.run, ...(r.needs === "" ? {} : { needs: r.needs }) });
 
+/** The form's label for each check field. */
+const FIELD_LABELS: Record<string, string> = { cwd: "folder", name: "name", needs: "needs", run: "command" };
+
+/** Core's `checks.1.run: …` as the form names it, `Check 2 command: …` (1-based). Display only; other text is unchanged. */
+function checkErrorText(text: string): string {
+  return text.replace(/^checks\.(\d+)(?:\.(\w+))?/, (whole, index: string, field?: string) => {
+    const label = field === undefined ? "" : FIELD_LABELS[field];
+    if (label === undefined) return whole;
+    return `Check ${Number(index) + 1}${label ? ` ${label}` : ""}`;
+  });
+}
+
 const draftOf = (repo: FactoryRepo | null): Draft =>
   repo ? { baseBranch: repo.baseBranch, checks: repo.checks.map(rowOf), remote: repo.remote, repoId: repo.repoId } : { baseBranch: "dev", checks: [], remote: "", repoId: "" };
 
@@ -150,7 +162,7 @@ export function RepoForm({ before, def, onCancel, onReload, onSaved }: Props) {
         <button type="button" className="sf-button" onClick={() => editChecks((rows) => [...rows, { cwd: ".", name: "", needs: "", run: "" }])}>Add check</button>
       </div>
       <span className="sf-hint">These commands run when the factory checks this repository.</span>
-      {invalidText.startsWith("checks") ? <p className="sf-problem" role="alert">{invalidText}</p> : null}
+      {invalidText.startsWith("checks") ? <p className="sf-problem" role="alert">{checkErrorText(invalidText)}</p> : null}
       </fieldset>
       {invalidText && !invalidText.startsWith("checks") ? <p className="sf-problem" role="alert">{invalidText}</p> : null}
       {review && base ? (

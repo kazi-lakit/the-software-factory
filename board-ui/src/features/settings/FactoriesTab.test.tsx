@@ -236,6 +236,18 @@ describe("Factories tab", () => {
     expect(event!.to).toContain("npm run test:all");
   });
 
+  it("shows_a_check_error_with_the_form's_1_based_check_label", async () => {
+    const save = vi.spyOn(owner(), "saveFactoryRepo");
+    await openFactoriesSection();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/api" }));
+    const form = await screen.findByRole("form", { name: "Edit repo api" });
+    changeField("Check 2 command", "");
+    fireEvent.click(within(form).getByRole("button", { name: "Save repo" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent(/^Check 2 command: must not be empty$/);
+    expect(within(form).queryByText(/checks\.1/)).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("saves_a_base_branch_change_without_a_checks_review", async () => {
     await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/api" }));

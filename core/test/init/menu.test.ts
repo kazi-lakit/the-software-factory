@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { VersionConflictError } from '../../src/boardStore.js';
 import { DEFAULT_SETTINGS } from '../../src/defaults.js';
 import type { DoctorCheck } from '../../src/doctor.js';
 import { DEFAULT_GH_USER } from '../../src/factories.js';
@@ -274,6 +275,25 @@ describe('runInit', () => {
     expect(d.transcript).toContain(CONFLICT);
     expect((await store.getTask('T-1')).status).toBe('ready');
     expect(loaded().config.repos.map((r) => r.repoId)).toEqual(['web']);
+  });
+
+  test('a task that changes while it is being cancelled names the task and the tasks already cancelled', async () => {
+    seedFactory();
+    await store.createTask({ factoryId: 'app', title: 'Fix login', description: 'd', repo: 'web', status: 'ready' });
+    await store.createTask({ factoryId: 'app', title: 'More login', description: 'd', repo: 'web', status: 'ready' });
+    const text = fileText();
+    const real = store.updateTask.bind(store);
+    store.updateTask = async (id, version, patch) => {
+      if (id === 'T-2') throw new VersionConflictError('T-2', version, version + 1);
+      return real(id, version, patch);
+    };
+    const d = deps(['7', '1', '1', QUIT]);
+    expect(await runInit(d)).toBe(0);
+    expect(d.transcript).not.toContain(CONFLICT);
+    expect(d.transcript).toContain('T-2 changed while it was being cancelled; web was not removed. Already cancelled: T-1. Run the item again.');
+    expect((await store.getTask('T-1')).status).toBe('cancelled');
+    expect((await store.getTask('T-2')).status).toBe('ready');
+    expect(fileText()).toBe(text);
   });
 
   test('add another factory runs the first-run questions and leaves the first factory alone', async () => {

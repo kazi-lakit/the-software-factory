@@ -773,3 +773,5 @@ git commit -m "feat: factory init command, setup.sh/setup.cmd, local launchers, 
 - [ ] `./setup.sh` a second time skips the done steps. `./factory init` shows the menu, and changing models leaves your hand-written comments in `factory.yaml`.
 - [ ] In the owner's own shell with `FACTORY_STORE=blocks`: `/factory:run` on the Blocks factories behaves as before, and `factory doctor --store blocks` is unchanged.
 - [ ] `/factory:run` in the fresh clone picks up a task created on the throwaway Project.
+- [ ] Rebuild the core (`cd core && npm run build`) on every machine before editing repo checks on the deployed Board: older cores skip list-shaped checks.
+- [ ] Keep `FACTORY_STORE=blocks` exported everywhere the Board factory runs (cron, systemd units, launch shells), since the default store is now `local`.
