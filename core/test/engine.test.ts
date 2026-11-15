@@ -9,6 +9,7 @@ import { emptyPushed } from '../src/githubLink.js';
 import { FakeGitHub, type GitHub } from '../src/github.js';
 import { IllegalInputError } from '../src/machine.js';
 import { FactoryConfig, type FactoryDef, type FactoryRepo } from '../src/factories.js';
+import { normaliseChecks } from '../src/checksSchema.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
 import { nextTicket } from './nextTicket.js';
 import { GhLoginMissingError, SecretMissingError } from '../src/secrets.js';
@@ -25,11 +26,16 @@ const ROOT = join(tmpdir(), 'factory-engine-test');
 const REMOTE = 'git@github.com:SELISEdigitalplatforms/blocks-data.git';
 
 const DEFS: FactoryDef[] = [defFixture('blocks')];
-const CHECKS = {
+const OLD_CHECKS = {
   server: { cwd: 'server', build: 'dotnet build', test: 'dotnet test' },
   client: { cwd: 'client', install: 'npm ci', typecheck: 'npm run tc', lint: 'npm run lint', test: 'npm test' },
   e2e: 'off',
 } as const;
+const CHECKS = (() => {
+  const r = normaliseChecks(OLD_CHECKS);
+  if (!r.ok) throw new Error(r.error);
+  return r.value;
+})();
 const REPOS: FactoryRepo[] = [
   repoFixture('blocks', 'data', { remote: REMOTE, checks: structuredClone(CHECKS) as never }),
   repoFixture('blocks', 'iam', { remote: 'git@github.com:SELISEdigitalplatforms/blocks-iam.git', checks: structuredClone(CHECKS) as never }),
@@ -106,7 +112,7 @@ const TWO = (over: { a?: Partial<FactoryDef>; b?: Partial<FactoryDef> } = {}) =>
   defs: [defFixture('a', over.a), defFixture('b', { docsPath: '/docs/b', ...over.b })],
   repos: [
     repoFixture('a', 'api'),
-    repoFixture('b', 'api', { checks: { ...structuredClone(CHECKS), e2e: 'off', server: { cwd: 'srv', build: 'make', test: 'make test' } } as never }),
+    repoFixture('b', 'api', { checks: structuredClone(CHECKS).map((c) => (c.name.startsWith('server.') ? { ...c, cwd: 'srv', run: c.name === 'server.build' ? 'make' : 'make test' } : c)) }),
     repoFixture('b', 'web'),
   ],
 });
@@ -349,7 +355,8 @@ describe('next across factories', () => {
     await putIn(store, 'b', { status: 'ready' }, 'api');
     const ticket = await nextTicket(engine);
     expect(ticket!.context.factory).toEqual({ factoryId: 'b', name: 'b', docsPath: '/docs/b' });
-    expect(ticket!.context.checks.server).toEqual({ cwd: 'srv', build: 'make', test: 'make test' });
+    expect(ticket!.context.checks.slice(0, 2)).toEqual([
+      { name: 'server.build', cwd: 'srv', run: 'make' }, { name: 'server.test', cwd: 'srv', run: 'make test', needs: 'server.build' }]);
     expect(git.calls[0]).toBe('clone b/api');
   });
 

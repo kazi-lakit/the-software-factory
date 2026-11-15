@@ -152,13 +152,23 @@ describe('validateFactoryRepo', () => {
   });
   test.each([['/tmp', 'an absolute'], ['../x', 'a ..'], ['a/../../b', 'a ..'], ['a\\..\\b', 'a ..']])('refuses checks cwd %j (%s path) (M6)', (cwd) => {
     const r = validateFactoryRepo({ repoId: 'api', remote: 'r', checks: { ...checks, client: { ...checks.client, cwd } } }, def);
-    expect(r).toEqual({ ok: false, error: 'checks.client.cwd must be a folder inside the repo (relative, no ..)' });
+    expect(r).toEqual({ ok: false, error: 'checks.client.cwd: must be a folder inside the repo (relative, no ..)' });
   });
   test.each(['.', 'client', 'apps/web', 'a..b'])('accepts checks cwd %j (M6)', (cwd) => {
     expect(validateFactoryRepo({ repoId: 'api', remote: 'r', checks: { ...checks, server: { ...checks.server, cwd } } }, def).ok).toBe(true);
   });
   test('rejects a bad repoId', () => {
     expect(validateFactoryRepo({ repoId: 'Api', remote: 'r', checks }, def).ok).toBe(false);
+  });
+  test.each([
+    [[{ name: 'a', run: 'x' }, { name: 'a', run: 'y' }], 'checks.1.name: duplicate check name a'],
+    [[{ name: 'a', run: 'x', needs: 'b' }], 'checks.0.needs: b is not an earlier check'],
+    [[{ name: 'a', run: 'x', cwd: '../up' }], 'checks.0.cwd: must be a folder inside the repo (relative, no ..)'],
+    [undefined, 'checks is required'],
+  ])('refuses checks %j', (raw, error) => expect(validateFactoryRepo({ repoId: 'r', remote: 'x', checks: raw }, def)).toEqual({ ok: false, error }));
+  test('an empty checks list is valid', () => {
+    const r = validateFactoryRepo({ repoId: 'r', remote: 'x', checks: [] }, def);
+    expect(r.ok && r.value.checks).toEqual([]);
   });
   test('rejects malformed checks with the zod message', () => {
     const r = validateFactoryRepo({ repoId: 'api', remote: 'r', checks: { ...checks, e2e: 'on' } }, def);

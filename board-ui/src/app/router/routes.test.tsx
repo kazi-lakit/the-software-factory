@@ -45,7 +45,7 @@ vi.mock("../../lib/board", () => ({
       ghUser: "kazi-lakit", protectedBranches: ["dev", "stg", "main"], version: 1
     }]),
     listFactoryRepos: vi.fn(async () => [{
-      baseBranch: "dev", checks: { client: { build: "b", cwd: "c", install: "i", lint: "l", test: "t", typecheck: "tc" }, e2e: "off", server: { build: "b", cwd: "s", test: "t" } },
+      baseBranch: "dev", checks: [{ name: "build", cwd: "s", run: "b" }, { name: "test", cwd: "s", run: "t", needs: "build" }],
       factoryId: "blocks", remote: "git@github.com:org/iam.git", repoId: "iam", version: 1
     }]),
     listRuns: vi.fn(async () => []),

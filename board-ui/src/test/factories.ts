@@ -4,11 +4,14 @@ import type { FakeBlocksData } from "../../../core/src/blocks/fakeData";
 
 export type Factories = { defs: FactoryDef[]; repos: FactoryRepo[] };
 
-const checks = {
-  client: { cwd: "client", install: "i", lint: "l", test: "t", typecheck: "tc" },
-  e2e: "off",
-  server: { build: "b", cwd: "server", test: "t" }
-} as const;
+const checks = [
+  { name: "server.build", cwd: "server", run: "b" },
+  { name: "server.test", cwd: "server", run: "t", needs: "server.build" },
+  { name: "client.install", cwd: "client", run: "i" },
+  { name: "client.typecheck", cwd: "client", run: "tc", needs: "client.install" },
+  { name: "client.lint", cwd: "client", run: "l", needs: "client.install" },
+  { name: "client.test", cwd: "client", run: "t", needs: "client.install" }
+];
 
 export const defFixture = (factoryId: string, over: Partial<FactoryDef> = {}): FactoryDef => ({
   active: true, docsPath: "/docs", factoryId, gitEmail: "factory@example.com", gitName: "Factory", name: factoryId,

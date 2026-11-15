@@ -219,10 +219,21 @@ const decodeDef = (r: Row): FactoryDef => {
   };
 };
 
-/** A repo whose checks are not a JSON object decodes with empty checks, which validation then skips. */
+/** A JSON list (the checks list) or object (the old shape, converted on validation); anything else stays `{}`, which validation skips. */
+function parseChecks(v: Value | undefined): unknown {
+  if (v === null || v === undefined) return {};
+  try {
+    const parsed: unknown = JSON.parse(String(v));
+    return typeof parsed === 'object' && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/** A repo whose checks are not a JSON list or object decodes with `{}`, which validation then skips. */
 const decodeRepo = (r: Row): FactoryRepo => ({
   factoryId: text(r.factoryId), repoId: text(r.repoId), remote: text(r.remote), baseBranch: text(r.baseBranch),
-  checks: (parseObject(r.checks) ?? {}) as FactoryRepo['checks'], version: num(r.version),
+  checks: parseChecks(r.checks) as FactoryRepo['checks'], version: num(r.version),
 });
 
 /** The watcher fields are read only when selected and not empty. */

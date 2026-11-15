@@ -73,11 +73,14 @@ afterEach(() => {
 function setup(clientTest = 'true') {
   const cfg = repoFixture('blocks', 'data', {
     remote: bare,
-    checks: {
-      server: { cwd: 'server', build: 'true', test: 'true' },
-      client: { cwd: 'client', install: 'true', typecheck: 'true', lint: 'true', test: clientTest },
-      e2e: 'off',
-    },
+    checks: [
+      { name: 'server.build', cwd: 'server', run: 'true' },
+      { name: 'server.test', cwd: 'server', run: 'true', needs: 'server.build' },
+      { name: 'client.install', cwd: 'client', run: 'true' },
+      { name: 'client.typecheck', cwd: 'client', run: 'true', needs: 'client.install' },
+      { name: 'client.lint', cwd: 'client', run: 'true', needs: 'client.install' },
+      { name: 'client.test', cwd: 'client', run: clientTest, needs: 'client.install' },
+    ],
   });
   const store = new MemoryStore();
   const github = new PathRemoteGitHub();

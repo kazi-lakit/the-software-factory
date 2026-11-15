@@ -8,6 +8,8 @@ export { isMainRef, isProtected } from './branches.js';
 export { AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, ensureMain, protectedFor, validateFactoryDef, validateFactoryRepo, FactoryConfig } from './factories.js';
 export type { AgentModel, AgentModels, FactoryDef, FactoryRepo, FactoryHealth } from './factories.js';
 export { DEFAULT_LABEL, DEFAULT_STATUS_MAP, STANDARD_STATUS_MAP, parseProjectRef, validateGitHubSettings } from './githubConfig.js';
+export { normaliseChecks } from './checksSchema.js';
+export type { Check, Checks } from './checksSchema.js';
 export { normaliseFactoryYaml } from './factoryYaml.js';
 export type { BoardConfig, BoardSource, FactorySource, FactoryYaml } from './factoryYaml.js';
 export type { GitHubMode, GitHubSettings, ProjectRef } from './githubConfig.js';

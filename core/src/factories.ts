@@ -1,6 +1,6 @@
 // Pure (no Node API): the browser entry validates factory definitions with it.
 import { isMainRef } from './branches.js';
-import { ChecksSchema, type Checks } from './checksSchema.js';
+import { normaliseChecks, type Checks } from './checksSchema.js';
 import { validateGitHubSettings, type GitHubSettings } from './githubConfig.js';
 import type { AgentStep } from './types.js';
 import { GH_USER_PATTERN, type Validated } from './validated.js';
@@ -148,12 +148,8 @@ export function validateFactoryRepo(input: unknown, def: FactoryDef): Validated<
   const baseBranch = text(input, 'baseBranch', 'dev');
   if (baseBranch === null || baseBranch === '') return fail('baseBranch must not be blank');
   if (isMainRef(baseBranch)) return fail('main is never a base');
-  const parsed = ChecksSchema.safeParse(input.checks);
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0]!;
-    const path = ['checks', ...issue.path].join('.');
-    return fail(`${path} ${issue.code === 'invalid_type' && issue.input === undefined ? 'is required' : issue.message}`);
-  }
+  const parsed = normaliseChecks(input.checks);
+  if (!parsed.ok) return parsed;
   const branches = input.protectedBranches;
   if (branches !== undefined && branches !== null && !isBranchList(branches)) return fail('protectedBranches must be a list of branch names');
   const version = input.version ?? 1;
@@ -161,7 +157,7 @@ export function validateFactoryRepo(input: unknown, def: FactoryDef): Validated<
   return {
     ok: true,
     value: {
-      factoryId: def.factoryId, repoId, remote, baseBranch, checks: parsed.data,
+      factoryId: def.factoryId, repoId, remote, baseBranch, checks: parsed.value,
       ...(isBranchList(branches) ? { protectedBranches: ensureMain(branches) } : {}), version,
     },
   };

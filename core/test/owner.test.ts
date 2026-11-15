@@ -776,12 +776,12 @@ describe.each([
     await saveFactory(s, now, null, defFixture('delta'));
     const api = await saveRepo(s, now, null, repoFixture('delta', 'api'));
     const before = (await s.listEvents('-')).length;
-    const checks = { ...api.checks, e2e: 'off' as const, server: { build: 'b2', cwd: 'server', test: 't' } };
+    const checks = api.checks.map((c) => (c.name === 'server.build' ? { ...c, run: 'b2' } : c));
     await saveRepo(s, now, api, { ...api, checks });
     expect((await factoryEvents(s)).slice(before)).toEqual([[
       'delta', 'you', 'repo.api.checks',
-      '{"client":{"cwd":"client","install":"i","lint":"l","test":"t","typecheck":"tc"},"e2e":"off","server":{"build":"b","cwd":"server","test":"t"}}',
-      '{"client":{"cwd":"client","install":"i","lint":"l","test":"t","typecheck":"tc"},"e2e":"off","server":{"build":"b2","cwd":"server","test":"t"}}',
+      '[{"cwd":"server","name":"server.build","run":"b"},{"cwd":"server","name":"server.test","needs":"server.build","run":"t"},{"cwd":"client","name":"client.install","run":"i"},{"cwd":"client","name":"client.typecheck","needs":"client.install","run":"tc"},{"cwd":"client","name":"client.lint","needs":"client.install","run":"l"},{"cwd":"client","name":"client.test","needs":"client.install","run":"t"}]',
+      '[{"cwd":"server","name":"server.build","run":"b2"},{"cwd":"server","name":"server.test","needs":"server.build","run":"t"},{"cwd":"client","name":"client.install","run":"i"},{"cwd":"client","name":"client.typecheck","needs":"client.install","run":"tc"},{"cwd":"client","name":"client.lint","needs":"client.install","run":"l"},{"cwd":"client","name":"client.test","needs":"client.install","run":"t"}]',
     ]]);
   });
 

@@ -411,7 +411,7 @@ export function gatesSummary(r: RepoSettings | undefined): string {
 
 /** A repo's check commands in the order they run. */
 export function checksSummary(c: FactoryRepo["checks"]): string {
-  return [c.server.build, c.server.test, c.client.install, c.client.typecheck, c.client.lint, c.client.test].join(" · ");
+  return c.map((check) => check.run).join(" · ");
 }
 
 function RepoTable({ factoryId, noteId, onNotice, onReload, repos, stored }: ScopeProps & { noteId: string; repos: readonly FactoryRepo[]; stored: FactoryStored }) {

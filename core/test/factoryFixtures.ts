@@ -1,11 +1,14 @@
 import type { FakeBlocksData } from '../src/blocks/fakeData.js';
 import type { FactoryDef, FactoryRepo } from '../src/factories.js';
 
-export const checksFixture = {
-  server: { cwd: 'server', build: 'b', test: 't' },
-  client: { cwd: 'client', install: 'i', typecheck: 'tc', lint: 'l', test: 't' },
-  e2e: 'off',
-} as const;
+export const checksFixture = [
+  { name: 'server.build', cwd: 'server', run: 'b' },
+  { name: 'server.test', cwd: 'server', run: 't', needs: 'server.build' },
+  { name: 'client.install', cwd: 'client', run: 'i' },
+  { name: 'client.typecheck', cwd: 'client', run: 'tc', needs: 'client.install' },
+  { name: 'client.lint', cwd: 'client', run: 'l', needs: 'client.install' },
+  { name: 'client.test', cwd: 'client', run: 't', needs: 'client.install' },
+];
 
 export const defFixture = (factoryId: string, over: Partial<FactoryDef> = {}): FactoryDef => ({
   factoryId, name: factoryId, protectedBranches: ['dev', 'stg', 'main'], gitName: 'Factory', gitEmail: 'factory@example.com',

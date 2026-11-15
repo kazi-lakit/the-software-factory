@@ -4,12 +4,10 @@ import { DEFAULT_STATUS_MAP, STANDARD_STATUS_MAP, validateGitHubSettings } from 
 import { normaliseFactoryYaml, type FactoryYaml } from '../src/factoryYaml.js';
 import { ALL_STATUSES } from '../src/status.js';
 
-// Checks stay in today's object shape until the checks list lands (a later task).
-const CHECKS = {
-  server: { cwd: 'server', build: 'b', test: 't' },
-  client: { cwd: 'client', install: 'i', typecheck: 'tc', lint: 'l', test: 't' },
-  e2e: 'off',
-};
+const CHECKS = [
+  { name: 'build', cwd: 'server', run: 'b' },
+  { name: 'test', cwd: 'server', run: 't', needs: 'build' },
+];
 
 /** The design's section 5 example, with baseBranch dev and statusMap left out. */
 const NEW_EXAMPLE = `
@@ -49,9 +47,8 @@ repos:
       baseBranch: dev
       protectedBranches: [main]
       checks:
-        server: { cwd: server, build: b, test: t }
-        client: { cwd: client, install: i, typecheck: tc, lint: l, test: t }
-        e2e: "off"
+        - { name: build, cwd: server, run: b }
+        - { name: test, cwd: server, run: t, needs: build }
 `;
 
 const REPO = { id: 'web', remote: 'git@github.com:my-org/web.git', baseBranch: 'dev', checks: CHECKS };

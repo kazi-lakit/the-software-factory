@@ -177,18 +177,18 @@ describe("Factories tab", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/api" }));
     const form = await screen.findByRole("form", { name: "Edit repo api" });
     const checks = JSON.parse((within(form).getByLabelText("Checks (JSON)") as HTMLTextAreaElement).value) as typeof checksFixtureForTests;
-    changeField("Checks (JSON)", JSON.stringify({ ...checks, server: { ...checks.server, test: "npm run test:all" } }));
+    changeField("Checks (JSON)", JSON.stringify(checks.map((c) => (c.name === "server.test" ? { ...c, run: "npm run test:all" } : c))));
     fireEvent.click(within(form).getByRole("button", { name: "Save repo" }));
     const review = await within(form).findByRole("region", { name: "Checks change" });
-    expect(within(review).getByLabelText("Old checks")).toHaveTextContent('"test": "t"');
-    expect(within(review).getByLabelText("New checks")).toHaveTextContent('"test": "npm run test:all"');
+    expect(within(review).getByLabelText("Old checks")).toHaveTextContent('"run": "t"');
+    expect(within(review).getByLabelText("New checks")).toHaveTextContent('"run": "npm run test:all"');
     expect(save).not.toHaveBeenCalled();
-    expect((await owner().listFactoryRepos("delta"))[0]!.checks.server.test).toBe("t");
+    expect((await owner().listFactoryRepos("delta"))[0]!.checks.find((c) => c.name === "server.test")!.run).toBe("t");
 
     fireEvent.click(within(review).getByRole("button", { name: "Confirm change" }));
     await screen.findByText("Saved repo api of delta.");
     expect(save).toHaveBeenCalledTimes(1);
-    expect((await owner().listFactoryRepos("delta"))[0]!.checks.server.test).toBe("npm run test:all");
+    expect((await owner().listFactoryRepos("delta"))[0]!.checks.find((c) => c.name === "server.test")!.run).toBe("npm run test:all");
     const event = (await owner().listEvents("-")).find((e) => e.field === "repo.api.checks");
     expect(event).toMatchObject({ actor: "you", factoryId: "delta" });
     expect(event!.to).toContain("npm run test:all");
@@ -272,7 +272,7 @@ describe("Factories tab restyle", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/api" }));
     const form = await screen.findByRole("form", { name: "Edit repo api" });
     const checks = JSON.parse((within(form).getByLabelText("Checks (JSON)") as HTMLTextAreaElement).value) as typeof checksFixtureForTests;
-    changeField("Checks (JSON)", JSON.stringify({ ...checks, server: { ...checks.server, test: "x" } }));
+    changeField("Checks (JSON)", JSON.stringify(checks.map((c) => (c.name === "server.test" ? { ...c, run: "x" } : c))));
     fireEvent.click(within(form).getByRole("button", { name: "Save repo" }));
     await within(form).findByRole("region", { name: "Checks change" });
     expect(save).not.toHaveBeenCalled();

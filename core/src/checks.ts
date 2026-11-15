@@ -37,26 +37,17 @@ export const shellExec: Exec = (cmd, cwd) =>
   });
 
 export async function runChecks(cfg: { checks: Checks }, worktree: string, exec: Exec = shellExec): Promise<CheckReport> {
-  const { server, client } = cfg.checks;
   const steps: CheckStep[] = [];
-
-  const run = async (name: string, command: string, cwd: string, skip: boolean): Promise<boolean> => {
-    if (skip) {
-      steps.push({ name, command, exitCode: null, output: '' });
-      return false;
+  const passed = new Set<string>();
+  for (const c of cfg.checks) {
+    if (c.needs !== undefined && !passed.has(c.needs)) {
+      steps.push({ name: c.name, command: c.run, exitCode: null, output: '' });
+      continue;
     }
-    const r = await exec(command, join(worktree, cwd));
-    steps.push({ name, command, exitCode: r.code, output: r.output.slice(-OUTPUT_LIMIT) });
-    return r.code === 0;
-  };
-
-  const built = await run('server.build', server.build, server.cwd, false);
-  await run('server.test', server.test, server.cwd, !built);
-  const installed = await run('client.install', client.install, client.cwd, false);
-  await run('client.typecheck', client.typecheck, client.cwd, !installed);
-  await run('client.lint', client.lint, client.cwd, !installed);
-  await run('client.test', client.test, client.cwd, !installed);
-
+    const r = await exec(c.run, join(worktree, c.cwd));
+    steps.push({ name: c.name, command: c.run, exitCode: r.code, output: r.output.slice(-OUTPUT_LIMIT) });
+    if (r.code === 0) passed.add(c.name);
+  }
   return { passed: steps.every((s) => s.exitCode === 0), steps };
 }
 
