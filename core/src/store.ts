@@ -282,12 +282,18 @@ export class MemoryStore implements BoardStore {
   }
 
   async saveSyncRequest(before: SyncRequest, after: SyncRequest) {
-    const ok = this.identity ? canSyncMove(before.state, after.state, this.identity) : canSyncMove(before.state, after.state, 'core') || canSyncMove(before.state, after.state, 'owner');
-    if (!ok) throw new ForbiddenError(`a sync request may not move from ${before.state} to ${after.state}${this.identity ? ` as ${this.identity}` : ''}`);
     return this.write(() => {
       const rows = this.state.syncRequests;
       const i = rows.findIndex((r) => r.requestId === before.requestId);
       const stored = versionedSave(`sync request ${before.requestId}`, rows[i], before, after);
+      const cur = rows[i]!;
+      // The role check uses the stored state, not the caller's `before`; ids are pinned to the stored row.
+      const ok = this.identity
+        ? canSyncMove(cur.state, after.state, this.identity)
+        : canSyncMove(cur.state, after.state, 'core') || canSyncMove(cur.state, after.state, 'owner');
+      if (!ok) throw new ForbiddenError(`a sync request may not move from ${cur.state} to ${after.state}${this.identity ? ` as ${this.identity}` : ''}`);
+      stored.requestId = cur.requestId;
+      stored.factoryId = cur.factoryId;
       rows[i] = stored;
       return clone(stored);
     });

@@ -41,6 +41,15 @@ describe('MemoryStore', () => {
 });
 
 describe('FileStore', () => {
+  test('sync requests survive a reload and can be saved by the new instance', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'fs-')), 'board.json');
+    const q = await new FileStore(path).requestSync('delta', 'kazi');
+    const b = new FileStore(path);
+    expect((await b.listSyncRequests('delta')).map((r) => r.requestId)).toEqual([q.requestId]);
+    const planned = await b.saveSyncRequest(q, { ...q, state: 'planned' });
+    expect((await new FileStore(path).listSyncRequests())[0]).toMatchObject({ state: 'planned', version: 2, requestId: q.requestId });
+    expect(planned.version).toBe(2);
+  });
   test('reloads what an earlier instance wrote', async () => {
     const path = join(mkdtempSync(join(tmpdir(), 'fs-')), 'sub', 'board.json');
     const a = new FileStore(path);

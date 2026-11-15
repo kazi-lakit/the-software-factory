@@ -44,9 +44,9 @@ export function fitSyncPlan(p: SyncPlan): SyncPlan {
   while (jsonBytes({ ...p, actions, notApplied: [...notApplied, ...dropped] }) > MAX_SYNC_JSON_BYTES) {
     let i = actions.length - 1;
     while (i >= 0 && actions[i]!.kind !== 'create') i--;
-    if (i < 0) break;
-    const [a] = actions.splice(i, 1);
-    if (a!.kind !== 'create') break;
+    const a = actions[i];
+    if (!a || a.kind !== 'create') break;
+    actions.splice(i, 1);
     dropped.unshift({ taskId: null, issue: `${a.issue.repo}#${a.issue.number}`, change: 'new issue', reason: 'too many changes for one Sync; click Sync again' });
   }
   return { ...p, actions, notApplied: [...notApplied, ...dropped] };

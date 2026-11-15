@@ -324,6 +324,30 @@ export function runStoreContract(
         const q2 = await any.requestSync('delta', 'kazi');
         await expect(any.saveSyncRequest(q2, { ...q2 })).rejects.toBeInstanceOf(ForbiddenError);
       });
+      test('the stored state decides the role check, and ids cannot change', async () => {
+        const s = await make('owner');
+        const q = await s.requestSync('delta', 'kazi');
+        await expect(s.saveSyncRequest({ ...q, state: 'planned' }, { ...q, state: 'applying' })).rejects.toBeInstanceOf(ForbiddenError);
+        const failed = await s.saveSyncRequest(q, { ...q, state: 'failed' }).catch((e: unknown) => e);
+        expect(failed).toBeInstanceOf(ForbiddenError);
+      });
+      test('requestId and factoryId stay as stored', async () => {
+        const s = await make();
+        const q = await s.requestSync('delta', 'kazi');
+        const out = await s.saveSyncRequest(q, { ...q, state: 'planned', factoryId: 'evil' });
+        expect(out).toMatchObject({ requestId: q.requestId, factoryId: 'delta' });
+        expect(await s.listSyncRequests('evil')).toEqual([]);
+        await expect(s.saveSyncRequest({ ...out, requestId: 'nope' }, { ...out, requestId: 'nope', state: 'failed' })).rejects.toBeInstanceOf(VersionConflictError);
+      });
+      test('core may fail a planned row; the owner may not', async () => {
+        const s = await make();
+        const q = await s.requestSync('delta', 'kazi');
+        const planned = await s.saveSyncRequest(q, { ...q, state: 'planned' });
+        const owner = await make('owner');
+        const oq = await owner.requestSync('delta', 'kazi');
+        await expect(owner.saveSyncRequest(oq, { ...oq, state: 'failed' })).rejects.toBeInstanceOf(ForbiddenError);
+        expect((await s.saveSyncRequest(planned, { ...planned, state: 'failed', error: 'x' })).state).toBe('failed');
+      });
       test('githubSchemaReady is true', async () => {
         expect(await (await make()).githubSchemaReady()).toBe(true);
       });
