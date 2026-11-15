@@ -1022,6 +1022,22 @@ textarea.sf-input {
   margin-top: auto;
 }
 
+/* The issue link sits above the stretched title link, as the CTA does. */
+.sf-card-github {
+  color: var(--sf-accent);
+  font-family: var(--sf-mono);
+  position: relative;
+  text-decoration: none;
+  z-index: 1;
+}
+.sf-card-github:hover { text-decoration: underline; }
+.sf-card-github-error {
+  color: var(--sf-removed);
+  font-size: 12px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 .sf-card-muted .sf-card-id,
 .sf-card-muted .sf-card-meta {
   color: var(--sf-done);

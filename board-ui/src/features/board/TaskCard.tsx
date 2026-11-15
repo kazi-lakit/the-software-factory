@@ -2,6 +2,7 @@ import { ArrowUpRight, GitBranch } from "lucide-react";
 import { Fragment, useState, type MouseEvent } from "react";
 import { markReady, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
+import type { CardGitHub } from "../github/githubCard";
 import { parseQuestion } from "../task/parseQuestion";
 import { describeWriteError, now, useInvalidateAfterWrite } from "../task/writeOutcome";
 import { ctaLabel, MUTED, NEEDS_YOU, progressLabel, progressSteps, STATUS_LABEL, STEPS, taskPath } from "./status";
@@ -19,8 +20,8 @@ export function followInApp(event: MouseEvent<HTMLAnchorElement>, href: string, 
  * card sits in: Lanes shows the status chip and the step bar; All stages (the column already says the status)
  * shows a chip only on cards that wait for the owner.
  */
-export function TaskCard({ onNavigate, showFactory = false, task, view = "lanes", waitingOn = [] }: {
-  onNavigate: (path: string) => void; showFactory?: boolean; task: Task; view?: BoardViewMode; waitingOn?: string[];
+export function TaskCard({ github = null, onNavigate, showFactory = false, task, view = "lanes", waitingOn = [] }: {
+  github?: CardGitHub | null; onNavigate: (path: string) => void; showFactory?: boolean; task: Task; view?: BoardViewMode; waitingOn?: string[];
 }) {
   const href = taskPath(task.taskId);
   const needsYou = NEEDS_YOU.has(task.status);
@@ -63,6 +64,10 @@ export function TaskCard({ onNavigate, showFactory = false, task, view = "lanes"
       </a>
       <div className="sf-card-meta">
         <span className="sf-card-repo"><GitBranch size={13} aria-hidden="true" />{task.repo}</span>
+        {github?.issue ? (
+          <a className="sf-card-github" href={github.issue.url} target="_blank" rel="noreferrer" aria-label={`GitHub issue ${github.issue.name}`}>{github.issue.label}</a>
+        ) : null}
+        {github?.waiting ? <span className="sf-card-status">waiting for GitHub</span> : null}
         {showSteps ? (
           <span className="sf-steps" role="img" aria-label={progressLabel(task.status, task.stage)}>
             {steps.map((state, i) => (
@@ -98,6 +103,7 @@ export function TaskCard({ onNavigate, showFactory = false, task, view = "lanes"
           Mark ready
         </button>
       ) : null}
+      {github?.error ? <p className="sf-card-github-error">GitHub: {github.error}</p> : null}
       {error ? <p className="sf-card-error" role="alert">{error}</p> : null}
     </article>
   );

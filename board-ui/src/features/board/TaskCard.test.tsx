@@ -345,4 +345,33 @@ describe("TaskCard at 360px", () => {
     expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
     expect(container.querySelector(".sf-card-question-options")?.textContent).toBe(" · 3 options");
   });
+
+  it("renders_the_issue_link_waiting_chip_and_stuck_error", () => {
+    const issue = { label: "#12", name: "acme/app#12", url: "https://github.com/acme/app/issues/12" };
+    const { unmount } = render(<TaskCard task={task()} github={{ issue, waiting: false, error: "rate limited" }} onNavigate={vi.fn()} />);
+    const a = screen.getByRole("link", { name: "GitHub issue acme/app#12" });
+    expect(a).toHaveTextContent("#12");
+    expect(a).toHaveAttribute("href", issue.url);
+    expect(a).toHaveAttribute("target", "_blank");
+    expect(a).toHaveAttribute("rel", "noreferrer");
+    expect(a.closest(".sf-card-meta")).not.toBeNull();
+    expect(screen.getByText("GitHub: rate limited")).toHaveClass("sf-card-github-error");
+    expect(screen.queryByText("waiting for GitHub")).toBeNull();
+    unmount();
+    render(<TaskCard task={task()} github={{ issue: null, waiting: true, error: null }} onNavigate={vi.fn()} />);
+    expect(screen.getByText("waiting for GitHub")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /GitHub issue/ })).toBeNull();
+  });
+
+  it("the_issue_link_opens_github_not_the_task", () => {
+    const onNavigate = vi.fn();
+    const issue = { label: "#12", name: "acme/app#12", url: "https://github.com/acme/app/issues/12" };
+    render(<TaskCard task={task()} github={{ issue, waiting: false, error: null }} onNavigate={onNavigate} />);
+    const a = screen.getByRole("link", { name: "GitHub issue acme/app#12" });
+    // The link is its own anchor, not inside the title link, and the app does not navigate.
+    expect(a.closest(".sf-card-link")).toBeNull();
+    fireEvent.click(a);
+    expect(onNavigate).not.toHaveBeenCalled();
+    expect(BOARD_CSS).toMatch(/\.sf-card-github[^{]*\{[^}]*z-index:\s*1/);
+  });
 });

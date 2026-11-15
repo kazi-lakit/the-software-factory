@@ -9,6 +9,8 @@ export { AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, ensureMain, validateFactory
 export type { AgentModel, AgentModels, FactoryDef, FactoryRepo, FactoryHealth } from './factories.js';
 export { DEFAULT_LABEL, DEFAULT_STATUS_MAP, parseProjectRef, validateGitHubSettings } from './githubConfig.js';
 export type { GitHubMode, GitHubSettings, ProjectRef } from './githubConfig.js';
+export { emptyPushed } from './githubLink.js';
+export type { GitHubLink, PushedState } from './githubLink.js';
 export { IMPORT_FORMAT, validateImportFile } from './importFile.js';
 export type { ImportFile } from './importFile.js';
 export { GATE_DOC, resolveSettings, resolveGates, validApproval, shouldMerge } from './gates.js';

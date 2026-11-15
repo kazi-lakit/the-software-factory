@@ -2,6 +2,8 @@ import { Plus, Search, SlidersHorizontal } from "lucide-react";
 import { useEffect, useId, useLayoutEffect, useState } from "react";
 import { unfinishedDeps, type FactoryRepo, type Status, type Task } from "@factory/core";
 import { useFactories, useSelectedFactory } from "../factories/useFactories";
+import { cardGitHub } from "../github/githubCard";
+import { useGitHubLinks } from "../github/useGitHub";
 import { FactoryPicker } from "./FactoryPicker";
 import { byAge, laneOf, LANES, type LaneId } from "./lanes";
 import { COLUMNS, isTestTask, MUTED, NEEDS_YOU, STATUS_LABEL } from "./status";
@@ -68,6 +70,10 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
   const matches = (task: Task) => q === "" || task.taskId.toLowerCase().includes(q) || task.title.toLowerCase().includes(q);
   const visible = inFactory.filter((task) => (showTest || !isTestTask(task)) && (repo === "" || (all ? `${task.factoryId}/${task.repo}` : task.repo) === repo) && matches(task));
   const allTasks = board.data ?? [];
+  const anyConnected = factories.defs.some((def) => def.github?.mode === "connected");
+  const links = useGitHubLinks(anyConnected);
+  const linkById = new Map((links.data ?? []).map((link) => [link.taskId, link]));
+  const githubOf = (task: Task) => cardGitHub(task, linkById.get(task.taskId), factories.byId.get(task.factoryId)?.def);
   const waitingOn = (task: Task): string[] => (task.status === "ready" ? unfinishedDeps(task, allTasks) : []);
   const byStatus = new Map<Status, Task[]>(COLUMNS.map((status) => [status, []]));
   for (const task of visible) byStatus.get(task.status)?.push(task);
@@ -217,7 +223,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
                 {shown.length > 0 ? (
                   <ul id={listId} className="sf-card-list">
                     {shown.map((task) => (
-                      <li key={task.taskId}><TaskCard task={task} showFactory={all} view="lanes" waitingOn={waitingOn(task)} onNavigate={onNavigate} /></li>
+                      <li key={task.taskId}><TaskCard task={task} github={githubOf(task)} showFactory={all} view="lanes" waitingOn={waitingOn(task)} onNavigate={onNavigate} /></li>
                     ))}
                   </ul>
                 ) : tasks.length === 0 ? (
@@ -266,7 +272,7 @@ export function BoardView({ onNavigate }: { onNavigate: Navigate }) {
                 {listed ? (
                   <ul id={listId} className="sf-card-list">
                     {tasks.map((task) => (
-                      <li key={task.taskId}><TaskCard task={task} showFactory={all} view="stages" waitingOn={waitingOn(task)} onNavigate={onNavigate} /></li>
+                      <li key={task.taskId}><TaskCard task={task} github={githubOf(task)} showFactory={all} view="stages" waitingOn={waitingOn(task)} onNavigate={onNavigate} /></li>
                     ))}
                   </ul>
                 ) : null}

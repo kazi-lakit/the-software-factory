@@ -1,6 +1,8 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clearAllUnsent, keepUnsent } from "../../lib/unsent";
+import { DEFAULT_STATUS_MAP } from "@factory/core";
+import { emptyPushed } from "../../../../core/src/githubLink";
 import { factory, merge } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
 import { BoardView } from "./BoardView";
@@ -930,4 +932,22 @@ it("keeps the result count in the toolbar and resets active filters", async () =
   expect(container.querySelector(".sf-board-filters")).toContainElement(screen.getByText("1 task in view"));
   fireEvent.click(screen.getByRole("button", { name: "Reset filters" }));
   expect(screen.getByRole("searchbox")).toHaveValue("");
+});
+
+describe("BoardView GitHub states", () => {
+  it("cards_of_a_connected_factory_show_their_github_state", async () => {
+    const github = { mode: "connected" as const, project: { owner: "o", number: 3 }, label: "factory", approvers: ["a"], statusMap: DEFAULT_STATUS_MAP };
+    resetFakeBoard(merge(factory("blocks", ["data"], { github }), factory("plain", ["data"], { name: "Plain" })));
+    const linked = await seedTask({ title: "Has issue" }, "ready");
+    await seedTask({ title: "No issue yet" }, "ready");
+    const plain = await seedTask({ title: "Not connected", factoryId: "plain" }, "ready");
+    const base = { factoryId: "blocks", repo: "acme/app", issueNodeId: null, project: null, itemId: null, pushed: emptyPushed(), error: null, lease: null, reported: [], version: 0 };
+    await fakeBoard().core.saveGitHubLink(null, { ...base, taskId: linked.taskId, issueNumber: 12 });
+    await fakeBoard().core.saveGitHubLink(null, { ...base, taskId: plain.taskId, factoryId: "plain", issueNumber: 99 });
+    renderBoard();
+    const issue = await screen.findByRole("link", { name: "GitHub issue acme/app#12" });
+    expect(issue).toHaveAttribute("href", "https://github.com/acme/app/issues/12");
+    expect(screen.getAllByText("waiting for GitHub")).toHaveLength(1);
+    expect(screen.queryByText("#99")).toBeNull();
+  });
 });
