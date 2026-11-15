@@ -12,4 +12,6 @@ You need Node 22 or newer, git, [Claude Code](https://docs.claude.com/claude-cod
 
 The plugin and its guard hooks are installed user-scoped by setup, so `/factory:run` works from any folder. See [plugin/README.md](plugin/README.md).
 
-The store defaults to `local` (`FACTORY_STORE=local|factory-app`). The file format, the checks list, the store variables and three ready templates (app only, app + GitHub, local + GitHub) are in the [factory.yaml reference](docs/setup/factory-yaml.md).
+`factories/<id>/factory.yaml` holds your GitHub logins and repo links and is not git-ignored. Don't commit it into contributions to this repository upstream.
+
+The store defaults to `local` (`FACTORY_STORE=local|factory-app`). With `FACTORY_STORE=blocks` (or `factory-app`) exported, `/factory:run` with no factory named sees only the Blocks factories: name your local factory (`/factory:run <factory>`) or use `FACTORY_STORE=local`. The file format, the checks list, the store variables and three ready templates (app only, app + GitHub, local + GitHub) are in the [factory.yaml reference](docs/setup/factory-yaml.md).

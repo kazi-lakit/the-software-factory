@@ -214,6 +214,28 @@ describe('factory cli', () => {
         delete process.env.FACTORY_ROOT;
       }
     });
+
+    test('complete, check, ship and renew with --factory <local yaml factory> open the file store under FACTORY_STORE=blocks', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'cli-root-'));
+      mkdirSync(join(root, 'factories', 'loc'), { recursive: true });
+      writeFileSync(join(root, 'factories', 'loc', 'factory.yaml'), 'factory:\n  id: loc\n  name: Loc\n  source: local\n');
+      process.env.FACTORY_ROOT = root;
+      process.env.FACTORY_STORE = 'blocks';
+      try {
+        const { go, wired, err } = setup();
+        await go('next', '--peek', '--factory', 'loc');
+        await go('complete', 'T-1', 'spec', '--reply', replyFile(SPEC_REPLY), '--factory', 'loc');
+        await go('check', 'T-1', '--factory', 'loc');
+        await go('ship', 'T-1', '--factory', 'loc');
+        await go('renew', 'T-1', '--factory', 'loc');
+        await go('renew', 'T-1');
+        expect(wired.map((w) => w.store)).toEqual(['file', 'file', 'file', 'file', 'file', 'blocks']);
+        expect(await go('renew', 'T-1', '--factory', 'Bad_Id')).toBe(1);
+        expect(err.at(-1)).toBe('error: --factory must be a factory id (lowercase letters, digits and hyphens)');
+      } finally {
+        delete process.env.FACTORY_ROOT;
+      }
+    });
   });
 
   test('dev approve for a missing doc exits 1', async () => {

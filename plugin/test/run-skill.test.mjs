@@ -63,6 +63,17 @@ describe('run skill', () => {
     for (const verb of ['next', 'check', 'ship', 'complete']) expect(cmds.some((c) => c.includes(` ${verb} `) || c.endsWith(` ${verb}`))).toBe(true);
   });
 
+  it('passes the ticket factory to complete, check and ship, and records it in the session file', () => {
+    const cmds = [...body.matchAll(/`([^`]*core\/dist\/cli\.js[^`]*)`/g)].map((m) => m[1]);
+    for (const verb of ['check', 'ship', 'complete']) {
+      const c = cmds.filter((x) => x.includes(` ${verb} `));
+      expect(c.length).toBeGreaterThan(0);
+      for (const x of c) expect(x).toContain('--factory "<context.factory.factoryId>"');
+    }
+    const step3 = body.match(/^3\. .*$/m)[0];
+    expect(step3).toContain('"factory": <context.factory.factoryId>');
+  });
+
   it('has the ground-rules line', () => {
     expect(body).toContain(GROUND_RULES);
   });

@@ -49,7 +49,7 @@ If the timeout kills a check, no report is written and the task stays at `check`
 
 ## Store
 
-The default store is `local` (this clone's `.factory/` plus `factories/<id>/factory.yaml`). Set `FACTORY_STORE=local|factory-app` to choose; `file` and `blocks` are still accepted for them. `FACTORY_STORE_LOCAL_PATH` (an absolute folder; empty means `<root>/.factory`) moves the store data only (`board.json` and its locks), not `factories/`. A factory whose YAML says `factory.source: local` always uses the local store. See `docs/setup/factory-yaml.md`.
+The default store is `local` (this clone's `.factory/` plus `factories/<id>/factory.yaml`). Set `FACTORY_STORE=local|factory-app` to choose; `file` and `blocks` are still accepted for them. `FACTORY_STORE_LOCAL_PATH` (an absolute folder; empty means `<root>/.factory`) moves the store data only (`board.json` and its locks), not `factories/`. A factory whose YAML says `factory.source: local` always uses the local store when the command names it: the run skill passes the ticket's factory to `complete`, `check` and `ship` as `--factory`, and the renew hook passes the factory recorded in the session file. With `FACTORY_STORE=blocks` (or `factory-app`), `/factory:run` with no factory named sees only the Blocks factories: name the factory (`/factory:run <factory>`) or use `FACTORY_STORE=local`. See `docs/setup/factory-yaml.md`.
 
 `./factory init` always works on the local store. After "Add another factory" the wizard finishes; run `./factory init` again for more changes. The generated `./factory` and `factory.cmd` launchers are git-ignored.
 

@@ -42,7 +42,13 @@ beforeEach(() => {
   stub('npm');
   stub('git');
   stub('gh');
-  stub('claude', 'if [ "$1 $2" = "plugin list" ] && [ -n "$CLAUDE_HAS_PLUGIN" ]; then echo "  factory@the-software-factory"; fi\nexit 0');
+  // Like the real claude: `marketplace add` fails when the marketplace is already registered.
+  stub('claude', [
+    'if [ "$1 $2" = "plugin list" ] && [ -n "$CLAUDE_HAS_PLUGIN" ]; then echo "  factory@the-software-factory"; fi',
+    'if [ "$1 $2 $3" = "plugin marketplace list" ] && [ -n "$CLAUDE_HAS_MARKETPLACE" ]; then echo "  > the-software-factory"; fi',
+    'if [ "$1 $2 $3" = "plugin marketplace add" ] && [ -n "$CLAUDE_HAS_MARKETPLACE" ]; then echo "already registered" >&2; exit 1; fi',
+    'exit 0',
+  ].join('\n'));
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
@@ -59,6 +65,7 @@ describe.skipIf(win)('setup.sh', () => {
     expect(lines()).toEqual([
       'npm ci @core', 'npm ci @plugin', 'npm run build @core',
       'claude plugin list @clone',
+      'claude plugin marketplace list @clone',
       `claude plugin marketplace add ${clone} @clone`,
       'claude plugin install factory@the-software-factory @clone',
       `cli init root=${clone}`,
@@ -73,6 +80,16 @@ describe.skipIf(win)('setup.sh', () => {
     const l = lines();
     expect(l).toContain('claude plugin list @clone');
     expect(l.some((x) => x.startsWith('claude plugin marketplace add') || x.startsWith('claude plugin install'))).toBe(false);
+    expect(l[l.length - 1]).toBe(`cli init root=${clone}`);
+  });
+
+  test('a registered marketplace without the plugin: skips marketplace add and installs the plugin', () => {
+    const r = setup({ CLAUDE_HAS_MARKETPLACE: '1' });
+    expect(r.status, r.stderr + r.stdout).toBe(0);
+    const l = lines();
+    expect(l).toContain('claude plugin marketplace list @clone');
+    expect(l.some((x) => x.startsWith('claude plugin marketplace add'))).toBe(false);
+    expect(l).toContain('claude plugin install factory@the-software-factory @clone');
     expect(l[l.length - 1]).toBe(`cli init root=${clone}`);
   });
 

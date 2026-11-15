@@ -43,7 +43,12 @@ printf '@echo off\r\nset "FACTORY_ROOT=%%~dp0"\r\nif "%%FACTORY_ROOT:~-1%%"=="\\
 if claude plugin list 2>/dev/null | grep -q 'factory@the-software-factory'; then
   echo "plugin factory@the-software-factory is already installed"
 else
-  claude plugin marketplace add "$ROOT"
+  # `marketplace add` fails when the marketplace is already registered: add it only when it is missing.
+  if claude plugin marketplace list 2>/dev/null | grep -q 'the-software-factory'; then
+    echo "marketplace the-software-factory is already registered"
+  else
+    claude plugin marketplace add "$ROOT"
+  fi
   claude plugin install factory@the-software-factory
 fi
 

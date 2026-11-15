@@ -66,7 +66,7 @@ export function sessionFile(root, sessionId) {
   return path.join(root, 'runs', '.sessions', `${sessionId}.json`);
 }
 
-// Session file shape: {taskId, step, worktree, mode, session}. Null when missing or unreadable.
+// Session file shape: {taskId, step, worktree, mode, session, factory}. Null when missing or unreadable.
 export function readSession(root, sessionId) {
   if (!sessionId) return null;
   try {
@@ -112,14 +112,19 @@ export function renewFile(root, sessionId) {
   return path.join(root, 'runs', '.sessions', `${sessionId}.renew`);
 }
 
+const FACTORY_ID = /^[a-z][a-z0-9-]{0,39}$/;
+
 // The store comes from the hook's own environment (the launch shell's FACTORY_STORE, default local, as session-start
 // does), never from the session file the model writes. Null unless it is local, factory-app, file or blocks.
+// The step's factory (session.factory, from the ticket) goes along as --factory, so the core routes a local factory to
+// the local store as it did for next; a value that is not a factory id is left out.
 export function renewCommand({ root, session, sessionId, host, node = process.execPath, env = process.env }) {
   const store = env.FACTORY_STORE || 'local';
   if (!['local', 'factory-app', 'file', 'blocks'].includes(store)) return null;
+  const factory = typeof session.factory === 'string' && FACTORY_ID.test(session.factory) ? ['--factory', session.factory] : [];
   return {
     file: node,
-    args: [path.join(root, 'core', 'dist', 'cli.js'), '--mode', session.mode, '--store', store, 'renew', session.taskId],
+    args: [path.join(root, 'core', 'dist', 'cli.js'), '--mode', session.mode, '--store', store, 'renew', session.taskId, ...factory],
     env: { ...env, FACTORY_ROOT: root, FACTORY_CLAIMANT: claimantFor(sessionId, host) },
     log: path.join(root, 'runs', session.taskId, 'renew.log'),
   };

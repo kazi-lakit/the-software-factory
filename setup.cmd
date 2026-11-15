@@ -34,12 +34,19 @@ rem 3. Launcher (git-ignored). It sets FACTORY_ROOT to its own folder.
 
 rem 4. The plugin, unless it is already installed.
 claude plugin list 2>nul | findstr /c:"factory@the-software-factory" >nul
+if errorlevel 1 goto install_plugin
+echo plugin factory@the-software-factory is already installed
+goto plugin_done
+:install_plugin
+rem "marketplace add" fails when the marketplace is already registered: add it only when it is missing.
+claude plugin marketplace list 2>nul | findstr /c:"the-software-factory" >nul
 if errorlevel 1 (
   call claude plugin marketplace add "%ROOT%" || exit /b 1
-  call claude plugin install factory@the-software-factory || exit /b 1
 ) else (
-  echo plugin factory@the-software-factory is already installed
+  echo marketplace the-software-factory is already registered
 )
+call claude plugin install factory@the-software-factory || exit /b 1
+:plugin_done
 
 rem 5. The wizard.
 echo Note: the factory steps themselves (git worktrees, the guard hook, shell checks) have not been tested on Windows yet.

@@ -20,7 +20,7 @@ try {
         fs.utimesSync(marker, new Date(now), new Date(now));
         const cmd = renewCommand({ root, session, sessionId: input.session_id, host: os.hostname() });
         if (!cmd) {
-          process.stderr.write('factory renew: FACTORY_STORE must be file or blocks; renewal skipped\n');
+          process.stderr.write('factory renew: FACTORY_STORE must be local or factory-app (or file, blocks); renewal skipped\n');
         } else {
           fs.mkdirSync(path.dirname(cmd.log), { recursive: true });
           const out = fs.openSync(cmd.log, 'a');

@@ -233,7 +233,9 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
     .description('report an agent step result')
     .option('--result <file>', 'path of the agent result JSON')
     .option('--reply <file>', 'path of the agent reply text (<factory-result> and <factory-doc> blocks)')
-    .action(async (task: string, step: string, o: { result?: string; reply?: string }, cmd: Command) => {
+    .option('--factory <id>', "the task's factory (routes a local factory to the local store)")
+    .action(async (task: string, step: string, o: { result?: string; reply?: string; factory?: string }, cmd: Command) => {
+      if (o.factory !== undefined) factoryId(o.factory);
       const agentStep = choice<AgentStep>('step', step, STEPS);
       if ((o.result === undefined) === (o.reply === undefined)) throw new CliExit('pass exactly one of --result or --reply', 1);
       const { engine, store } = await open(cmd);
@@ -248,7 +250,9 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   program
     .command('check <task>')
     .description('run the repo checks')
-    .action(async (task: string, _o: object, cmd: Command) => {
+    .option('--factory <id>', "the task's factory (routes a local factory to the local store)")
+    .action(async (task: string, o: { factory?: string }, cmd: Command) => {
+      if (o.factory !== undefined) factoryId(o.factory);
       const { engine, store } = await open(cmd);
       const updated = await engine.check(task);
       await pushAfter(cmd, store, updated.taskId);
@@ -258,7 +262,9 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   program
     .command('ship <task>')
     .description('push the branch and open (or merge) the PR')
-    .action(async (task: string, _o: object, cmd: Command) => {
+    .option('--factory <id>', "the task's factory (routes a local factory to the local store)")
+    .action(async (task: string, o: { factory?: string }, cmd: Command) => {
+      if (o.factory !== undefined) factoryId(o.factory);
       const { engine, store } = await open(cmd);
       const updated = await engine.ship(task);
       await pushAfter(cmd, store, updated.taskId);
@@ -268,7 +274,9 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
   program
     .command('renew <task>')
     .description('extend your claim on a task by 10 minutes')
-    .action(async (task: string, _o: object, cmd: Command) => {
+    .option('--factory <id>', "the task's factory (routes a local factory to the local store)")
+    .action(async (task: string, o: { factory?: string }, cmd: Command) => {
+      if (o.factory !== undefined) factoryId(o.factory);
       const { engine } = await open(cmd);
       const renewed = await engine.renew(task);
       io.out(`${renewed.taskId} claimed until ${renewed.claimUntil}`);

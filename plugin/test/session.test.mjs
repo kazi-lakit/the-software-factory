@@ -74,6 +74,16 @@ describe('renewCommand', () => {
   it('skips an invalid store', () => {
     expect(args({ FACTORY_STORE: 'sqlite' })).toBeNull();
   });
+  it('passes the factory recorded for the step, so a local factory renews in the local store', () => {
+    const c = renewCommand({ root, session: { ...session, factory: 'myapp' }, sessionId: '0123456789ab', host: 'mac', node: 'node', env: { FACTORY_STORE: 'blocks' } });
+    expect(c.args).toEqual(['/f/root/core/dist/cli.js', '--mode', 'session', '--store', 'blocks', 'renew', 'T-1', '--factory', 'myapp']);
+  });
+  it('leaves out a recorded factory that is not a factory id', () => {
+    for (const factory of ['Bad_Id', '--store=file', 42, '']) {
+      const c = renewCommand({ root, session: { ...session, factory }, sessionId: '0123456789ab', host: 'mac', node: 'node', env: {} });
+      expect(c.args).not.toContain('--factory');
+    }
+  });
 });
 
 // Temp folders: a factory root (core/package.json, plugin manifest), a plain project folder, and a home with no factory.
