@@ -3,8 +3,9 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, utimesSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
-import { FileStore, MemoryStore, RereadAfterUpdateError, updateHeld, VersionConflictError } from '../src/store.js';
+import { FileStore, ForbiddenError, MemoryStore, RereadAfterUpdateError, updateHeld, VersionConflictError } from '../src/store.js';
 import { runStoreContract } from './storeContract.js';
+import { emptyPushed, type GitHubLink } from '../src/githubLink.js';
 
 const mk = (s: MemoryStore, title = 'a') => s.createTask({ factoryId: 'blocks', title, description: '', repo: 'data' });
 
@@ -212,5 +213,60 @@ describe('FileStore factories', () => {
     expect(await s.getSettings()).toEqual({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, paused: true }, repos: { data: { maxParallel: 1 } } } } });
     await s.updateSettingsScope('blocks/data', { maxParallel: 1 }, { maxParallel: 2 });
     expect((await new FileStore(join(root, 'board.json')).getSettings()).factories.blocks!.repos.data).toEqual({ maxParallel: 2 });
+  });
+});
+
+const link = (taskId: string, factoryId: string): GitHubLink => ({
+  taskId, factoryId, repo: 'o/r', issueNumber: null, issueNodeId: null, project: null, itemId: null,
+  pushed: emptyPushed(), error: null, lease: null, version: 0,
+});
+
+describe.each([
+  ['MemoryStore', (identity?: 'core' | 'owner') => new MemoryStore({ identity })],
+  ['FileStore', (identity?: 'core' | 'owner') => new FileStore(join(mkdtempSync(join(tmpdir(), 'fs-link-')), 'board.json'), { identity })],
+])('%s GitHub links', (_name, make) => {
+  test('saveGitHubLink inserts at version 1 and lists by factory', async () => {
+    const s = make();
+    const a = await s.saveGitHubLink(null, link('T-1', 'a'));
+    await s.saveGitHubLink(null, link('T-2', 'b'));
+    expect(a.version).toBe(1);
+    expect(await s.listGitHubLinks('a')).toEqual([a]);
+    expect(await s.listGitHubLinks()).toHaveLength(2);
+    expect(await s.getGitHubLink('T-1')).toEqual(a);
+    expect(await s.getGitHubLink('T-9')).toBeUndefined();
+  });
+  test('saveGitHubLink is compare-and-set', async () => {
+    const s = make();
+    const a = await s.saveGitHubLink(null, link('T-1', 'a'));
+    const b = await s.saveGitHubLink(a, { ...a, issueNumber: 5 });
+    expect(b.version).toBe(2);
+    await expect(s.saveGitHubLink(a, { ...a, issueNumber: 6 })).rejects.toBeInstanceOf(VersionConflictError);
+    await expect(s.saveGitHubLink(null, link('T-1', 'a'))).rejects.toBeInstanceOf(VersionConflictError);
+  });
+  test('owner identity may not save links', async () => {
+    await expect(make('owner').saveGitHubLink(null, link('T-1', 'a'))).rejects.toBeInstanceOf(ForbiddenError);
+  });
+});
+
+describe('FileStore GitHub links and factory.yaml', () => {
+  test('a file without githubLinks loads', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'fs-link-')), 'board.json');
+    writeFileSync(path, '{"tasks":[]}');
+    expect(await new FileStore(path).listGitHubLinks()).toEqual([]);
+  });
+  test('re-reads factory.yaml when it changes', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'fs-yaml-'));
+    mkdirSync(join(root, 'factories', 'a'), { recursive: true });
+    const yaml = join(root, 'factories', 'a', 'factory.yaml');
+    const text = (ready: string) => 'factoryId: a\nname: A\ngithub:\n  mode: github-only\n  project: kazi-lakit/3\n  statusMap:\n    inbox: Backlog\n'
+      + `    ready: ${ready}\n    spec: In progress\n    spec_review: In progress\n    plan: In progress\n    plan_review: In progress\n    build: In progress\n`
+      + '    verify: In progress\n    review: In progress\n    pr_open: In review\n    done: Done\n    blocked: In progress\n    cancelled: Done\n';
+    writeFileSync(yaml, text('Todo'));
+    const s = new FileStore(join(root, 'board.json'), { factoriesDir: join(root, 'factories') });
+    expect((await s.listFactoryDefs())[0]!.github!.statusMap.ready).toBe('Todo');
+    writeFileSync(yaml, text('Ready'));
+    const later = new Date(Date.now() + 2000);
+    utimesSync(yaml, later, later);
+    expect((await s.listFactoryDefs())[0]!.github!.statusMap.ready).toBe('Ready');
   });
 });

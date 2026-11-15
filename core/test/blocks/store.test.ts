@@ -10,6 +10,7 @@ import { PROTECTED_TASK_FIELDS } from '../../src/blocks/schema.js';
 import { defFixture, repoFixture, seedBlocksFactories } from '../factoryFixtures.js';
 import { FactoryConfig } from '../../src/factories.js';
 import { runStoreContract } from '../storeContract.js';
+import { emptyPushed } from '../../src/githubLink.js';
 
 // R1: the contract suite runs on role 'any' (owner identity, no access checks).
 runStoreContract('BlocksStore', (identity) => new BlocksStore(new FakeBlocksData('any'), identity ?? 'owner'));
@@ -778,5 +779,15 @@ describe('legacySettingsStatus', () => {
     expect(await core.legacySettingsStatus()).toEqual({ unmoved: [], unretired: ['global', 'data'] });
     await owner.retireLegacySettings();
     expect(await core.legacySettingsStatus()).toEqual({ unmoved: [], unretired: [] });
+  });
+});
+
+describe('BlocksStore GitHub links (connected mode: not stored yet)', () => {
+  it('lists none, finds none and refuses saves', async () => {
+    const s = new BlocksStore(new FakeBlocksData('any'), 'core');
+    expect(await s.listGitHubLinks()).toEqual([]);
+    expect(await s.getGitHubLink('T-1')).toBeUndefined();
+    const l = { taskId: 'T-1', factoryId: 'a', repo: 'o/r', issueNumber: null, issueNodeId: null, project: null, itemId: null, pushed: emptyPushed(), error: null, lease: null, version: 0 };
+    await expect(s.saveGitHubLink(null, l)).rejects.toBeInstanceOf(ForbiddenError);
   });
 });

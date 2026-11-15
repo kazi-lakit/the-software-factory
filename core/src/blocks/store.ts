@@ -3,6 +3,7 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from '../limits.js';
 import { DEFAULT_SETTINGS } from '../defaults.js';
 import type { FactoryDef, FactoryHealth, FactoryRepo } from '../factories.js';
+import type { GitHubLink } from '../githubLink.js';
 import {
   assertNewStatus, canonicalJson, parseScope, CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, OwnerOnlyError, RereadAfterUpdateError, sameApproval,
   settingsConflict, VersionConflictError, type BoardStore, type NewApproval, type NewTask, type StoredSettings,
@@ -451,6 +452,19 @@ export class BlocksStore implements BoardStore {
       const y = repoKey(b.factoryId, b.repoId);
       return x < y ? -1 : x > y ? 1 : 0;
     });
+  }
+
+  /** GitHub links are not stored in Blocks yet (connected mode). */
+  async listGitHubLinks(_factoryId?: string): Promise<GitHubLink[]> {
+    return [];
+  }
+
+  async getGitHubLink(_taskId: string): Promise<GitHubLink | undefined> {
+    return undefined;
+  }
+
+  async saveGitHubLink(_before: GitHubLink | null, _after: GitHubLink): Promise<GitHubLink> {
+    throw new ForbiddenError('GitHub links are not stored in Blocks yet (connected mode)');
   }
 
   async saveFactoryDef(before: FactoryDef | null, after: FactoryDef): Promise<FactoryDef> {

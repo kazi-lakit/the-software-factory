@@ -1,9 +1,10 @@
 import { randomBytes } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { DEFAULT_SETTINGS } from './defaults.js';
 import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
 import { loadFactoriesFromDir } from './factoriesFs.js';
+import type { GitHubLink } from './githubLink.js';
 import type {
   Approval, Doc, DocKind, FactoryEvent, Mode, RepoSettings, Run, Settings, Step, Task,
 } from './types.js';
@@ -30,10 +31,11 @@ interface State {
   factoryDefs: FactoryDef[];
   factoryRepos: FactoryRepo[];
   health: FactoryHealth[];
+  githubLinks: GitHubLink[];
 }
 
 const emptyState = (): State => ({
-  tasks: [], docs: [], approvals: [], settings: null, runs: [], events: [], factoryDefs: [], factoryRepos: [], health: [],
+  tasks: [], docs: [], approvals: [], settings: null, runs: [], events: [], factoryDefs: [], factoryRepos: [], health: [], githubLinks: [],
 });
 const clone = <T>(v: T): T => structuredClone(v);
 const num = (id: string) => Number(id.slice(id.indexOf('-') + 1)) || 0;
@@ -216,6 +218,29 @@ export class MemoryStore implements BoardStore {
     });
   }
 
+  listGitHubLinks(factoryId?: string) {
+    return this.read(() => clone(this.state.githubLinks.filter((l) => factoryId === undefined || l.factoryId === factoryId)));
+  }
+
+  getGitHubLink(taskId: string) {
+    return this.read(() => {
+      const l = this.state.githubLinks.find((x) => x.taskId === taskId);
+      return l ? clone(l) : undefined;
+    });
+  }
+
+  async saveGitHubLink(before: GitHubLink | null, after: GitHubLink) {
+    this.coreOnly('saveGitHubLink');
+    return this.write(() => {
+      const links = this.state.githubLinks;
+      const i = links.findIndex((l) => l.taskId === after.taskId);
+      const stored = versionedSave(`GitHub link ${after.taskId}`, links[i], before, after);
+      if (i < 0) links.push(stored);
+      else links[i] = stored;
+      return clone(stored);
+    });
+  }
+
   listFactoryHealth() {
     return this.read(() => clone(this.state.health));
   }
@@ -340,8 +365,8 @@ export class FileStore extends MemoryStore {
   private readonly lockTimeoutMs: number;
   private readonly factoriesDir: string | undefined;
   private readonly log: ((line: string) => void) | undefined;
-  /** Read once per instance: a bad file is reported once, not on every call. */
-  private seeded: { defs: FactoryDef[]; repos: FactoryRepo[] } | undefined;
+  /** Read again only when a factory.yaml changed (newest mtime + file count): a bad file is reported once per change. */
+  private seeded: { key: string; defs: FactoryDef[]; repos: FactoryRepo[] } | undefined;
 
   constructor(private readonly path: string, opts: FileStoreOptions = {}) {
     super(opts);
@@ -378,7 +403,7 @@ export class FileStore extends MemoryStore {
   /**
    * A file written before factories: its tasks and events belong to factory `blocks`, and its `{ global, repos }`
    * settings are that factory's. Definitions the file lacks are seeded from `factoriesDir` (see loadFactoriesFromDir), and
-   * each stored definition's `github` block is taken from its valid `factory.yaml` (read once per instance), or removed.
+   * each stored definition's `github` block is taken from its valid `factory.yaml` (re-read when one changed), or removed.
    */
   private upgrade(raw: Record<string, unknown>): State {
     const state = { ...emptyState(), ...raw } as State;
@@ -389,7 +414,10 @@ export class FileStore extends MemoryStore {
       state.settings = { factories: { [LEGACY_FACTORY]: { factory: legacy.global ?? clone(DEFAULT_SETTINGS), repos: legacy.repos ?? {} } } };
     }
     if (this.factoriesDir === undefined) return state;
-    this.seeded ??= loadFactoriesFromDir(this.factoriesDir, (file, reason) => this.log?.(`skipped ${file}: ${reason}`));
+    const key = this.yamlKey(this.factoriesDir);
+    if (this.seeded?.key !== key) {
+      this.seeded = { key, ...loadFactoriesFromDir(this.factoriesDir, (file, reason) => this.log?.(`skipped ${file}: ${reason}`)) };
+    }
     if (state.factoryDefs.length === 0 && state.factoryRepos.length === 0) {
       state.factoryDefs = clone(this.seeded.defs);
       state.factoryRepos = clone(this.seeded.repos);
@@ -401,6 +429,22 @@ export class FileStore extends MemoryStore {
       return github ? { ...def, github: clone(github) } : def;
     });
     return state;
+  }
+
+  /** The newest mtime of every factory.yaml under the factories dir, plus their count: it changes when one is edited, added or removed. */
+  private yamlKey(dir: string): string {
+    let newest = 0;
+    let count = 0;
+    if (existsSync(dir)) {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (!e.isDirectory()) continue;
+        try {
+          newest = Math.max(newest, statSync(join(dir, e.name, 'factory.yaml')).mtimeMs);
+          count++;
+        } catch { /* no factory.yaml here */ }
+      }
+    }
+    return `${newest}:${count}`;
   }
 
   private persist(): void {

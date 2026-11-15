@@ -1,4 +1,5 @@
 import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
+import type { GitHubLink } from './githubLink.js';
 import type { Approval, Doc, DocKind, FactoryEvent, Mode, RepoId, RepoSettings, Run, Settings, Step, Task } from './types.js';
 
 // The store contract, its errors and updateHeld. Pure (no Node API), so the browser entry can import it; store.ts re-exports it.
@@ -125,6 +126,11 @@ export interface BoardStore {
   saveFactoryDef(before: FactoryDef | null, after: FactoryDef): Promise<FactoryDef>;
   /** Owner only. As saveFactoryDef, keyed by factory and repo id. */
   saveFactoryRepo(before: FactoryRepo | null, after: FactoryRepo): Promise<FactoryRepo>;
+  /** What was last pushed to GitHub per task: one factory's links, or every factory's when `factoryId` is left out. */
+  listGitHubLinks(factoryId?: string): Promise<GitHubLink[]>;
+  getGitHubLink(taskId: string): Promise<GitHubLink | undefined>;
+  /** Core only. Compare-and-set on `version` as saveFactoryDef, keyed by task id. Returns the stored link. */
+  saveGitHubLink(before: GitHubLink | null, after: GitHubLink): Promise<GitHubLink>;
   listFactoryHealth(): Promise<FactoryHealth[]>;
   /** Core only: the owner reads health, the core writes it. */
   setFactoryHealth(h: FactoryHealth): Promise<void>;
