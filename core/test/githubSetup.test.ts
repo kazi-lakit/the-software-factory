@@ -79,6 +79,21 @@ describe('OctokitGitHubSetup', () => {
   });
 });
 
+describe('OctokitGitHubSetup edge cases', () => {
+  const r = { owner: 'o', repo: 'r' };
+  test('listFiles throws a clear error on a truncated tree', async () => {
+    const f = vi.fn(async () => json({ truncated: true, tree: [{ path: 'a', type: 'blob' }] }));
+    await expect(setup(f).listFiles(r, 'dev')).rejects.toThrow(/o\/r is too large/);
+  });
+  test('listFiles of an empty repo (409) is empty', async () => {
+    expect(await setup(vi.fn(async () => json({ message: 'Git Repository is empty.' }, 409))).listFiles(r, 'main')).toEqual([]);
+  });
+  test('ensureStatusOptions reports a missing project', async () => {
+    const f = vi.fn(async () => json({ data: { repositoryOwner: { projectV2: null } } }));
+    await expect(setup(f).ensureStatusOptions({ owner: 'acme', number: 9 }, ['Todo'])).rejects.toThrow('Project acme/9 not found');
+  });
+});
+
 describe('FakeGitHubSetup and lazyGitHubSetupFor', () => {
   test('fake records added options, keeps existing ones', async () => {
     const fake = new FakeGitHubSetup();

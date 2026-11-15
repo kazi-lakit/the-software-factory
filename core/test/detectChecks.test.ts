@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'vitest';
+import { normaliseChecks } from '../src/checksSchema.js';
 import { detectChecks } from '../src/detectChecks.js';
 
 const readOf = (files: Record<string, string>) => async (p: string) => files[p] ?? null;
@@ -38,5 +39,25 @@ describe('detectChecks', () => {
   test('nothing found is an empty list; deeper folders are ignored', async () => {
     expect(await detectChecks(['README.md', 'a/b/go.mod'], readOf({}))).toEqual([]);
     expect(await detectChecks(['package.json'], readOf({ 'package.json': 'not json' }))).toEqual([]);
+  });
+
+  test('a folder with several stacks gets unique names, and needs point at the right one', async () => {
+    const out = await detectChecks(['package.json', 'go.mod', 'pyproject.toml'], readOf({ 'package.json': '{"scripts":{"test":"v","build":"b"}}', 'pyproject.toml': 'pytest' }));
+    expect(out.map((c) => c.name)).toEqual(['npm-install', 'npm-test', 'npm-build', 'go-build', 'go-test', 'pytest-test']);
+    expect(out.find((c) => c.name === 'go-test')?.needs).toBe('go-build');
+    expect(out.find((c) => c.name === 'npm-build')?.needs).toBe('npm-install');
+    expect(normaliseChecks(out).ok).toBe(true);
+  });
+
+  test.each([['.config'], ['my app'], ['@scope'], ['a'.repeat(40)], ['x'.repeat(40) + ' y']])('folder %j gives valid names', async (dir) => {
+    const out = await detectChecks([`${dir}/go.mod`, `${dir}/package.json`], readOf({ [`${dir}/package.json`]: '{"scripts":{"typecheck":"t"}}' }));
+    expect(out.length).toBeGreaterThan(0);
+    expect(normaliseChecks(out).ok).toBe(true);
+  });
+
+  test('folders that sanitize to the same prefix or to nothing are left out', async () => {
+    const out = await detectChecks(['my app/go.mod', 'my-app/go.mod', '...//x'], readOf({}));
+    expect(out.map((c) => c.cwd)).toEqual(['my app', 'my app']);
+    expect(await detectChecks(['@@/go.mod'], readOf({}))).toEqual([]);
   });
 });

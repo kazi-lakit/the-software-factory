@@ -89,7 +89,9 @@ export class OctokitGitHubSetup implements GitHubSetup {
 
   async ensureStatusOptions(ref: ProjectRef, names: string[]): Promise<string[]> {
     const res: StatusRes = await this.octokit.graphql(STATUS_QUERY, { owner: ref.owner, number: ref.number });
-    const field = res.repositoryOwner?.projectV2?.field;
+    const project = res.repositoryOwner?.projectV2;
+    if (!project) throw new Error(`Project ${ref.owner}/${ref.number} not found`);
+    const field = project.field;
     if (!field?.id) throw new Error(`Project ${ref.owner}/${ref.number} has no single select field named "Status"`);
     const existing = field.options ?? [];
     const missing = [...new Set(names)].filter((n) => !existing.some((e) => e.name === n));
@@ -124,8 +126,15 @@ export class OctokitGitHubSetup implements GitHubSetup {
   }
 
   async listFiles(r: RepoRef, ref: string): Promise<string[]> {
-    const { data } = await this.octokit.request('GET /repos/{owner}/{repo}/git/trees/{tree_sha}?recursive=1', { owner: r.owner, repo: r.repo, tree_sha: ref });
-    return (data.tree as { type?: string; path?: string }[]).filter((t) => t.type === 'blob' && t.path).map((t) => t.path as string);
+    let data: { truncated?: boolean; tree: { type?: string; path?: string }[] };
+    try {
+      ({ data } = await this.octokit.request('GET /repos/{owner}/{repo}/git/trees/{tree_sha}?recursive=1', { owner: r.owner, repo: r.repo, tree_sha: ref }));
+    } catch (e) {
+      if ((e as { status?: unknown } | null)?.status === 409) return []; // an empty repo has no tree
+      throw e;
+    }
+    if (data.truncated) throw new Error(`The file tree of ${r.owner}/${r.repo} is too large to list; add the checks by hand`);
+    return data.tree.filter((t) => t.type === 'blob' && t.path).map((t) => t.path as string);
   }
 
   async readFile(r: RepoRef, ref: string, path: string): Promise<string | null> {
