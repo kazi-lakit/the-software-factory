@@ -159,6 +159,7 @@ For each factory with a `github` block: the Project's items in the factory's rep
 - **Who applies it (owner's call, option A).** In GitHub-only mode the core applies pulled changes itself (the FileStore has no identity split). In connected mode the factory machine only fetches and works out the change set; the **Board, signed in as the owner**, applies it (section 9.2). The `factory-core` Blocks role is not widened. The core still writes its own fields, including the task's `github` link and `lastPushed` state, which join `CORE_TASK_FIELDS` (`core/src/blocks/store.ts:20`), and the outbox and sync-request rows.
 - A pull never runs an agent and never writes approvals except through section 7.
 - The pull result lists: tasks created, changes applied, changes not applied (with reason), and errors. It's printed by the CLI and shown on the Board after Sync.
+- Stage 3 build: pure planner and applier with a change set reusable by the Board, see the stage 3 plan's builder's calls.
 
 ### 8.4 Echo and conflicts
 - Pushes made by the core are recognised on pull by comparing against the last pushed value stored per task (`github.lastPushed: { status, title, bodyHash }`), so the core doesn't re-apply its own changes.

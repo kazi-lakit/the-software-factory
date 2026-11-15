@@ -5,12 +5,13 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { shellExec } from '../src/checks.js';
 import { Engine, type EngineDeps } from '../src/engine.js';
-import { LocalGitRepos } from '../src/git.js';
+import { LocalGitRepos, type GitIdentity } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
-import { FactoryConfig } from '../src/factories.js';
+import { FactoryConfig, type FactoryRepo } from '../src/factories.js';
 import { run } from '../src/cli.js';
 import { FakeGitHubBoard } from '../src/githubBoard.js';
 import { FileStore } from '../src/store.js';
+import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
 import { nextTicket } from './nextTicket.js';
 import { MemoryStore } from '../src/store.js';
@@ -21,11 +22,24 @@ const git = (cwd: string, ...args: string[]) =>
 
 /** FakeGitHub only parses github.com remotes; the engine passes the temp bare repo path, so give it a github-shaped one. */
 class PathRemoteGitHub extends FakeGitHub {
+  /** The body of every PR opened. */
+  readonly bodies: string[] = [];
   override openPr(p: Parameters<FakeGitHub['openPr']>[0]) {
+    this.bodies.push(p.body);
     return super.openPr({ ...p, remote: 'git@github.com:SELISEdigitalplatforms/blocks-data.git' });
   }
   override findOpenPr(p: Parameters<FakeGitHub['findOpenPr']>[0]) {
     return super.findOpenPr({ ...p, remote: 'git@github.com:SELISEdigitalplatforms/blocks-data.git' });
+  }
+}
+
+/** Clones and pushes the temp bare repo while the engine and the store keep the repo's real GitHub remote (the PR body reads the issue number from it). */
+class BareRemoteGit extends LocalGitRepos {
+  override ensureClone(f: string, repo: FactoryRepo, protectedBranches: string[]) {
+    return super.ensureClone(f, { ...repo, remote: bare }, protectedBranches);
+  }
+  override worktree(f: string, repo: FactoryRepo, taskId: string, branch: string, protectedBranches: string[], identity?: GitIdentity) {
+    return super.worktree(f, { ...repo, remote: bare }, taskId, branch, protectedBranches, identity);
   }
 }
 
@@ -215,7 +229,7 @@ describe('GitHub-only push', () => {
       const id = /^(\S+) created in/m.exec(created)![1]!;
       expect(created).toContain('issue o/app#1');
       expect(board.issue(REPO, 1).labels).toEqual(['factory']);
-      expect(board.issue(REPO, 1).body).toMatch(/<!-- tsf:task=[^>]*-->\s*$/);
+      expect(board.issue(REPO, 1).body).toMatch(new RegExp(`<!-- tsf:task=${id} factory=f -->$`));
       expect(await status()).toBe('Backlog');
 
       await go('dev', 'ready', id);
@@ -246,6 +260,139 @@ describe('GitHub-only push', () => {
       const v = await linkVersion(id);
       expect(await go('sync')).toContain('pushed 0, failed 0');
       expect(await linkVersion(id)).toBe(v);
+    } finally {
+      if (saved === undefined) delete process.env.FACTORY_ROOT; else process.env.FACTORY_ROOT = saved;
+    }
+  });
+});
+
+describe('GitHub-only end to end', () => {
+  const MAP = { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress', plan_review: 'In progress',
+    build: 'In progress', verify: 'In progress', review: 'In progress', pr_open: 'In review', done: 'Merged', blocked: 'In progress', cancelled: 'Backlog' };
+  const factoryYaml = 'factoryId: f\nname: F\ngithub:\n  mode: github-only\n  project: o/3\n  statusMap:\n'
+    + Object.entries(MAP).map(([k, v]) => `    ${k}: ${v}\n`).join('');
+  const repoYaml = 'repoId: app\nremote: git@github.com:o/app.git\nchecks:\n  server: { cwd: server, build: "true", test: "true" }\n'
+    + '  client: { cwd: client, install: "true", typecheck: "true", lint: "true", test: "true" }\n  e2e: off\n';
+  const reply = (r: object, doc?: string) => `<factory-result>\n${JSON.stringify(r)}\n</factory-result>${doc === undefined ? '' : `\n<factory-doc>\n${doc}\n</factory-doc>`}`;
+
+  test('a hand-made issue goes from Todo to Merged through comments, reviews and the merge', async () => {
+    const root = join(tmp, 'froot');
+    mkdirSync(join(root, 'factories', 'f', 'repos'), { recursive: true });
+    writeFileSync(join(root, 'factories', 'f', 'factory.yaml'), factoryYaml);
+    writeFileSync(join(root, 'factories', 'f', 'repos', 'app.yaml'), repoYaml);
+    const boardFile = join(root, '.factory', 'board.json');
+    const fileStore = () => new FileStore(boardFile, { factoriesDir: join(root, 'factories') });
+    const board = new FakeGitHubBoard();
+    const info = board.addProject({ owner: 'o', number: 3 }, ['Backlog', 'Todo', 'In progress', 'In review', 'Merged']);
+    const fakeGitHub = new PathRemoteGitHub();
+    const REPO = { owner: 'o', repo: 'app' };
+    const held = new Set<string>();
+    const pullLock = async (f: string) => (held.has(f) ? null : (held.add(f), () => { held.delete(f); }));
+    // Spec and PR gates on, plan gate off (the defaults, set explicitly).
+    await fileStore().updateSettingsScope('f', DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, gates: { spec: true, plan: false, pr: true } });
+
+    const makeEngine = async () => {
+      const store = fileStore();
+      const engine = new Engine({
+        store,
+        git: new BareRemoteGit(root),
+        githubFor: () => fakeGitHub,
+        factories: async () => new FactoryConfig(await store.listFactoryDefs(), await store.listFactoryRepos()),
+        exec: shellExec,
+        now: () => new Date(),
+        mode: 'session',
+        claimant: 'me',
+      });
+      return { engine, store };
+    };
+    const saved = process.env.FACTORY_ROOT;
+    process.env.FACTORY_ROOT = root;
+    try {
+      let out: string[] = [];
+      let err: string[] = [];
+      const go = async (...argv: string[]) => {
+        out = [];
+        err = [];
+        const code = await run(['--store', 'file', ...argv], { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine,
+          { githubBoardFor: () => board, githubFor: () => fakeGitHub, pullLock });
+        expect(code, [...out, ...err].join('\n')).toBe(0);
+        return out.join('\n');
+      };
+      let n = 0;
+      const file = (text: string) => {
+        const f = join(tmp, `reply-${n++}.txt`);
+        writeFileSync(f, text);
+        return f;
+      };
+      const ticket = async () => JSON.parse(await go('next', '--json')) as { step: string; worktree: string; context: { feedback?: string } };
+      const status = async () => (await board.listItems(info))[0]!.status;
+      const task = async () => (await fileStore().getTask('T-1'))!;
+      const comment = (body: string, author: string) => board.addComment(REPO, 1, body, author);
+
+      // 1. A hand-made issue in Todo becomes a task.
+      const made = await board.createIssue(REPO, { title: 'Hand made', body: 'Please add a widget.', labels: ['factory'] });
+      const item = await board.addToProject(info, made.nodeId);
+      await board.setStatus(info, item, 'Todo');
+      let t = await ticket();
+      expect(err.join('\n')).toContain('T-1 created from o/app#1 (ready)');
+      expect(t.step).toBe('spec');
+      expect(board.issue(REPO, 1).body).toMatch(/<!-- tsf:task=T-1 factory=f -->$/);
+
+      // 2. The spec is posted as a comment.
+      await go('complete', 'T-1', 'spec', '--reply', file(reply({ status: 'done', summary: 's' }, '# Spec\nv1')));
+      expect(board.issue(REPO, 1).comments[0]!.body).toMatch(/^## Spec v1/);
+      expect(board.issue(REPO, 1).comments[0]!.body).toContain('/approve');
+      expect(await status()).toBe('In progress');
+
+      // 3. Only an approver counts; /changes sends the spec back, /approve moves on.
+      await comment('/approve', 'someone-else');
+      const changes = await comment('/changes add tests', 'kazi-lakit');
+      t = await ticket();
+      expect(t.step).toBe('spec');
+      expect(t.context.feedback).toBe('add tests');
+      expect(board.reactions).toEqual([{ commentId: changes.id, content: '+1' }]);
+      await go('complete', 'T-1', 'spec', '--reply', file(reply({ status: 'done', summary: 's' }, '# Spec\nv2')));
+      expect(board.issue(REPO, 1).comments.some((c) => c.body.startsWith('## Spec v2'))).toBe(true);
+      await comment('/approve', 'kazi-lakit');
+      expect((await ticket()).step).toBe('plan');
+
+      // 4. Plan, build, check, verify, review, ship.
+      await go('complete', 'T-1', 'plan', '--reply', file(reply({ status: 'done', summary: 's' }, '# Plan')));
+      t = await ticket();
+      expect(t.step).toBe('build');
+      writeFileSync(join(t.worktree, 'hello.txt'), 'hello');
+      git(t.worktree, 'add', '.');
+      git(t.worktree, 'commit', '-q', '-m', 'add hello');
+      await go('complete', 'T-1', 'build', '--result', file(result({ status: 'done', summary: 's' })));
+      expect((await ticket()).step).toBe('check');
+      await go('check', 'T-1');
+      expect((await ticket()).step).toBe('verify');
+      await go('complete', 'T-1', 'verify', '--reply', file(reply({ status: 'done', summary: 's', verdict: 'pass' }, '# Verify')));
+      expect((await ticket()).step).toBe('review');
+      await go('complete', 'T-1', 'review', '--reply', file(reply({ status: 'done', summary: 's', verdict: 'approve' }, '# Review')));
+      expect((await ticket()).step).toBe('ship');
+      await go('ship', 'T-1');
+      expect((await task()).status).toBe('pr_open');
+      const [prUrl, pr] = [...fakeGitHub.prs][0]!;
+      expect(pr.base).toBe('dev');
+      expect(await status()).toBe('In review');
+      expect((await task()).prUrl).toBe(prUrl);
+      expect(fakeGitHub.bodies[0]).toContain('Closes #1');
+
+      // 5. An approved review is recorded; the protected base waits for the owner's merge.
+      fakeGitHub.addReview(prUrl, { author: 'kazi-lakit', state: 'approved' });
+      await go('next');
+      expect((await fileStore().listApprovals('T-1')).some((a) => a.gate === 'pr' && a.decision === 'approve')).toBe(true);
+      expect((await task()).status).toBe('pr_open');
+
+      // 6. The merge closes the issue (Closes #1) before the engine sees it; the task is done, not cancelled.
+      fakeGitHub.setState(prUrl, 'merged');
+      await board.closeIssue(REPO, 1, 'completed');
+      await go('next');
+      expect((await task()).status).toBe('done');
+      const synced = await go('sync');
+      expect(await status()).toBe('Merged');
+      expect(synced).toContain('pulled: created 0, applied 0, not applied 0, failed 0');
     } finally {
       if (saved === undefined) delete process.env.FACTORY_ROOT; else process.env.FACTORY_ROOT = saved;
     }
