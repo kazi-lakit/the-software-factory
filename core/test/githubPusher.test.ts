@@ -129,6 +129,38 @@ describe('GitHubPusher', () => {
     expect(r.done).toEqual(['status Todo']);
   });
 
+  test('an unexpired lease held by the same claimant is still leased', async () => {
+    const s = setup();
+    const t = await add(s);
+    await s.pusher.pushTask(t.taskId);
+    const link = (await s.store.getGitHubLink(t.taskId))!;
+    await s.store.updateTask(t.taskId, 1, { status: 'ready' });
+    await s.store.saveGitHubLink(link, { ...link, lease: { by: 'x', until: new Date(NOW.getTime() + LEASE_MS).toISOString() } });
+    const calls: string[] = [];
+    const spy = new Proxy(s.board, { get: (o, p, r) => { calls.push(String(p)); const v = Reflect.get(o, p, r); return typeof v === 'function' ? v.bind(o) : v; } });
+    expect(await s.make('x', spy).pushTask(t.taskId)).toMatchObject({ skipped: 'leased' });
+    expect(calls).toEqual([]);
+  });
+
+  test('a failure does not wipe the lease of a pusher that took over mid-run', async () => {
+    const s = setup();
+    const t = await add(s);
+    let saves = 0;
+    const rival = { by: 'z', until: new Date(NOW.getTime() + LEASE_MS).toISOString() };
+    const store = new Proxy(s.store, { get(o, p, r) {
+      const v = Reflect.get(o, p, r);
+      if (p !== 'saveGitHubLink') return typeof v === 'function' ? v.bind(o) : v;
+      return async (before: never, after: never) => {
+        if (++saves === 3) { const l = (await o.getGitHubLink(t.taskId))!; await o.saveGitHubLink(l, { ...l, lease: rival }); }
+        return o.saveGitHubLink(before, after);
+      };
+    } });
+    const p = new GitHubPusher({ store, boardFor: () => s.board, now: () => NOW, claimant: 'x' });
+    const r = await p.pushTask(t.taskId);
+    expect(r.error).not.toBeNull();
+    expect((await s.store.getGitHubLink(t.taskId))!.lease).toEqual(rival);
+  });
+
   test('factory without github: not-github, no link written', async () => {
     for (const github of [null, hub('connected')]) {
       const s = setup(github);

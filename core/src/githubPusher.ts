@@ -93,7 +93,7 @@ export class GitHubPusher {
     const key = blockedKey(task);
     if (actions.length === 0 && !link?.error && (link?.pushed.blocked ?? null) === key) return result;
 
-    if (link?.lease && link.lease.by !== this.d.claimant && Date.parse(link.lease.until) > now.getTime()) return { ...result, skipped: 'leased' };
+    if (link?.lease && Date.parse(link.lease.until) > now.getTime()) return { ...result, skipped: 'leased' };
     const base: GitHubLink = link ?? {
       taskId, factoryId: task.factoryId, repo: `${ref.owner}/${ref.repo}`, issueNumber: null, issueNodeId: null, project: null, itemId: null,
       pushed: emptyPushed(), error: null, lease: null, version: 0,
@@ -107,7 +107,7 @@ export class GitHubPusher {
     }
 
     try {
-      cur = await this.run(task, ref, settings, actions, cur, result, cache);
+      cur = await this.run(task, ref, settings, actions, cur, result, cache, (l) => { cur = l; });
       const pushed = { ...cur.pushed, blocked: key };
       cur = await store.saveGitHubLink(cur, { ...cur, pushed, error: null, lease: null });
       result.issue = this.issueName(cur);
@@ -117,11 +117,11 @@ export class GitHubPusher {
       const attempts = (link?.error?.attempts ?? 0) + 1;
       result.error = message;
       try {
-        const latest = (await store.getGitHubLink(taskId)) ?? cur;
+        const latest = cur;
         const failed = { message, attempts, nextAttemptAt: new Date(this.d.now().getTime() + backoffMs(attempts)).toISOString() };
         const saved = await store.saveGitHubLink(latest, { ...latest, error: failed, lease: null });
         result.issue = this.issueName(saved);
-      } catch { /* the lease expires by itself */ }
+      } catch { /* a conflict means another pusher owns the link now; otherwise the lease expires by itself */ }
       return result;
     }
   }
@@ -130,7 +130,7 @@ export class GitHubPusher {
     return l.issueNumber == null ? null : `${l.repo}#${l.issueNumber}`;
   }
 
-  private async run(task: Task, ref: RepoRef, settings: GitHubSettings, actions: PushAction[], start: GitHubLink, result: PushResult, cache: ProjectCache): Promise<GitHubLink> {
+  private async run(task: Task, ref: RepoRef, settings: GitHubSettings, actions: PushAction[], start: GitHubLink, result: PushResult, cache: ProjectCache, track: (l: GitHubLink) => void): Promise<GitHubLink> {
     if (actions.length === 0) return start;
     const def = (await this.d.store.listFactoryDefs()).find((f) => f.factoryId === task.factoryId)!;
     const board = this.d.boardFor(def.ghUser);
@@ -143,7 +143,7 @@ export class GitHubPusher {
       labelReady = true;
     };
     let cur = start;
-    const save = async (patch: (l: GitHubLink) => GitHubLink): Promise<void> => { cur = await this.d.store.saveGitHubLink(cur, patch(structuredClone(cur))); };
+    const save = async (patch: (l: GitHubLink) => GitHubLink): Promise<void> => { cur = await this.d.store.saveGitHubLink(cur, patch(structuredClone(cur))); track(cur); };
     for (const a of actions) {
       switch (a.kind) {
         case 'create': {
