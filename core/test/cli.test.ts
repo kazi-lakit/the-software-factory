@@ -1304,3 +1304,27 @@ describe('factory sync and push on the Blocks store (connected mode)', () => {
     expect(out).toContain(`github: ${link.taskId} push failing (boom), attempt 3, next try 2026-11-15T10:00:00.000Z`);
   });
 });
+
+describe('factory init', () => {
+  test('runs the wizard on the local store even when FACTORY_STORE=blocks, and exits with its code', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'factory-init-cli-'));
+    const prev = { root: process.env.FACTORY_ROOT, store: process.env.FACTORY_STORE };
+    process.env.FACTORY_ROOT = root;
+    process.env.FACTORY_STORE = 'blocks';
+    try {
+      const { wired, goWith } = setup();
+      const seen: { root: string; store: unknown }[] = [];
+      const exit = await goWith({ runInit: async (d) => { seen.push({ root: d.root, store: await d.openStore() }); return 7; } }, 'init');
+      expect(exit).toBe(7);
+      expect(seen[0]!.root).toBe(root);
+      expect(seen[0]!.store).toBeInstanceOf(FileStore);
+      expect(wired).toEqual([]);
+    } finally {
+      for (const [k, v] of [['FACTORY_ROOT', prev.root], ['FACTORY_STORE', prev.store]] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

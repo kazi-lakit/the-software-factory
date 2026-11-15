@@ -23,7 +23,11 @@ import { lazyGitHubSetupFor, type GitHubSetupFor } from './githubSetup.js';
 import { GITHUB_SCHEMA_MISSING } from './githubSync.js';
 import type { GitHubFor } from './github.js';
 import type { GitHubBoardFor } from './githubBoard.js';
-import { parseStoreKind, storeDirPath, storeForFactories, type StoreKind } from './storeSelect.js';
+import { localStoreDir, parseStoreKind, storeDirPath, storeForFactories, type StoreKind } from './storeSelect.js';
+import { realGhCli } from './init/ghCli.js';
+import { runInit } from './init/menu.js';
+import { readlinePrompter } from './init/prompts.js';
+import type { InitDeps } from './init/shared.js';
 import { findRoot, lazyGitHubBoardFor, lazyGitHubFor, wire, type WireOptions } from './wire.js';
 
 export type { WireOptions } from './wire.js';
@@ -98,6 +102,8 @@ export interface CliDeps {
   watchTicks?: number;
   /** Logins found on this machine (the connected-mode watcher's health). Default: the login check. Tests pass a fake. */
   loggedIn?: () => Promise<ReadonlySet<string>>;
+  /** The `factory init` wizard. Default: the real one over the terminal. Tests pass a fake. */
+  runInit?: (d: InitDeps) => Promise<number>;
 }
 
 /** The printable lines of one factory's pull: created, applied, not applied and failed items. */
@@ -359,6 +365,38 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
       if (o.json) return printJson({ factories: list });
       for (const f of list) {
         io.out(`${f.factoryId} (${f.name}) ${f.active ? 'active' : 'inactive'}: ${f.repos.map((r) => r.repoId).join(', ') || 'no repos'}`);
+      }
+    });
+
+  program
+    .command('init')
+    .description('set up a factory by answering questions (first run), or change its settings (later runs); always the local store')
+    .action(async () => {
+      const root = findRoot();
+      const prompt = readlinePrompter();
+      const openStore = async () =>
+        new FileStore(join(localStoreDir(root), 'board.json'), { factoriesDir: join(root, 'factories'), log: io.err });
+      const setupFor = deps.githubSetupFor ?? lazyGitHubSetupFor(undefined, exec);
+      const initDeps: InitDeps = {
+        root, prompt, gh: realGhCli(exec), boardFor, setupFor,
+        // A client per call: after `gh auth refresh` a cached client would still hold the old token.
+        freshBoardFor: (login) => lazyGitHubBoardFor(undefined, undefined, exec)(login),
+        openStore,
+        doctor: async (id) => {
+          const store = await openStore();
+          const [defs, repos] = await Promise.all([store.listFactoryDefs(), store.listFactoryRepos()]);
+          return doctor({
+            defs, repos, store: 'file', loggedIn: await ghLoggedInUsers(exec), boardFor: lazyGitHubBoardFor(undefined, undefined, exec),
+            setupFor, fileProblems: store.factoryFileProblems(), only: [id],
+          });
+        },
+        platform: process.platform, now: () => new Date(),
+      };
+      try {
+        const code = await (deps.runInit ?? runInit)(initDeps);
+        if (code !== 0) throw new CliExit('', code, true);
+      } finally {
+        prompt.close();
       }
     });
 
