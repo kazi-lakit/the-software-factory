@@ -3,7 +3,7 @@ import { describe, expect, test, vi } from 'vitest';
 import type { BlocksCredential } from '../src/blocks/credential.js';
 import { GhLoginMissingError, SecretMissingError, type ExecFile } from '../src/secrets.js';
 import { FakeGitHub } from '../src/github.js';
-import { FakeGitHubBoard } from '../src/githubBoard.js';
+import { FakeGitHubBoard, type GitHubBoard } from '../src/githubBoard.js';
 import { lazyGitHubBoardFor, lazyGitHubFor, LazyBlocksStore, wire } from '../src/wire.js';
 import { MemoryStore, type BoardStore } from '../src/store.js';
 
@@ -113,6 +113,37 @@ describe('lazyGitHubFor', () => {
     await a.prState('https://github.com/o/r/pull/1').catch(() => undefined);
     expect(reads).toEqual(['user-a']);
     expect(made).toEqual(['pat-user-a']);
+  });
+
+  test('a 401 makes the next call read the token again; a 500 does not', async () => {
+    const failFirst = (status: number) => {
+      let first = true;
+      return () => {
+        const fake = new FakeGitHub();
+        fake.prState = async () => {
+          if (first) { first = false; throw Object.assign(new Error('Bad credentials'), { status }); }
+          return 'open';
+        };
+        return fake;
+      };
+    };
+    for (const [status, reads] of [[401, 2], [500, 1]] as const) {
+      let n = 0;
+      const client = lazyGitHubFor(async () => `pat-${++n}`, failFirst(status))('u');
+      await expect(client.prState('https://github.com/o/r/pull/1')).rejects.toThrow('Bad credentials');
+      await client.prState('https://github.com/o/r/pull/1').catch(() => undefined);
+      expect(n).toBe(reads);
+    }
+  });
+
+  test('a 401 on the board client also resets the token', async () => {
+    let n = 0;
+    const board = lazyGitHubBoardFor(async () => `pat-${++n}`, () => ({
+      tokenScopes: async () => { throw Object.assign(new Error('Bad credentials'), { status: 401 }); },
+    }) as unknown as GitHubBoard)('u');
+    await expect(board.tokenScopes()).rejects.toThrow('Bad credentials');
+    await board.tokenScopes().catch(() => undefined);
+    expect(n).toBe(2);
   });
 
   test('a missing login becomes GhLoginMissingError with the gh text (R16)', async () => {

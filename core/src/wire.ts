@@ -65,6 +65,20 @@ class LoadOnce<T> {
     }
     return this.inner;
   }
+  /** Forgets the client, so the next get() reads the token again. */
+  reset(): void {
+    this.inner = undefined;
+  }
+  /** Runs a call on the client; a 401 resets it (a new `gh auth login` takes effect) and the error is rethrown. */
+  async run<R>(fn: (client: T) => Promise<R>): Promise<R> {
+    const client = await this.get();
+    try {
+      return await fn(client);
+    } catch (e) {
+      if ((e as { status?: unknown } | null)?.status === 401) this.reset();
+      throw e;
+    }
+  }
 }
 
 /** One GitHub client per gh login, each created on its first call, so commands that never touch GitHub read no token. A failed read is not cached. */
@@ -80,16 +94,19 @@ class LazyGitHub implements GitHub {
     await this.gh;
   }
   async openPr(p: Parameters<GitHub['openPr']>[0]) {
-    return (await this.gh).openPr(p);
+    return this.loader.run((c) => c.openPr(p));
   }
   async findOpenPr(p: Parameters<GitHub['findOpenPr']>[0]) {
-    return (await this.gh).findOpenPr(p);
+    return this.loader.run((c) => c.findOpenPr(p));
   }
   async prState(url: string) {
-    return (await this.gh).prState(url);
+    return this.loader.run((c) => c.prState(url));
+  }
+  async prReviews(url: string) {
+    return this.loader.run((c) => c.prReviews(url));
   }
   async mergePr(url: string, base: string, protectedBranches?: readonly string[]) {
-    return (await this.gh).mergePr(url, base, protectedBranches);
+    return this.loader.run((c) => c.mergePr(url, base, protectedBranches));
   }
 }
 
@@ -121,46 +138,46 @@ class LazyGitHubBoard implements GitHubBoard {
     await this.b;
   }
   async tokenScopes() {
-    return (await this.b).tokenScopes();
+    return this.loader.run((c) => c.tokenScopes());
   }
   async project(p: ProjectRef) {
-    return (await this.b).project(p);
+    return this.loader.run((c) => c.project(p));
   }
   async listItems(p: ProjectInfo) {
-    return (await this.b).listItems(p);
+    return this.loader.run((c) => c.listItems(p));
   }
   async createIssue(r: RepoRef, i: Parameters<GitHubBoard['createIssue']>[1]) {
-    return (await this.b).createIssue(r, i);
+    return this.loader.run((c) => c.createIssue(r, i));
   }
   async updateIssue(r: RepoRef, number: number, patch: Parameters<GitHubBoard['updateIssue']>[2]) {
-    return (await this.b).updateIssue(r, number, patch);
+    return this.loader.run((c) => c.updateIssue(r, number, patch));
   }
   async closeIssue(r: RepoRef, number: number, reason: 'completed' | 'not_planned') {
-    return (await this.b).closeIssue(r, number, reason);
+    return this.loader.run((c) => c.closeIssue(r, number, reason));
   }
   async addLabels(r: RepoRef, number: number, labels: string[]) {
-    return (await this.b).addLabels(r, number, labels);
+    return this.loader.run((c) => c.addLabels(r, number, labels));
   }
   async addToProject(p: ProjectInfo, issueNodeId: string) {
-    return (await this.b).addToProject(p, issueNodeId);
+    return this.loader.run((c) => c.addToProject(p, issueNodeId));
   }
   async setStatus(p: ProjectInfo, itemId: string, option: string) {
-    return (await this.b).setStatus(p, itemId, option);
+    return this.loader.run((c) => c.setStatus(p, itemId, option));
   }
   async listComments(r: RepoRef, number: number, since?: string) {
-    return (await this.b).listComments(r, number, since);
+    return this.loader.run((c) => c.listComments(r, number, since));
   }
   async addComment(r: RepoRef, number: number, body: string) {
-    return (await this.b).addComment(r, number, body);
+    return this.loader.run((c) => c.addComment(r, number, body));
   }
   async reactToComment(r: RepoRef, commentId: number, content: '+1') {
-    return (await this.b).reactToComment(r, commentId, content);
+    return this.loader.run((c) => c.reactToComment(r, commentId, content));
   }
   async labelExists(r: RepoRef, name: string) {
-    return (await this.b).labelExists(r, name);
+    return this.loader.run((c) => c.labelExists(r, name));
   }
   async createLabel(r: RepoRef, name: string) {
-    return (await this.b).createLabel(r, name);
+    return this.loader.run((c) => c.createLabel(r, name));
   }
 }
 

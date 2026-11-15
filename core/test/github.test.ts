@@ -89,6 +89,23 @@ describe('OctokitGitHub', () => {
     expect(Object.fromEntries(u.searchParams)).toMatchObject({ head: 'o:factory/T-1-x', base: 'dev', state: 'open' });
   });
 
+  test('prReviews returns head sha and reviews', async () => {
+    const fetchStub = vi.fn(async (u: Request | string | URL) =>
+      urlOf(u).includes('/reviews')
+        ? json([{ id: 11, user: { login: 'alice' }, state: 'APPROVED', body: 'ok', submitted_at: '2026-01-01T00:00:00Z', commit_id: 'abc123' }])
+        : json(pull('dev')),
+    );
+    const client = new OctokitGitHub('t', { fetch: fetchStub as unknown as typeof fetch });
+    const res = await client.prReviews('https://github.com/o/r/pull/7');
+    expect(res).toEqual({
+      headSha: 'abc123',
+      reviews: [{ id: 11, author: 'alice', state: 'approved', body: 'ok', submittedAt: '2026-01-01T00:00:00Z', commitId: 'abc123' }],
+    });
+    const paths = fetchStub.mock.calls.map((c) => new URL(urlOf(c[0])).pathname);
+    expect(paths).toContain('/repos/o/r/pulls/7');
+    expect(paths).toContain('/repos/o/r/pulls/7/reviews');
+  });
+
   test('findOpenPr returns null when none is open', async () => {
     const fetchStub = vi.fn(async () => json([]));
     const gh = new OctokitGitHub('t', { fetch: fetchStub as unknown as typeof fetch });
@@ -107,7 +124,24 @@ describe('FakeGitHub', () => {
     await gh.mergePr(a.url, 'feature/x');
     expect(await gh.prState(a.url)).toBe('merged');
     gh.setState(b.url, 'closed');
-    expect(gh.prs.get(b.url)).toEqual({ base: 'feature/x', head: 'h2', state: 'closed' });
+    expect(gh.prs.get(b.url)).toMatchObject({ base: 'feature/x', head: 'h2', state: 'closed' });
+  });
+
+  test('reviews default to the head commit; newHead moves it', async () => {
+    const fake = new FakeGitHub();
+    const a = await fake.openPr({ remote: 'git@github.com:o/r.git', head: 'h', base: 'feature/x', title: 't', body: 'b' });
+    expect(await fake.prReviews(a.url)).toEqual({ headSha: 'sha-1-1', reviews: [] });
+    const r1 = fake.addReview(a.url, { author: 'alice', state: 'approved' });
+    expect(r1).toMatchObject({ id: 1, author: 'alice', state: 'approved', body: '', commitId: 'sha-1-1' });
+    expect(fake.newHead(a.url)).toBe('sha-1-2');
+    const r2 = fake.addReview(a.url, { author: 'bob', state: 'changes_requested', body: 'no' });
+    expect(r2.id).toBeGreaterThan(r1.id);
+    expect(r2.commitId).toBe('sha-1-2');
+    const old = fake.addReview(a.url, { author: 'c', state: 'commented', commitId: 'sha-1-1' });
+    expect(old.commitId).toBe('sha-1-1');
+    const res = await fake.prReviews(a.url);
+    expect(res.headSha).toBe('sha-1-2');
+    expect(res.reviews).toHaveLength(3);
   });
 
   test('openPr refuses a second open PR with the same head and base in the same repo, like GitHub', async () => {

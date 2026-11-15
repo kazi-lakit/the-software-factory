@@ -8,6 +8,16 @@ export type GitHubFor = (ghUser: string) => GitHub;
 
 export type PrState = 'open' | 'merged' | 'closed';
 
+/** One review on a PR; `state` is GitHub's, lower-cased. */
+export interface PrReview {
+  id: number;
+  author: string;
+  state: 'approved' | 'changes_requested' | 'commented' | 'dismissed' | 'pending';
+  body: string;
+  submittedAt: string | null;
+  commitId: string | null;
+}
+
 export interface GitHub {
   /** Resolves the credential up front; rejects with GhLoginMissingError when the factory's gh login is not logged in. Clients without a lazy credential omit it. */
   ensureReady?(): Promise<void>;
@@ -15,6 +25,8 @@ export interface GitHub {
   /** The open PR from `head` into `base` in the remote's repo, or null. */
   findOpenPr(p: { remote: string; head: string; base: string }): Promise<{ url: string; number: number } | null>;
   prState(url: string): Promise<PrState>;
+  /** The PR's current head commit and all its reviews. */
+  prReviews(url: string): Promise<{ headSha: string; reviews: PrReview[] }>;
   /** Merges only when the PR's real base is `base` and not protected (in `protectedBranches`, default dev/stg/main); throws ProtectedBranchError or PrBaseMismatchError otherwise. */
   mergePr(url: string, base: string, protectedBranches?: readonly string[]): Promise<void>;
 }
@@ -66,6 +78,21 @@ export class OctokitGitHub implements GitHub {
     return data.state === 'closed' ? 'closed' : 'open';
   }
 
+  async prReviews(url: string): Promise<{ headSha: string; reviews: PrReview[] }> {
+    const { owner, repo, number } = parsePrUrl(url);
+    const { data } = await this.octokit.rest.pulls.get({ owner, repo, pull_number: number });
+    const list = await this.octokit.paginate(this.octokit.rest.pulls.listReviews, { owner, repo, pull_number: number, per_page: 100 });
+    const reviews = list.map((r) => ({
+      id: r.id,
+      author: r.user?.login ?? '',
+      state: r.state.toLowerCase() as PrReview['state'],
+      body: r.body ?? '',
+      submittedAt: r.submitted_at ?? null,
+      commitId: r.commit_id ?? null,
+    }));
+    return { headSha: data.head.sha, reviews };
+  }
+
   async mergePr(url: string, base: string, protectedBranches?: readonly string[]): Promise<void> {
     if (isProtected(base, protectedBranches)) throw new ProtectedBranchError(base);
     const { owner, repo, number } = parsePrUrl(url);
@@ -76,14 +103,15 @@ export class OctokitGitHub implements GitHub {
 }
 
 export class FakeGitHub implements GitHub {
-  readonly prs = new Map<string, { base: string; head: string; state: PrState }>();
+  readonly prs = new Map<string, { base: string; head: string; state: PrState; headSha: string; reviews: PrReview[] }>();
   private next = 1;
+  private reviewId = 1;
 
   async openPr(p: { remote: string; head: string; base: string; title: string; body: string }): Promise<{ url: string; number: number }> {
     if (await this.findOpenPr(p)) throw new Error(`A pull request already exists for ${p.head} into ${p.base}`);
     const number = this.next++;
     const url = `${this.prefix(p.remote)}${number}`;
-    this.prs.set(url, { base: p.base, head: p.head, state: 'open' });
+    this.prs.set(url, { base: p.base, head: p.head, state: 'open', headSha: `sha-${number}-1`, reviews: [] });
     return { url, number };
   }
 
@@ -99,6 +127,34 @@ export class FakeGitHub implements GitHub {
 
   async prState(url: string): Promise<PrState> {
     return this.pr(url).state;
+  }
+
+  async prReviews(url: string): Promise<{ headSha: string; reviews: PrReview[] }> {
+    const pr = this.pr(url);
+    return { headSha: pr.headSha, reviews: pr.reviews.map((r) => ({ ...r })) };
+  }
+
+  /** Adds a review; `commitId` defaults to the current head. */
+  addReview(url: string, r: { author: string; state: PrReview['state']; body?: string; commitId?: string }): PrReview {
+    const pr = this.pr(url);
+    const review: PrReview = {
+      id: this.reviewId++,
+      author: r.author,
+      state: r.state,
+      body: r.body ?? '',
+      submittedAt: new Date().toISOString(),
+      commitId: r.commitId ?? pr.headSha,
+    };
+    pr.reviews.push(review);
+    return review;
+  }
+
+  /** Moves the head to a new commit (a re-ship); earlier reviews keep their old commit. */
+  newHead(url: string): string {
+    const pr = this.pr(url);
+    const n = Number(/^sha-(\d+)-(\d+)$/.exec(pr.headSha)![2]) + 1;
+    pr.headSha = `sha-${/^sha-(\d+)-/.exec(pr.headSha)![1]}-${n}`;
+    return pr.headSha;
   }
 
   async mergePr(url: string, base: string, protectedBranches?: readonly string[]): Promise<void> {

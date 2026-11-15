@@ -941,7 +941,7 @@ describe('ship', () => {
     const t = await engine.ship('T-1');
     expect(t).toMatchObject({ status: 'pr_open', stage: null, prUrl: 'https://github.com/SELISEdigitalplatforms/blocks-data/pull/1' });
     expect(git.pushes).toEqual([{ path: join(ROOT, '.clones', 'worktrees', 'T-1'), branch: 'factory/T-1-add-widget' }]);
-    expect([...github.prs.values()]).toEqual([{ base: 'dev', head: 'factory/T-1-add-widget', state: 'open' }]);
+    expect([...github.prs.values()]).toMatchObject([{ base: 'dev', head: 'factory/T-1-add-widget', state: 'open' }]);
   });
 
   test('base feature/x with the PR gate off merges and is done', async () => {
