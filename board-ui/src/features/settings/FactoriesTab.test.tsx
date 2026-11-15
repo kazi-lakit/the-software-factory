@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { DEFAULT_STATUS_MAP } from "@factory/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { checksFixtureForTests } from "./testChecks";
 import { blocksFactories, factory, merge } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard } from "../../test/fakeBoard";
 import { SettingsView } from "./SettingsView";
@@ -18,6 +17,15 @@ async function openFactoriesSection() {
 }
 
 const owner = () => fakeBoard().owner;
+const click = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
+/** Clicks Add check, then fills row n. */
+function addCheck(n: number, name: string, cwd: string, run: string, needs = "") {
+  click("Add check");
+  changeField(`Check ${n} name`, name);
+  changeField(`Check ${n} folder`, cwd);
+  changeField(`Check ${n} command`, run);
+  if (needs) changeField(`Check ${n} needs`, needs);
+}
 const changeField = (label: string, value: string) => fireEvent.change(screen.getByLabelText(label), { target: { value } });
 
 beforeEach(() => {
@@ -145,15 +153,19 @@ describe("Factories tab", () => {
     const form = await screen.findByRole("form", { name: "Add repo to delta" });
     changeField("Repo id", "web");
     changeField("Remote", "git@github.com:org/web.git");
-    changeField("Checks (JSON)", JSON.stringify(checksFixtureForTests));
+    addCheck(1, "build", "server", "make build");
+    addCheck(2, "test", "server", "make test", "build");
     fireEvent.click(within(form).getByRole("button", { name: "Add repo" }));
     await screen.findByText("Saved repo web of delta.");
+    expect((await owner().listFactoryRepos("delta"))[1]!.checks).toEqual([
+      { name: "build", cwd: "server", run: "make build" }, { name: "test", cwd: "server", run: "make test", needs: "build" }
+    ]);
     expect((await owner().listFactoryRepos("delta")).map((r) => r.repoId)).toEqual(["api", "web"]);
     fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/web" }));
     expect(within(await screen.findByRole("form", { name: "Edit repo web" })).getByLabelText("Repo id")).toHaveAttribute("readonly");
   });
 
-  it("refuses_a_repo_with_a_base_of_main_or_checks_that_are_not_json", async () => {
+  it("refuses_a_repo_with_a_base_of_main_or_invalid_checks", async () => {
     const save = vi.spyOn(owner(), "saveFactoryRepo");
     await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Add repo to delta" }));
@@ -161,14 +173,45 @@ describe("Factories tab", () => {
     changeField("Repo id", "web");
     changeField("Remote", "git@github.com:org/web.git");
     changeField("Base branch", "main");
-    changeField("Checks (JSON)", JSON.stringify(checksFixtureForTests));
+    addCheck(1, "build", ".", "make");
     fireEvent.click(within(form).getByRole("button", { name: "Add repo" }));
     expect(await within(form).findByRole("alert")).toHaveTextContent("main is never a base");
     changeField("Base branch", "dev");
-    changeField("Checks (JSON)", "{nope");
+    addCheck(2, "build", ".", "make again");
     fireEvent.click(within(form).getByRole("button", { name: "Add repo" }));
-    expect(await within(form).findByRole("alert")).toHaveTextContent("checks must be valid JSON");
+    expect(await within(form).findByRole("alert")).toHaveTextContent("duplicate check name build");
     expect(save).not.toHaveBeenCalled();
+  });
+
+  it("reorders and removes checks", async () => {
+    await openFactoriesSection();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/api" }));
+    const form = await screen.findByRole("form", { name: "Edit repo api" });
+    click("Remove check 6");
+    click("Remove check 5");
+    click("Remove check 4");
+    click("Remove check 3");
+    click("Remove check 2");
+    expect(screen.queryByLabelText("Check 2 name")).toBeNull();
+    addCheck(2, "extra", ".", "x");
+    expect(within(form).getByLabelText("Check 2 needs").querySelectorAll("option")).toHaveLength(2);
+    click("Move check 2 up");
+    expect(screen.getByLabelText("Check 1 name")).toHaveValue("extra");
+    expect(screen.getByLabelText("Check 2 name")).toHaveValue("server.build");
+    expect(screen.getByRole("button", { name: "Move check 1 up" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move check 2 down" })).toBeDisabled();
+  });
+
+  it("an old-shape repo opens as its six checks", async () => {
+    const old = { server: { cwd: "server", build: "b", test: "t" }, client: { cwd: "client", install: "i", typecheck: "tc", lint: "l", test: "t" }, e2e: "off" };
+    fakeBoard().ownerData.seed("FactoryRepo", { baseBranch: "dev", checks: JSON.stringify(old), factoryId: "delta", remote: "git@github.com:org/old.git", repoId: "old", repoKey: "delta/old", version: 1, writeId: "" });
+    await openFactoriesSection();
+    fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/old" }));
+    await screen.findByRole("form", { name: "Edit repo old" });
+    expect(screen.getByLabelText("Check 1 name")).toHaveValue("server.build");
+    expect(screen.getByLabelText("Check 6 name")).toHaveValue("client.test");
+    expect(screen.getByLabelText("Check 6 needs")).toHaveValue("client.install");
+    expect(screen.queryByLabelText("Check 7 name")).toBeNull();
   });
 
   it("saves_a_checks_change_only_after_confirm_change_and_records_a_history_event", async () => {
@@ -176,8 +219,7 @@ describe("Factories tab", () => {
     await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/api" }));
     const form = await screen.findByRole("form", { name: "Edit repo api" });
-    const checks = JSON.parse((within(form).getByLabelText("Checks (JSON)") as HTMLTextAreaElement).value) as typeof checksFixtureForTests;
-    changeField("Checks (JSON)", JSON.stringify(checks.map((c) => (c.name === "server.test" ? { ...c, run: "npm run test:all" } : c))));
+    changeField("Check 2 command", "npm run test:all");
     fireEvent.click(within(form).getByRole("button", { name: "Save repo" }));
     const review = await within(form).findByRole("region", { name: "Checks change" });
     expect(within(review).getByLabelText("Old checks")).toHaveTextContent('"run": "t"');
@@ -226,7 +268,7 @@ describe("Factories tab", () => {
     const form = await screen.findByRole("form", { name: "Add repo to delta" });
     changeField("Repo id", "api");
     changeField("Remote", "git@github.com:org/api2.git");
-    changeField("Checks (JSON)", JSON.stringify(checksFixtureForTests));
+    addCheck(1, "build", ".", "make");
     fireEvent.click(within(form).getByRole("button", { name: "Add repo" }));
     expect(await within(form).findByRole("alert")).toHaveTextContent("Repo api already exists in delta. Pick another id.");
     expect(within(form).queryByRole("button", { name: "Reload" })).not.toBeInTheDocument();
@@ -254,7 +296,7 @@ describe("Factories tab restyle", () => {
     await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Add repo to delta" }));
     const form = await screen.findByRole("form", { name: "Add repo to delta" });
-    for (const name of ["Repo id", "Remote", "Base branch", "Checks (JSON)"]) expect(within(form).getByLabelText(name), name).toHaveClass("sf-input");
+    for (const name of ["Repo id", "Remote", "Base branch"]) expect(within(form).getByLabelText(name), name).toHaveClass("sf-input");
     expect(within(form).getByRole("button", { name: "Add repo" })).toHaveClass("sf-button-primary");
     expect(within(form).getByRole("button", { name: "Cancel" })).not.toHaveClass("sf-button-primary");
   });
@@ -271,8 +313,7 @@ describe("Factories tab restyle", () => {
     await openFactoriesSection();
     fireEvent.click(await screen.findByRole("button", { name: "Edit repo delta/api" }));
     const form = await screen.findByRole("form", { name: "Edit repo api" });
-    const checks = JSON.parse((within(form).getByLabelText("Checks (JSON)") as HTMLTextAreaElement).value) as typeof checksFixtureForTests;
-    changeField("Checks (JSON)", JSON.stringify(checks.map((c) => (c.name === "server.test" ? { ...c, run: "x" } : c))));
+    changeField("Check 2 command", "x");
     fireEvent.click(within(form).getByRole("button", { name: "Save repo" }));
     await within(form).findByRole("region", { name: "Checks change" });
     expect(save).not.toHaveBeenCalled();

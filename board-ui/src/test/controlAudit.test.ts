@@ -16,8 +16,9 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
  *  +1: the Board's Search tasks by title or id field (T-24).
  *  -1 / +1 file: DependsOnPicker dropdown, New task page (T-26).
  *  -2: History drops Mode, Kind, From and To and adds the search and When (T-28).
- *  +4 / +1 file: New factory page's text field, Factory id, Active switch and Add a branch (T-32). */
-const EXPECTED_CONTROLS = 51;
+ *  +4 / +1 file: New factory page's text field, Factory id, Active switch and Add a branch (T-32).
+ *  +3: RepoForm's checks list replaces the JSON textarea with name, folder, command inputs and a needs select (factory init). */
+const EXPECTED_CONTROLS = 54;
 const EXPECTED_FILES = 16;
 
 type Control = { file: string; tag: string; text: string };

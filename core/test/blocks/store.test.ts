@@ -101,6 +101,37 @@ describe('BlocksStore factories', () => {
     },
   );
 
+  const seedRepo = (data: FakeBlocksData, checks: unknown) => {
+    const row = { ...repoFixture('delta', 'api'), checks, writeId: '', repoKey: 'delta/api' } as Record<string, unknown>;
+    if (checks === undefined) delete row.checks;
+    data.seed('FactoryRepo', row as never);
+  };
+  const loadRepos = async (data: FakeBlocksData) => {
+    const s = new BlocksStore(data, 'owner');
+    return new FactoryConfig([defFixture('delta')], await s.listFactoryRepos('delta')).repos('delta');
+  };
+
+  it.each([['missing', undefined], ['not JSON', 'not json'], ['a JSON string', '"x"'], ['JSON null', 'null'], ['a JSON number', '5'], ['broken JSON', '{nope'], ['an invalid list', '[{"name":""}]']])(
+    'a repo whose checks are %s is skipped, never read as no checks',
+    async (_what, raw) => {
+      const data = new FakeBlocksData('any');
+      seedRepo(data, raw);
+      expect(await loadRepos(data)).toEqual([]);
+    },
+  );
+
+  it('decodes a checks list, and an old-shape checks object as the list', async () => {
+    const list = repoFixture('delta', 'api').checks;
+    const old = { server: { cwd: 'server', build: 'b', test: 't' }, client: { cwd: 'client', install: 'i', typecheck: 'tc', lint: 'l', test: 't' }, e2e: 'off' };
+    for (const raw of [JSON.stringify(list), JSON.stringify(old)]) {
+      const data = new FakeBlocksData('any');
+      seedRepo(data, raw);
+      const repos = await loadRepos(data);
+      expect(repos).toHaveLength(1);
+      expect(repos[0]!.checks.map((c) => c.name)).toEqual(['server.build', 'server.test', 'client.install', 'client.typecheck', 'client.lint', 'client.test']);
+    }
+  });
+
   it('stores agentModels as JSON text and reads it back', async () => {
     const data = new FakeBlocksData('any');
     const s = new BlocksStore(data, 'owner');

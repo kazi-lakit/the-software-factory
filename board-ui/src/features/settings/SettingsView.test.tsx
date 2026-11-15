@@ -271,6 +271,7 @@ describe("repo summaries", () => {
 
   it("checks_summary_joins_commands_in_run_order", () => {
     expect(checksSummary(repoFixture("blocks", "iam").checks)).toBe("b · t · i · tc · l · t");
+    expect(checksSummary([])).toBe("No checks");
   });
 });
 
