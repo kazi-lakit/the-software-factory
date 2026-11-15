@@ -270,13 +270,14 @@ const byRequested = (a: SyncRequest, b: SyncRequest) =>
 const oldFields = (schema: 'FactoryDef' | 'FactoryHealth'): string[] =>
   FIELDS[schema].map((f) => f.name).filter((n) => !(GITHUB_SCHEMA.fields[schema] as readonly string[]).includes(n));
 
-const encodeDef = (d: FactoryDef, ready: boolean): Record<string, Value> => ({
+const encodeDef = (d: FactoryDef, writeGithub: boolean): Record<string, Value> => ({
   name: d.name, protectedBranches: JSON.stringify(d.protectedBranches), gitName: d.gitName, gitEmail: d.gitEmail, docsPath: d.docsPath,
   ghUser: d.ghUser, active: d.active ? 1 : 0,
   // Always written, so an edit can clear every entry: Blocks ignores null in an update.
   agentModels: JSON.stringify(d.agentModels ?? {}),
-  // Written only once the column exists; '' clears it (turning GitHub off).
-  ...(ready ? { github: d.github ? JSON.stringify(d.github) : '' } : {}),
+  // Written only when the column exists and either side has a block ('' clears it, turning GitHub off); otherwise
+  // left alone, so a save from a def read before the schema was ready cannot wipe a stored block.
+  ...(writeGithub ? { github: d.github ? JSON.stringify(d.github) : '' } : {}),
 });
 
 const encodeRepo = (r: FactoryRepo): Record<string, Value> => ({ remote: r.remote, baseBranch: r.baseBranch, checks: canonicalJson(r.checks) });
@@ -611,7 +612,7 @@ export class BlocksStore implements BoardStore {
     const what = `factory ${after.factoryId}`;
     const ready = await this.githubSchemaReady();
     if (!ready && after.github) throw new ForbiddenError(GITHUB_SCHEMA_MISSING);
-    const fields = encodeDef(after, ready);
+    const fields = encodeDef(after, ready && Boolean(after.github || before?.github));
     if (before === null) {
       const all = await this.data.list('FactorySettings', {}, ['scope', 'json']);
       if (all.some((r) => r.scope === after.factoryId && isLegacyRepoRow(r, legacyIsOn(all)))) {

@@ -834,10 +834,40 @@ describe('BlocksStore GitHub (connected mode)', () => {
   });
 
   it('a sync request round-trips plan and result JSON; nullable texts read back as null', async () => {
-    const owner = new BlocksStore(new FakeBlocksData('any'), 'owner');
+    const storage = newFakeStorage();
+    const owner = new BlocksStore(new FakeBlocksData('any', { storage }), 'owner');
+    const core = new BlocksStore(new FakeBlocksData('any', { storage }), 'core');
     const q = await owner.requestSync('delta', 'kazi');
     expect(q).toMatchObject({ plan: null, plannedAt: null, applyingSince: null, result: null, appliedAt: null, error: null, version: 1 });
     expect((await owner.listSyncRequests('delta'))[0]).toEqual(q);
+    const plan = { actions: [], notApplied: [{ taskId: null, issue: 'o/r#1', change: 'new issue', reason: 'r' }], done: [{ taskId: 'T-1', issue: 'o/r#2', change: 'c' }], errors: [] };
+    const planned = await core.saveSyncRequest(q, { ...q, state: 'planned', plan, plannedAt: 'p' });
+    const applying = await owner.saveSyncRequest(planned, { ...planned, state: 'applying', applyingSince: 'a' });
+    const result = { created: [{ taskId: 'T-2', issue: 'o/r#3', status: 'inbox' as const }], applied: [], notApplied: [], errors: [] };
+    const applied = await owner.saveSyncRequest(applying, { ...applying, state: 'applied', result, appliedAt: 'z' });
+    const [back] = await owner.listSyncRequests('delta');
+    expect(back).toEqual(applied);
+    expect(back).toMatchObject({ plan, result, plannedAt: 'p', applyingSince: 'a', appliedAt: 'z', error: null });
+  });
+
+  it('an unrelated save keeps the stored github block when an earlier read happened before the schema probe was ready', async () => {
+    let t = Date.parse('2026-11-15T00:00:00Z');
+    const storage = newFakeStorage();
+    const ready = new FakeBlocksData('any', { storage });
+    const missing = new FakeBlocksData('any', { storage, missing: GITHUB_SCHEMA });
+    const first = await new BlocksStore(ready, 'owner').saveFactoryDef(null, defFixture('delta', { github: githubSettings() }));
+    expect(first.github).toBeDefined();
+    let current: BlocksData = missing;
+    const data: BlocksData = { list: (...a) => current.list(...a), insert: (...a) => current.insert(...a), update: (...a) => current.update(...a), hardDelete: (...a) => current.hardDelete(...a) };
+    const s = new BlocksStore(data, 'owner', { now: () => new Date(t) });
+    const [before] = await s.listFactoryDefs();
+    expect(before).not.toHaveProperty('github');
+    current = ready;
+    t += 61_000;
+    expect(await s.githubSchemaReady()).toBe(true);
+    await s.saveFactoryDef(before!, { ...before!, name: 'x' });
+    expect(JSON.parse(String(ready.rows('FactoryDef')[0]!.github))).toMatchObject({ mode: 'connected' });
+    expect(ready.rows('FactoryDef')[0]!.name).toBe('x');
   });
 
   it('the github block is stored as JSON text and read back; turning it off writes empty text', async () => {
