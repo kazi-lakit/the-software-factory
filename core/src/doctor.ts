@@ -8,8 +8,9 @@ import { ALL_STATUSES } from './status.js';
 export interface DoctorCheck { factoryId: string; check: string; ok: boolean; detail: string }
 
 const TOKEN = /\b(?:gh[opsur]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)\b/g;
-const redact = (s: string): string => s.replace(TOKEN, '[redacted]');
-const firstLine = (e: unknown): string => redact((e instanceof Error ? e.message : String(e)).split('\n')[0]!);
+/** Replaces GitHub tokens in a message. */
+export const redactSecrets = (s: string): string => s.replace(TOKEN, '[redacted]');
+const firstLine = (e: unknown): string => redactSecrets((e instanceof Error ? e.message : String(e)).split('\n')[0]!);
 const byId = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** Checks each factory's gh login and, with a `github` block, its GitHub setup. Reads only; a client error becomes a failing check. */
@@ -22,7 +23,7 @@ export async function doctor(o: {
   const out: DoctorCheck[] = [];
   for (const def of o.defs.filter((d) => !o.only || o.only.includes(d.factoryId))) {
     const factoryId = def.factoryId;
-    const add = (check: string, ok: boolean, detail: string): boolean => { out.push({ factoryId, check, ok, detail: redact(detail) }); return ok; };
+    const add = (check: string, ok: boolean, detail: string): boolean => { out.push({ factoryId, check, ok, detail: redactSecrets(detail) }); return ok; };
     /** Runs a check; a thrown error fails it with the first line of the message. */
     const attempt = async <T>(check: string, fn: () => Promise<T>): Promise<T | undefined> => {
       try { return await fn(); } catch (e) { add(check, false, firstLine(e)); return undefined; }
