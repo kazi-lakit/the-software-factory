@@ -458,7 +458,12 @@ export async function run(argv: string[], io: IO, makeEngine: MakeEngine = (o) =
         }
       };
       if (o.rebuild) {
-        const failed = rebuildLines(await puller.rebuild(only));
+        const rebuilt = await puller.rebuild(only);
+        if (rebuilt.length === 0 && !only) {
+          io.out('no factory uses GitHub-only mode');
+          throw new CliExit('', 1, true);
+        }
+        const failed = rebuildLines(rebuilt);
         const pushed = await pusher.pushAll(only, { ignoreBackoff: true });
         lines(pushed);
         if (failed || pushed.some((r) => r.error !== null)) throw new CliExit('', 1, true);

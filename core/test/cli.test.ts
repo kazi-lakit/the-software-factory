@@ -972,11 +972,23 @@ describe('GitHub pulling from the CLI', () => {
     const board = newBoard();
     board.project = async () => { throw new GhLoginMissingError('kazi-lakit'); };
     const plain = setup(withGithub());
-    const plainCode = await plain.goWith({ githubBoardFor: () => newBoard() }, '--store', 'file', 'next');
+    const plainCode = await plain.goWith(wire(newBoard()), '--store', 'file', 'next');
     const { out, err, goWith } = setup(withGithub());
     expect(await goWith(wire(board), '--store', 'file', 'next')).toBe(plainCode);
     expect(out).toEqual(plain.out);
     expect(err.join('\n')).toContain('github: PULL FAIL');
+  });
+
+  test('next still works when the pull itself throws', async () => {
+    const plain = setup(withGithub());
+    const plainCode = await plain.goWith(wire(newBoard()), '--store', 'file', 'next');
+    const { out, err, store, goWith } = setup(withGithub());
+    const orig = store.listFactoryDefs.bind(store);
+    let n = 0;
+    store.listFactoryDefs = async () => { if (n++ === 0) throw new Error('locked\nmore'); return orig(); };
+    expect(await goWith(wire(newBoard()), '--store', 'file', 'next')).toBe(plainCode);
+    expect(out).toEqual(plain.out);
+    expect(err).toContain('github: pull failed (locked)');
   });
 
   test('next pulls while the lock is free and skips when held', async () => {
@@ -1077,6 +1089,12 @@ describe('GitHub pulling from the CLI', () => {
     const { out, goWith } = setup(seed());
     expect(await goWith(wire(newBoard()), '--store', 'file', 'sync', '--rebuild', '--factory', 'blocks')).toBe(1);
     expect(out.join('\n')).toContain('FAIL rebuild blocks: not a GitHub-only factory');
+  });
+
+  test('sync --rebuild with no github-only factory exits 1', async () => {
+    const { out, goWith } = setup(seed());
+    expect(await goWith(wire(newBoard()), '--store', 'file', 'sync', '--rebuild')).toBe(1);
+    expect(out).toEqual(['no factory uses GitHub-only mode']);
   });
 
   test('sync --rebuild --watch is refused', async () => {
