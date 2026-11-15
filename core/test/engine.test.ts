@@ -927,8 +927,8 @@ describe('check', () => {
 });
 
 describe('ship', () => {
-  async function atShip(base: string, prGate: boolean) {
-    const s = setup();
+  async function atShip(base: string, prGate: boolean, log?: (m: string) => void) {
+    const s = setup(log ? { log } : {});
     await s.store.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: prGate } }, repos: {} } } });
     await put(s.store, { status: 'review', stage: 'ship', branch: 'factory/T-1-add-widget' }, base);
     await s.store.addDoc('T-1', 'spec', 'S'.repeat(5000), 'a');
@@ -981,6 +981,15 @@ describe('ship', () => {
     const openPr = vi.spyOn(github, 'openPr');
     await engine.ship('T-1');
     expect(openPr.mock.calls[0]![0].body.endsWith('\n\nCloses #12')).toBe(true);
+  });
+
+  test('a failed link read is logged and the PR still opens', async () => {
+    const logs: string[] = [];
+    const { engine, github, store } = await atShip('dev', true, (m) => logs.push(m));
+    vi.spyOn(store, 'getGitHubLink').mockRejectedValue(new Error('boom\nsecond'));
+    await engine.ship('T-1');
+    expect(logs).toContain('PR body: issue link not read (boom)');
+    expect(github.prs.size).toBe(1);
   });
 
   test('ship body unchanged without a link, with another repo, or without an issue number', async () => {
@@ -1246,6 +1255,26 @@ describe('sync', () => {
     expect(await store.getTask('T-1')).toMatchObject({ status: 'build', stage: 'build', question: null, answer: 'do x' });
     expect((await store.getTask('T-2')).status).toBe('blocked');
     expect((await store.getTask('T-3')).status).toBe('blocked');
+  });
+
+  const GH_ONLY = { mode: 'github-only' as const, project: 'o/1' as never, label: 'factory', approvers: ['kazi-lakit'],
+    statusMap: { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress', plan_review: 'In progress',
+      build: 'In progress', verify: 'In progress', review: 'In progress', pr_open: 'In review', done: 'Merged', blocked: 'In progress', cancelled: 'Backlog' } as never };
+
+  test('an answered stage-less blocked task restarts in a github-only factory', async () => {
+    const { store, engine } = setup({ defs: [defFixture('blocks', { github: GH_ONLY })] });
+    await put(store, { status: 'blocked', stage: null, attempt: 2, question: 'q?', blockedReason: 'rebuilt from GitHub, check status', answer: 'unblocked by x' });
+    await put(store, { status: 'blocked', stage: null, answer: '  ' });
+    await engine.sync();
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', stage: null, attempt: 0, question: null, blockedReason: null, answer: null });
+    expect((await store.getTask('T-2')).status).toBe('blocked');
+  });
+
+  test('the same task stays blocked in a factory without github', async () => {
+    const { store, engine } = setup();
+    await put(store, { status: 'blocked', stage: null, question: 'q?', answer: 'unblocked by x' });
+    await engine.sync();
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'blocked', answer: 'unblocked by x' });
   });
 
   test('a working task over the cost limit is blocked; waiting-without-stage and blocked tasks are left alone', async () => {

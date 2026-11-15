@@ -485,7 +485,8 @@ export class Engine {
       if (link?.issueNumber == null) return undefined;
       const { owner, repo } = parseRemote(remote);
       return link.repo.toLowerCase() === `${owner}/${repo}`.toLowerCase() ? link.issueNumber : undefined;
-    } catch {
+    } catch (e) {
+      this.deps.log?.(`PR body: issue link not read (${firstLine(e)})`);
       return undefined;
     }
   }
@@ -536,6 +537,9 @@ export class Engine {
       case 'blocked':
         if (task.answer?.trim() && task.stage !== null) {
           return this.apply(task, this.decideFor(task, { kind: 'answered' }, settings), this.coreActor);
+        }
+        if (task.answer?.trim() && task.stage === null && def.github?.mode === 'github-only') {
+          return this.apply(task, this.decideFor(task, { kind: 'restart' }, settings), this.coreActor);
         }
         return undefined;
       default:

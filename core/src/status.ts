@@ -35,6 +35,8 @@ const CORE_PAIRS: ReadonlyArray<readonly [Status, Status]> = [
   ...NON_TERMINAL.filter((s) => s !== 'blocked').map((s): [Status, Status] => [s, 'blocked']),
   // ... and resumed into any working step.
   ['blocked', 'spec'], ['blocked', 'plan'], ['blocked', 'build'], ['blocked', 'verify'], ['blocked', 'review'],
+  // ... or, with no stage to resume at (GitHub-only restart), started again from ready.
+  ['blocked', 'ready'],
 ];
 
 const YOU_PAIRS: ReadonlyArray<readonly [Status, Status]> = [
