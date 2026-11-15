@@ -3,7 +3,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, 
 import { dirname, join } from 'node:path';
 import { DEFAULT_SETTINGS } from './defaults.js';
 import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
-import { loadFactoriesFromDir } from './factoriesFs.js';
+import { loadFactoriesFromDir, type FactoryDirLoad, type FactoryFileProblem } from './factoriesFs.js';
 import { canSyncMove, type SyncRequest } from './githubSync.js';
 import { withLinkDefaults, type GitHubLink } from './githubLink.js';
 import type {
@@ -325,7 +325,12 @@ export class MemoryStore implements BoardStore {
   }
 
   getSettings(): Promise<StoredSettings> {
-    return this.read(() => clone(this.state.settings ?? { factories: {} }));
+    return this.read(() => this.settingsView(clone(this.state.settings ?? { factories: {} })));
+  }
+
+  /** The settings as callers see them; FileStore lays the YAML gates over them. The argument is a copy it may change. */
+  protected settingsView(s: StoredSettings): StoredSettings {
+    return s;
   }
 
   setSettings(s: StoredSettings) {
@@ -340,7 +345,7 @@ export class MemoryStore implements BoardStore {
     if (repoId === undefined && after === null) throw new Error('factory settings cannot be removed');
     return this.write(() => {
       const s: StoredSettings = this.state.settings ?? { factories: {} };
-      const entry = s.factories[factoryId];
+      const entry = this.settingsView(clone(s)).factories[factoryId];
       const current = repoId === undefined ? (entry?.factory ?? DEFAULT_SETTINGS) : entry?.repos[repoId];
       if (canonicalJson(current) !== canonicalJson(before)) throw settingsConflict(scope);
       const target = (s.factories[factoryId] ??= { factory: clone(DEFAULT_SETTINGS), repos: {} });
@@ -407,9 +412,9 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 export interface FileStoreOptions extends Omit<MemoryStoreOptions, 'factories'> {
   /** How long a write waits for the lock before it gives up (default 5 s). */
   lockTimeoutMs?: number;
-  /** Where definitions are seeded from the first time the store has none (`<root>/factories`). Left out: no seeding. */
+  /** The factory YAMLs (`<root>/factories`): their definitions, repos and gates win over board.json on every load. Left out: none. */
   factoriesDir?: string;
-  /** Told why a definition file was skipped while seeding. */
+  /** Told why a definition file was skipped. */
   log?: (line: string) => void;
 }
 
@@ -425,8 +430,8 @@ export class FileStore extends MemoryStore {
   private readonly lockTimeoutMs: number;
   private readonly factoriesDir: string | undefined;
   private readonly log: ((line: string) => void) | undefined;
-  /** Read again only when a factory.yaml changed (newest mtime + file count): a bad file is reported once per change. */
-  private seeded: { key: string; defs: FactoryDef[]; repos: FactoryRepo[] } | undefined;
+  /** Read again only when a factory file changed (see yamlKey): a bad file is reported once per change. */
+  private seeded: ({ key: string } & FactoryDirLoad) | undefined;
 
   constructor(private readonly path: string, opts: FileStoreOptions = {}) {
     super(opts);
@@ -460,10 +465,26 @@ export class FileStore extends MemoryStore {
     this.state = this.upgrade(raw);
   }
 
+  /** The factory files that were skipped on the last load, with the file and the reason. */
+  factoryFileProblems(): FactoryFileProblem[] {
+    this.reload();
+    return clone(this.seeded?.problems ?? []);
+  }
+
+  /** Owned factories' YAML gates win over the stored ones per gate; a missing factory scope starts from the defaults. */
+  protected override settingsView(s: StoredSettings): StoredSettings {
+    for (const [factoryId, gates] of Object.entries(this.seeded?.gates ?? {})) {
+      const entry = (s.factories[factoryId] ??= { factory: clone(DEFAULT_SETTINGS), repos: {} });
+      entry.factory = { ...entry.factory, gates: { ...entry.factory.gates, ...gates } };
+    }
+    return s;
+  }
+
   /**
    * A file written before factories: its tasks and events belong to factory `blocks`, and its `{ global, repos }`
-   * settings are that factory's. Definitions the file lacks are seeded from `factoriesDir` (see loadFactoriesFromDir), and
-   * each stored definition's `github` block is taken from its valid `factory.yaml` (re-read when one changed), or removed.
+   * settings are that factory's. With `factoriesDir`, the YAML definitions and repos (see loadFactoriesFromDir, re-read
+   * when a file changed) replace board.json's for every factory the YAML owns, valid or not; the other board.json
+   * definitions keep loading, without a `github` block (only a YAML may give one).
    */
   private upgrade(raw: Record<string, unknown>): State {
     const state = { ...emptyState(), ...raw } as State;
@@ -478,39 +499,46 @@ export class FileStore extends MemoryStore {
     if (this.seeded?.key !== key) {
       this.seeded = { key, ...loadFactoriesFromDir(this.factoriesDir, (file, reason) => this.log?.(`skipped ${file}: ${reason}`)) };
     }
-    if (state.factoryDefs.length === 0 && state.factoryRepos.length === 0) {
-      state.factoryDefs = clone(this.seeded.defs);
-      state.factoryRepos = clone(this.seeded.repos);
-    }
-    // factory.yaml is the source of truth for `github`: a stored def takes the valid YAML's block, or none.
-    const yaml = new Map(this.seeded.defs.map((d) => [d.factoryId, d]));
-    state.factoryDefs = state.factoryDefs.map(({ github: _stored, ...def }) => {
-      const github = yaml.get(def.factoryId)?.github;
-      return github ? { ...def, github: clone(github) } : def;
-    });
+    const owned = new Set(this.seeded.owned);
+    state.factoryDefs = [
+      ...clone(this.seeded.defs),
+      ...state.factoryDefs.filter((d) => !owned.has(d.factoryId)).map(({ github: _stored, ...def }) => def),
+    ];
+    state.factoryRepos = [...clone(this.seeded.repos), ...state.factoryRepos.filter((r) => !owned.has(r.factoryId))];
     return state;
   }
 
-  /** The newest mtime of every factory.yaml under the factories dir, plus their count: it changes when one is edited, added or removed. */
+  /** Every factory.yaml and repos/*.yaml under the factories dir with its mtime and size: it changes when one is edited, added or removed. */
   private yamlKey(dir: string): string {
-    let newest = 0;
-    let count = 0;
-    if (existsSync(dir)) {
-      for (const e of readdirSync(dir, { withFileTypes: true })) {
-        if (!e.isDirectory()) continue;
-        try {
-          newest = Math.max(newest, statSync(join(dir, e.name, 'factory.yaml')).mtimeMs);
-          count++;
-        } catch { /* no factory.yaml here */ }
-      }
+    const parts: string[] = [];
+    const stamp = (file: string): void => {
+      try {
+        const st = statSync(file);
+        parts.push(`${file}:${st.mtimeMs}:${st.size}`);
+      } catch { /* not there */ }
+    };
+    if (!existsSync(dir)) return '';
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      if (!e.isDirectory()) continue;
+      stamp(join(dir, e.name, 'factory.yaml'));
+      const reposDir = join(dir, e.name, 'repos');
+      if (!existsSync(reposDir)) continue;
+      for (const f of readdirSync(reposDir).filter((n) => n.endsWith('.yaml'))) stamp(join(reposDir, f));
     }
-    return `${newest}:${count}`;
+    return parts.sort().join('|');
   }
 
+  /** Writes board.json without the definitions and repos the YAML owns: those live only in their files. */
   private persist(): void {
     mkdirSync(dirname(this.path), { recursive: true });
+    const owned = new Set(this.seeded?.owned ?? []);
+    const state: State = {
+      ...this.state,
+      factoryDefs: this.state.factoryDefs.filter((d) => !owned.has(d.factoryId)),
+      factoryRepos: this.state.factoryRepos.filter((r) => !owned.has(r.factoryId)),
+    };
     const tmp = `${this.path}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
-    writeFileSync(tmp, JSON.stringify(this.state, null, 2));
+    writeFileSync(tmp, JSON.stringify(state, null, 2));
     renameSync(tmp, this.path);
   }
 

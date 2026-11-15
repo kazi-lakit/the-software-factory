@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { FileStore, ForbiddenError, MemoryStore, RereadAfterUpdateError, updateHeld, VersionConflictError } from '../src/store.js';
 import { runStoreContract } from './storeContract.js';
+import { yamlVersion } from '../src/factoriesFs.js';
 import { emptyPushed, type GitHubLink } from '../src/githubLink.js';
 
 const mk = (s: MemoryStore, title = 'a') => s.createTask({ factoryId: 'blocks', title, description: '', repo: 'data' });
@@ -118,23 +119,78 @@ describe('FileStore', () => {
 describe('FileStore factories', () => {
   const dir = () => mkdtempSync(join(tmpdir(), 'fs-fac-'));
 
-  test('seeds definitions from <root>/factories the first time, then keeps what the owner saves', async () => {
+  const repoText = (base = 'dev') => `repoId: api\nremote: git@github.com:o/api.git\nbaseBranch: ${base}\nchecks:\n  server: { cwd: s, build: b, test: t }\n  client: { cwd: c, install: i, typecheck: tc, lint: l, test: t }\n  e2e: off\n`;
+  /** A root with `factories/<id>/factory.yaml` and a board.json holding `stored`. */
+  const rootWith = (yaml: Record<string, string>, stored: { defs?: unknown[]; repos?: unknown[]; settings?: unknown } = {}) => {
     const root = dir();
-    mkdirSync(join(root, 'factories', 'delta', 'repos'), { recursive: true });
-    writeFileSync(join(root, 'factories', 'delta', 'factory.yaml'), 'factoryId: delta\nname: Delta\n');
-    writeFileSync(
-      join(root, 'factories', 'delta', 'repos', 'api.yaml'),
-      'repoId: api\nremote: git@github.com:o/api.git\nchecks:\n  server: { cwd: s, build: b, test: t }\n  client: { cwd: c, install: i, typecheck: tc, lint: l, test: t }\n  e2e: off\n',
-    );
-    // The board file is not in the root: the definitions dir is given explicitly.
+    for (const [rel, text] of Object.entries(yaml)) {
+      mkdirSync(join(root, 'factories', rel, '..'), { recursive: true });
+      writeFileSync(join(root, 'factories', rel), text);
+    }
     const board = join(root, '.factory', 'board.json');
-    const opts = { factoriesDir: join(root, 'factories') };
+    mkdirSync(join(root, '.factory'), { recursive: true });
+    writeFileSync(board, JSON.stringify({ factoryDefs: stored.defs ?? [], factoryRepos: stored.repos ?? [], settings: stored.settings ?? null }));
+    return { root, board, opts: { factoriesDir: join(root, 'factories') } };
+  };
+  const storedDef = (factoryId: string, name: string) => ({ factoryId, name, gitName: '', gitEmail: '', docsPath: '', ghUser: 'kazi-lakit', active: true, version: 3 });
+
+  test('a YAML-backed definition wins over the board.json copy on every load', async () => {
+    const { board, opts, root } = rootWith({ 'delta/factory.yaml': 'factoryId: delta\nname: New\n', 'delta/repos/api.yaml': repoText() }, { defs: [storedDef('delta', 'Old')] });
     const s = new FileStore(board, opts);
-    expect((await s.listFactoryDefs()).map((d) => d.factoryId)).toEqual(['delta']);
+    expect((await s.listFactoryDefs()).map((d) => d.name)).toEqual(['New']);
     expect((await s.listFactoryRepos('delta')).map((r) => r.repoId)).toEqual(['api']);
-    const [def] = await s.listFactoryDefs();
-    await s.saveFactoryDef(def!, { ...def!, name: 'Delta 2' });
-    expect((await new FileStore(board, opts).listFactoryDefs())[0]).toMatchObject({ name: 'Delta 2', version: 2 });
+    writeFileSync(join(root, 'factories', 'delta', 'factory.yaml'), 'factoryId: delta\nname: Newer\n');
+    expect((await new FileStore(board, opts).listFactoryDefs()).map((d) => d.name)).toEqual(['Newer']);
+  });
+
+  test('a definition in board.json with no YAML keeps loading from board.json', async () => {
+    const { board, opts } = rootWith({ 'delta/factory.yaml': 'factoryId: delta\nname: Delta\n' }, { defs: [storedDef('blocks', 'Blocks')] });
+    const s = new FileStore(board, opts);
+    expect((await s.listFactoryDefs()).map((d) => `${d.factoryId}:${d.name}:${d.version}`).sort()).toEqual(['blocks:Blocks:3', `delta:Delta:${yamlVersion('factoryId: delta\nname: Delta\n')}`]);
+  });
+
+  test('an invalid factory.yaml hides the board.json copy and is reported with the file and field path', async () => {
+    const { board, opts } = rootWith({ 'delta/factory.yaml': 'factory:\n  id: delta\n  name: Delta\n  agents:\n    build: gpt\n' }, { defs: [storedDef('delta', 'Delta')] });
+    const lines: string[] = [];
+    const s = new FileStore(board, { ...opts, log: (l) => lines.push(l) });
+    expect((await s.listFactoryDefs()).map((d) => d.factoryId)).toEqual([]);
+    expect(s.factoryFileProblems()).toEqual([{ factoryId: 'delta', file: expect.stringMatching(/delta[\\/]factory\.yaml$/), reason: expect.stringContaining('factory.agents.build:') }]);
+    expect(lines).toHaveLength(1);
+  });
+
+  test('editing a repos/*.yaml file is picked up without touching factory.yaml', async () => {
+    const { board, opts, root } = rootWith({ 'delta/factory.yaml': 'factoryId: delta\nname: Delta\n', 'delta/repos/api.yaml': repoText() });
+    const s = new FileStore(board, opts);
+    expect((await s.listFactoryRepos('delta'))[0]!.baseBranch).toBe('dev');
+    const file = join(root, 'factories', 'delta', 'repos', 'api.yaml');
+    writeFileSync(file, repoText('stg'));
+    utimesSync(file, new Date(Date.now() + 5000), new Date(Date.now() + 5000));
+    expect((await s.listFactoryRepos('delta'))[0]!.baseBranch).toBe('stg');
+  });
+
+  test('YAML gates win over board.json per gate; other settings stay from board.json', async () => {
+    const yaml = 'factory:\n  id: delta\n  name: Delta\ngates: { plan: true }\n';
+    const settings = { factories: { delta: { factory: { ...DEFAULT_SETTINGS, gates: { spec: false, plan: false, pr: true }, maxParallel: 4 }, repos: {} } } };
+    const { board, opts } = rootWith({ 'delta/factory.yaml': yaml, 'echo/factory.yaml': yaml.replace(/delta/g, 'echo').replace('true', 'false') }, { settings });
+    const s = new FileStore(board, opts);
+    const got = await s.getSettings();
+    expect(got.factories.delta!.factory).toMatchObject({ gates: { spec: false, plan: true, pr: true }, maxParallel: 4 });
+    expect(got.factories.echo!.factory).toEqual({ ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, plan: false } });
+    // A save based on what getSettings returned is not a conflict.
+    await s.updateSettingsScope('delta', got.factories.delta!.factory, { ...got.factories.delta!.factory, maxParallel: 5 });
+    expect((await s.getSettings()).factories.delta!.factory).toMatchObject({ gates: { plan: true }, maxParallel: 5 });
+  });
+
+  test('persisting a task write drops board.json copies of YAML-backed definitions', async () => {
+    const storedRepo = { factoryId: 'delta', repoId: 'old', remote: 'git@github.com:o/old.git', baseBranch: 'dev', checks: {}, version: 1 };
+    const { board, opts } = rootWith({ 'delta/factory.yaml': 'factoryId: delta\nname: Delta\n', 'delta/repos/api.yaml': repoText() },
+      { defs: [storedDef('delta', 'Old'), storedDef('blocks', 'Blocks')], repos: [storedRepo] });
+    const s = new FileStore(board, opts);
+    await s.createTask({ factoryId: 'delta', title: 't', description: '', repo: 'api' });
+    const raw = JSON.parse(readFileSync(board, 'utf8')) as { factoryDefs: { factoryId: string }[]; factoryRepos: unknown[]; tasks: unknown[] };
+    expect(raw.factoryDefs.map((d) => d.factoryId)).toEqual(['blocks']);
+    expect(raw.factoryRepos).toEqual([]);
+    expect(raw.tasks).toHaveLength(1);
   });
 
   test('an invalid definition is skipped with a logged reason; the valid one loads', async () => {
@@ -150,7 +206,7 @@ describe('FileStore factories', () => {
     expect(lines[0]).toContain('broken');
   });
 
-  test('the github block comes from factory.yaml on every load, also after the definitions were seeded', async () => {
+  test('the github block comes from factory.yaml on every load; a board.json-only def loses a hand-edited one', async () => {
     const root = dir();
     mkdirSync(join(root, 'factories', 'delta'), { recursive: true });
     const yaml = join(root, 'factories', 'delta', 'factory.yaml');
@@ -161,44 +217,20 @@ describe('FileStore factories', () => {
     writeFileSync(yaml, plain);
     const board = join(root, 'board.json');
     const opts = { factoriesDir: join(root, 'factories') };
-    const s = new FileStore(board, opts);
-    const [def] = await s.listFactoryDefs();
-    await s.saveFactoryDef(def!, { ...def!, name: 'Delta 2' });
+    expect((await new FileStore(board, opts).listFactoryDefs())[0]).not.toHaveProperty('github');
 
     writeFileSync(yaml, plain + github);
-    const [withGh] = await new FileStore(board, opts).listFactoryDefs();
-    expect(withGh).toMatchObject({ name: 'Delta 2', github: { mode: 'github-only', project: { owner: 'kazi-lakit', number: 3 }, label: 'factory' } });
+    const [withHub] = await new FileStore(board, opts).listFactoryDefs();
+    expect(withHub).toMatchObject({ github: { mode: 'github-only', project: { owner: 'kazi-lakit', number: 3 }, label: 'factory' } });
 
     writeFileSync(yaml, plain);
     expect((await new FileStore(board, opts).listFactoryDefs())[0]).not.toHaveProperty('github');
 
-    // A github hand-edited into board.json without YAML support is dropped.
-    const raw = JSON.parse(readFileSync(board, 'utf8')) as { factoryDefs: Record<string, unknown>[] };
-    raw.factoryDefs[0]!.github = withGh!.github;
-    writeFileSync(board, JSON.stringify(raw));
-    expect((await new FileStore(board, opts).listFactoryDefs())[0]).not.toHaveProperty('github');
-  });
-
-  test('a factory.yaml that fails validation is skipped and leaves the stored def without github', async () => {
-    const root = dir();
-    mkdirSync(join(root, 'factories', 'delta'), { recursive: true });
-    const yaml = join(root, 'factories', 'delta', 'factory.yaml');
-    writeFileSync(yaml, 'factoryId: delta\nname: Delta\n');
-    const board = join(root, 'board.json');
-    const opts = { factoriesDir: join(root, 'factories') };
-    const [def] = await new FileStore(board, opts).listFactoryDefs();
-    await new FileStore(board, opts).saveFactoryDef(def!, { ...def!, name: 'Delta 2' });
-    const raw = JSON.parse(readFileSync(board, 'utf8')) as { factoryDefs: Record<string, unknown>[] };
-    raw.factoryDefs[0]!.github = { mode: 'github-only' };
-    writeFileSync(board, JSON.stringify(raw));
-    writeFileSync(yaml, 'factoryId: delta\nname: Delta\ngithub:\n  mode: mirror\n');
-    const lines: string[] = [];
-    const defs = await new FileStore(board, { ...opts, log: (l) => lines.push(l) }).listFactoryDefs();
-    expect(defs).toHaveLength(1);
-    expect(defs[0]).toMatchObject({ name: 'Delta 2' });
-    expect(defs[0]).not.toHaveProperty('github');
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain('github.mode must be github-only or connected');
+    // A github hand-edited into a board.json definition that has no YAML is dropped.
+    writeFileSync(board, JSON.stringify({ factoryDefs: [{ ...storedDef('legacy', 'Legacy'), github: withHub!.github }] }));
+    const legacy = (await new FileStore(board, opts).listFactoryDefs()).find((d) => d.factoryId === 'legacy');
+    expect(legacy).toBeDefined();
+    expect(legacy).not.toHaveProperty('github');
   });
 
   test('without factoriesDir nothing is seeded', async () => {

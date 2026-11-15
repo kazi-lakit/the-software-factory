@@ -1,10 +1,11 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, test } from 'vitest';
 import { isProtected } from '../src/branches.js';
 import { AGENT_MODELS, AGENT_STEPS, DEFAULT_GH_USER, FactoryConfig, ensureMain, protectedFor, validateFactoryDef, validateFactoryRepo, type FactoryDef, type FactoryRepo } from '../src/factories.js';
-import { loadFactoriesFromDir } from '../src/factoriesFs.js';
+import { loadFactoriesFromDir, yamlVersion } from '../src/factoriesFs.js';
 
 const checks = {
   server: { cwd: 'server', build: 'b', test: 't' },
@@ -230,6 +231,71 @@ describe('loadFactoriesFromDir', () => {
     expect(cfg.factories().map((f) => f.factoryId)).toEqual(['f']);
   });
   test('a missing directory is empty', () => {
-    expect(loadFactoriesFromDir(join(tmpdir(), 'no-such-factories-dir'))).toEqual({ defs: [], repos: [] });
+    expect(loadFactoriesFromDir(join(tmpdir(), 'no-such-factories-dir'))).toEqual({ defs: [], repos: [], gates: {}, owned: [], problems: [] });
+  });
+  const objChecks = 'checks:\n  server: { cwd: s, build: b, test: t }\n  client: { cwd: c, install: i, typecheck: tc, lint: l, test: t }\n  e2e: "off"\n';
+  const newShape = (id: string) => `factory:\n  id: ${id}\n  name: N\naccounts:\n  github: me\ngates: { plan: true }\nrepos:\n  list:\n`
+    + `    - id: api\n      remote: git@github.com:o/api.git\n      checks:\n        server: { cwd: s, build: b, test: t }\n`
+    + `        client: { cwd: c, install: i, typecheck: tc, lint: l, test: t }\n        e2e: "off"\n`;
+  test('a new-shape factory.yaml with repos.list loads, and old repos/*.yaml join it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'factories-'));
+    mkdirSync(join(dir, 'delta', 'repos'), { recursive: true });
+    writeFileSync(join(dir, 'delta', 'factory.yaml'), newShape('delta'));
+    writeFileSync(join(dir, 'delta', 'repos', 'web.yaml'), `repoId: web\nremote: git@github.com:o/web.git\n${objChecks}`);
+    const got = loadFactoriesFromDir(dir);
+    expect(got.problems).toEqual([]);
+    expect(got.defs.map((d) => d.factoryId)).toEqual(['delta']);
+    expect(got.repos.map((r) => r.repoId)).toEqual(['api', 'web']);
+    expect(got.gates).toEqual({ delta: { plan: true } });
+    expect(got.owned).toEqual(['delta']);
+  });
+  test('a repo in repos.list and repos/<id>.yaml is a problem; the list entry stays', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'factories-'));
+    mkdirSync(join(dir, 'delta', 'repos'), { recursive: true });
+    writeFileSync(join(dir, 'delta', 'factory.yaml'), newShape('delta'));
+    writeFileSync(join(dir, 'delta', 'repos', 'api.yaml'), `repoId: api\nremote: git@github.com:o/other.git\n${objChecks}`);
+    const skipped: string[] = [];
+    const got = loadFactoriesFromDir(dir, (f, r) => skipped.push(`${f}: ${r}`));
+    expect(got.repos.map((r) => r.remote)).toEqual(['git@github.com:o/api.git']);
+    expect(got.problems).toEqual([{ factoryId: 'delta', file: join(dir, 'delta', 'repos', 'api.yaml'), reason: 'repo id api is in repos.list and repos/api.yaml' }]);
+    expect(skipped).toHaveLength(1);
+  });
+  test('versions are content hashes and change when the file changes', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'factories-'));
+    mkdirSync(join(dir, 'delta', 'repos'), { recursive: true });
+    const text = newShape('delta');
+    const repoText = `repoId: web\nremote: git@github.com:o/web.git\n${objChecks}`;
+    writeFileSync(join(dir, 'delta', 'factory.yaml'), text);
+    writeFileSync(join(dir, 'delta', 'repos', 'web.yaml'), repoText);
+    const a = loadFactoriesFromDir(dir);
+    expect(yamlVersion(text)).toBe(Number.parseInt(createHash('sha256').update(text).digest('hex').slice(0, 12), 16));
+    expect(a.defs[0]!.version).toBe(yamlVersion(text));
+    expect(a.repos.find((r) => r.repoId === 'api')!.version).toBe(yamlVersion(text));
+    expect(a.repos.find((r) => r.repoId === 'web')!.version).toBe(yamlVersion(repoText));
+    writeFileSync(join(dir, 'delta', 'factory.yaml'), text.replace('name: N', 'name: M'));
+    const b = loadFactoriesFromDir(dir);
+    expect(b.defs[0]!.version).not.toBe(a.defs[0]!.version);
+    expect(b.repos.find((r) => r.repoId === 'web')!.version).toBe(yamlVersion(repoText));
+  });
+  test('a factory-app factory.yaml is skipped with a note and is not owned', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'factories-'));
+    mkdirSync(join(dir, 'app'), { recursive: true });
+    writeFileSync(join(dir, 'app', 'factory.yaml'), 'factory:\n  id: app\n  name: App\n  source: factory-app\nboard:\n  source: factory-app\n');
+    const skipped: [string, string][] = [];
+    const got = loadFactoriesFromDir(dir, (f, r) => skipped.push([f, r]));
+    expect(got).toEqual({ defs: [], repos: [], gates: {}, owned: [], problems: [] });
+    expect(skipped).toEqual([[join(dir, 'app', 'factory.yaml'), 'factory.source factory-app: the YAML is a template for the Board; skipped']]);
+    // Without onSkip the note does not throw.
+    expect(loadFactoriesFromDir(dir).defs).toEqual([]);
+  });
+  test('an invalid factory.yaml is owned and reported with the field path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'factories-'));
+    mkdirSync(join(dir, 'delta'), { recursive: true });
+    writeFileSync(join(dir, 'delta', 'factory.yaml'), 'factory:\n  id: delta\n  agents:\n    build: gpt\n');
+    const got = loadFactoriesFromDir(dir, () => {});
+    expect(got.defs).toEqual([]);
+    expect(got.owned).toEqual(['delta']);
+    expect(got.problems).toEqual([{ factoryId: 'delta', file: join(dir, 'delta', 'factory.yaml'), reason: expect.stringContaining('factory.agents.build:') }]);
+    expect(() => loadFactoriesFromDir(dir)).toThrow(/factory\.agents\.build:/);
   });
 });
