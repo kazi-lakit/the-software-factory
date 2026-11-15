@@ -34,6 +34,16 @@ describe('applyPull', () => {
     expect((await store.listEvents('T-2'))[0]).toMatchObject({ actor: 'github', action: 'create', to: 'ready' });
   });
 
+  it('a refused create is not applied, not an error', async () => {
+    const { store } = await setup();
+    const r = await applyPull(store, now, plan([{
+      kind: 'create', issue: { repo: 'o/app', number: 9 }, nodeId: 'I', itemId: 'P', option: null, labelled: true, repoId: 'nope', baseBranch: 'dev', title: 'New', description: 'd', status: 'inbox',
+    }]));
+    expect(r.errors).toEqual([]);
+    expect(r.created).toEqual([]);
+    expect(r.notApplied).toMatchObject([{ taskId: null, issue: 'o/app#9', change: 'create' }]);
+  });
+
   it('ready, edit, cancel apply with actor github', async () => {
     const { store, task } = await setup();
     const r = await applyPull(store, now, plan([
@@ -108,7 +118,7 @@ describe('applyPull', () => {
     const r = await applyPull(store, now, plan([{ kind: 'answer', taskId: 'T-1', version: v, issue, text: 'because', by: 'kazi-lakit', unblock: false, commentId: 3 }]));
     expect(r.applied[0]!.change).toBe('answered by kazi-lakit');
     expect((await store.getTask('T-1')).answer).toBe('because');
-    expect(task.taskId).toBe('T-1');
+    expect(await events(store)).toContainEqual(expect.objectContaining({ actor: 'github · kazi-lakit', field: 'answer' }));
     const s2 = await setup({ status: 'blocked', stage: 'build' });
     const v2 = (await s2.store.getTask('T-1')).version;
     const r2 = await applyPull(s2.store, now, plan([{ kind: 'answer', taskId: 'T-1', version: v2, issue, text: 'unblocked by kazi-lakit', by: 'kazi-lakit', unblock: true, commentId: 4 }]));

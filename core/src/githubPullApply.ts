@@ -19,7 +19,9 @@ export interface ApplyResult { created: PullCreated[]; applied: PullApplied[]; n
 type Linked = Exclude<PullAction, { kind: 'create' }>;
 type Done = { task: Task; change: string };
 
-const firstLine = (e: unknown): string => (e instanceof Error ? e.message : String(e)).split('\n')[0]!;
+// doctor.ts's redactSecrets needs Node (secrets.ts), so this pure module keeps its own copy of the token rule.
+const TOKEN = /\b(?:gh[opsur]_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+)\b/g;
+const firstLine = (e: unknown): string => (e instanceof Error ? e.message : String(e)).split('\n')[0]!.replace(TOKEN, '[redacted]');
 const refused = (e: unknown): boolean =>
   e instanceof VersionConflictError || e instanceof StaleDocError || e instanceof OwnerActionError || e instanceof IllegalMoveError || e instanceof IllegalInputError;
 const GITHUB: OwnerBy = { actor: 'github' };
@@ -73,7 +75,8 @@ export async function applyPull(store: BoardStore, now: () => Date, plan: PullPl
         );
         out.created.push({ taskId: t.taskId, issue, status: a.status, action: a });
       } catch (e) {
-        out.errors.push({ taskId: null, issue, message: firstLine(e) });
+        if (refused(e)) out.notApplied.push({ taskId: null, issue, change: 'create', reason: firstLine(e) });
+        else out.errors.push({ taskId: null, issue, message: firstLine(e) });
       }
       continue;
     }
