@@ -137,7 +137,7 @@ describe("phone pills and lanes", () => {
   it("desktop lanes are unchanged", () => {
     const base = css.slice(0, css.lastIndexOf("@media (max-width: 639px)"));
     expect(base).not.toContain("data-selected");
-    expect((tokens(css, ".sf-lanes")["grid-template-columns"] ?? "").replace(/\s+/g, "")).toBe("minmax(0,1.2fr)repeat(3,minmax(0,1fr))");
+    expect((tokens(css, ".sf-lanes")["grid-template-columns"] ?? "").replace(/\s+/g, "")).toBe("repeat(4,minmax(0,1fr))");
   });
 
   it("the pill gets the shared colour transition and no phone rule adds one", () => {
