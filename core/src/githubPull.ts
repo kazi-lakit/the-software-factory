@@ -11,6 +11,16 @@ import type { Approval, Gate, Task } from './types.js';
 export interface IssueRef { repo: string; number: number }
 export const issueName = (r: IssueRef): string => `${r.repo}#${r.number}`;
 
+const FROM_ISSUE = /^created from GitHub issue ([^\s#]+\/[^\s#]+)#(\d+)$/;
+/** The issue a task was created from: its `create` event by `github` (written by `createTaskFromGitHub`); null for any other task. */
+export function createdFromIssue(events: { actor: string; action: string; reason: string }[]): IssueRef | null {
+  for (const e of events) {
+    const m = e.action === 'create' && e.actor === 'github' ? FROM_ISSUE.exec(e.reason) : null;
+    if (m) return { repo: m[1]!, number: Number(m[2]) };
+  }
+  return null;
+}
+
 export type PullCommand = { cmd: 'approve' | 'changes' | 'answer' | 'unblock'; text: string };
 
 const COMMAND_RE = /^\/(approve|changes|answer|unblock)(?=\s|$)/i;
@@ -43,6 +53,8 @@ export interface PullInput {
   tasks: PullTaskView[];
   /** Ids of this factory's tasks without a link. */
   unlinked: string[];
+  /** Issue names (`o/r#n`) of tasks created from GitHub that the pusher has not adopted yet; never planned as new. */
+  pendingIssues?: string[];
 }
 
 export type PullAction =
@@ -104,6 +116,7 @@ type Out = { actions: PullAction[]; notApplied: NotApplied[] };
 
 function planUnlinked(i: PullInput, it: ProjectItem, out: Out): void {
   const slug = slugOf(it);
+  if (i.pendingIssues?.some((p) => lower(p) === lower(issueName(refOf(it))))) return;
   if (it.issue.state === 'closed' || i.otherRepos.some((r) => lower(r) === lower(slug))) return;
   const marker = markerIn(it.issue.body);
   if (marker && marker.factoryId !== i.factoryId) return;

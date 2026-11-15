@@ -400,4 +400,16 @@ describe('GitHubPuller link writes', () => {
       expect(comments[1]!.body).toContain('/unblock');
     });
   });
+
+  test('planFactory returns the plan without applying it', async () => {
+    const s = setup();
+    const made = await s.board.createIssue(REPO, { title: 'From GitHub', body: 'please', labels: ['factory'] });
+    const item = await s.board.addToProject(await project(s), made.nodeId);
+    await s.board.setStatus(await project(s), item, 'Todo');
+    const def = (await s.store.listFactoryDefs())[0]!;
+    const r = await s.puller.planFactory(def, await s.store.listFactoryDefs(), await s.store.listFactoryRepos(), 'file');
+    expect(r.errors).toEqual([]);
+    expect(r.plan!.actions[0]!.kind).toBe('create');
+    expect(await s.store.listTasks()).toEqual([]);
+  });
 });

@@ -5,8 +5,8 @@ import type { GitHubFor } from './github.js';
 import type { GitHubBoard, GitHubBoardFor, IssueComment, ProjectItem, RepoRef } from './githubBoard.js';
 import { githubConfigProblems } from './githubConfig.js';
 import { emptyPushed, type GitHubLink, type PushedState } from './githubLink.js';
-import { issueName, planPull, pullNeeds, type PullInput, type PullPlan, type PullTaskView } from './githubPull.js';
-import { applyPull, type ApplyResult, type PullCreated } from './githubPullApply.js';
+import { issueName, planPull, pullNeeds, type NotApplied, type PullInput, type PullPlan, type PullTaskView } from './githubPull.js';
+import { applyPull, type ApplyResult, type PullCreated, type PullError } from './githubPullApply.js';
 import { bodyHash, markerIn, projectKey, stripMarker } from './githubPush.js';
 import { parseRemote } from './remote.js';
 import type { DocKind, Status, Task } from './types.js';
@@ -181,38 +181,59 @@ export class GitHubPuller {
     return redactSecrets((e instanceof Error ? e.message : String(e)).split('\n')[0]!);
   }
 
-  private async pullFactory(def: FactoryDef, defs: FactoryDef[], allRepos: FactoryRepo[], lock: PullRelease): Promise<PullResult> {
+  /** Reads the Project and builds the plan for one factory. plan null when the Project could not be read (errors say why). */
+  async planFactory(
+    def: FactoryDef, defs: FactoryDef[], repos: FactoryRepo[], storeKind: 'file' | 'blocks', extra: { pendingIssues?: string[] } = {},
+  ): Promise<{ plan: PullPlan | null; errors: PullError[] }> {
     const { store } = this.d;
     const settings = def.github!;
-    const result = empty(def.factoryId);
-    const fail: Fail = (taskId, issue, e, prefix = '') => { result.errors.push({ taskId, issue, message: prefix + this.firstLine(e) }); };
-    const problem = githubConfigProblems(defs, allRepos, 'file').find((p) => p.factoryId === def.factoryId);
-    if (problem) { fail(null, null, problem.message); return result; }
+    const errors: PullError[] = [];
+    const fail: Fail = (taskId, issue, e, prefix = '') => { errors.push({ taskId, issue, message: prefix + this.firstLine(e) }); };
+    const problem = githubConfigProblems(defs, repos, storeKind).find((p) => p.factoryId === def.factoryId);
+    if (problem) { fail(null, null, problem.message); return { plan: null, errors }; }
 
     const board = this.d.boardFor(def.ghUser);
     let items: ProjectItem[];
     try {
       const project = await board.project(settings.project);
-      if (!project) { fail(null, null, `Project ${projectKey(settings.project)} not found`); return result; }
+      if (!project) { fail(null, null, `Project ${projectKey(settings.project)} not found`); return { plan: null, errors }; }
       items = await board.listItems(project);
-    } catch (e) { fail(null, null, e); return result; }
+    } catch (e) { fail(null, null, e); return { plan: null, errors }; }
 
-    const mine = allRepos.filter((r) => r.factoryId === def.factoryId);
+    const mine = repos.filter((r) => r.factoryId === def.factoryId);
     const links = new Map((await store.listGitHubLinks(def.factoryId)).map((l) => [l.taskId, l]));
     const tasks = (await store.listTasks()).filter((t) => t.factoryId === def.factoryId);
     const linked = tasks.filter((t) => links.get(t.taskId)?.issueNumber != null);
     const input: PullInput = {
       factoryId: def.factoryId, settings,
       repos: mine.map((r) => ({ repoId: r.repoId, slug: slugOf(r), baseBranch: r.baseBranch })),
-      otherRepos: allRepos.filter((r) => r.factoryId !== def.factoryId).map(slugOf),
+      otherRepos: repos.filter((r) => r.factoryId !== def.factoryId).map(slugOf),
       items, tasks: await Promise.all(linked.map((t) => this.view(t, links.get(t.taskId)!))),
       unlinked: tasks.filter((t) => links.get(t.taskId)?.issueNumber == null).map((t) => t.taskId),
+      ...(extra.pendingIssues ? { pendingIssues: extra.pendingIssues } : {}),
     };
-
     await this.fetchNeeds(input, def, board, fail);
+    return { plan: planPull(input), errors };
+  }
+
+  /** Saves NotApplied link patches (option, report) only; used by the watcher. */
+  async saveNotAppliedLinks(def: FactoryDef, notApplied: NotApplied[]): Promise<PullError[]> {
+    void def;
+    const errors: PullError[] = [];
+    await this.saveLinks({ created: [], applied: [], notApplied, errors: [] }, (taskId, issue, e, prefix = '') => { errors.push({ taskId, issue, message: prefix + this.firstLine(e) }); });
+    return errors;
+  }
+
+  private async pullFactory(def: FactoryDef, defs: FactoryDef[], allRepos: FactoryRepo[], lock: PullRelease): Promise<PullResult> {
+    const { store } = this.d;
+    const result = empty(def.factoryId);
+    const fail: Fail = (taskId, issue, e, prefix = '') => { result.errors.push({ taskId, issue, message: prefix + this.firstLine(e) }); };
+    const { plan, errors } = await this.planFactory(def, defs, allRepos, 'file');
+    result.errors.push(...errors);
+    if (!plan) return result;
+    const board = this.d.boardFor(def.ghUser);
     // The GitHub reads can be slow: refresh the lock so it is not taken over as stale, and stop if it already was.
     if (lock.touch && !lock.touch()) { fail(null, null, 'pull lock taken over by another pull; nothing applied'); return result; }
-    const plan: PullPlan = planPull(input);
     // Each new task's link is saved right after its create, so a pusher never sees the task without its issue.
     const applied = await applyPull(store, this.d.now, plan, { onCreated: (c) => this.save(c.taskId, (cur) => this.createdLink(def, c, cur)) });
     result.created = applied.created;

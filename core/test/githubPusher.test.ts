@@ -5,6 +5,7 @@ import { GitHubPusher, LEASE_MS, backoffMs } from '../src/githubPusher.js';
 import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { VersionConflictError } from '../src/boardStore.js';
 import { issueBody, issueText, bodyHash, MAX_BODY } from '../src/githubPush.js';
+import { createTask, createTaskFromGitHub } from '../src/owner.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
 
 const map = { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress',
@@ -37,6 +38,8 @@ const throwing = (board: FakeGitHubBoard, method: keyof GitHubBoard, times: numb
     return (...a: unknown[]) => { if (n-- > 0) throw typeof err === 'string' ? new Error(err) : err; return v.apply(t, a); };
   } });
 };
+/** How many issues the fake repo holds (probed by number). */
+const issueCount = (b: FakeGitHubBoard): number => { let n = 0; for (;; n++) { try { b.issue(REPO, n + 1); } catch { return n; } } };
 const items = async (s: ReturnType<typeof setup>) => s.board.listItems((await s.board.project({ owner: 'o', number: 3 }))!);
 
 describe('GitHubPusher', () => {
@@ -421,5 +424,71 @@ describe('GitHubPusher while a pull runs', () => {
     const t = await add(s);
     const pusher = new GitHubPusher({ store: s.store, boardFor: () => s.board, now: () => NOW, claimant: 'x', pullBusy: () => true });
     expect(await pusher.pushTask(t.taskId)).toMatchObject({ skipped: 'not-github' });
+  });
+
+  describe('connected factories', () => {
+    const mk = (kind: 'file' | 'blocks', github: ReturnType<typeof hub> | null = hub('connected')) => {
+      const s = setup(github);
+      return { ...s, kinded: new GitHubPusher({ store: s.store, boardFor: () => s.board, now: () => NOW, claimant: 'x', storeKind: kind }) };
+    };
+    const own = (s: ReturnType<typeof setup>) => createTask(s.store, () => NOW, { factoryId: 'f', title: 'Do it', description: 'desc', repo: 'app' });
+
+    test('a connected task on the blocks kind gets an issue; on the file kind it is not-github', async () => {
+      const a = mk('blocks');
+      const t = await own(a);
+      expect(await a.kinded.pushTask(t.taskId)).toMatchObject({ issue: 'o/app#1', skipped: null, error: null });
+      const b = mk('file');
+      const u = await own(b);
+      expect(await b.kinded.pushTask(u.taskId)).toMatchObject({ skipped: 'not-github' });
+      expect(issueCount(b.board)).toBe(0);
+    });
+
+    test('a github-only factory on the blocks kind is not pushed', async () => {
+      const s = mk('blocks', hub('github-only'));
+      const t = await own(s);
+      expect(await s.kinded.pushTask(t.taskId)).toMatchObject({ skipped: 'not-github' });
+      expect(await s.kinded.pushAll()).toEqual([]);
+      expect(issueCount(s.board)).toBe(0);
+    });
+
+    test('a task created from a GitHub issue adopts it, writes the marker, and creates no issue', async () => {
+      const s = mk('blocks');
+      const made = await s.board.createIssue(REPO, { title: 'From GitHub', body: 'please', labels: ['factory'] });
+      const project = (await s.board.project({ owner: 'o', number: 3 }))!;
+      await s.board.setStatus(project, await s.board.addToProject(project, made.nodeId), 'Todo');
+      const t = await createTaskFromGitHub(s.store, () => NOW, { factoryId: 'f', title: 'From GitHub', description: 'please', repo: 'app', baseBranch: 'dev', status: 'ready' }, `o/app#${made.number}`);
+      const r = await s.kinded.pushTask(t.taskId);
+      expect(r.error).toBeNull();
+      expect(r.done[0]).toBe('adopted');
+      expect(issueCount(s.board)).toBe(1);
+      const link = (await s.store.getGitHubLink(t.taskId))!;
+      expect(link).toMatchObject({ issueNumber: made.number, repo: 'o/app', lease: null, error: null });
+      expect(s.board.issue(REPO, made.number).body).toContain(`<!-- tsf:task=${t.taskId}`);
+      expect(s.board.issue(REPO, made.number).body.trimEnd().endsWith('-->')).toBe(true);
+    });
+
+    test('an issue that is not on the Project fails the push', async () => {
+      const s = mk('blocks');
+      const t = await createTaskFromGitHub(s.store, () => NOW, { factoryId: 'f', title: 'X', description: '', repo: 'app', baseBranch: 'dev', status: 'inbox' }, 'o/app#9');
+      const r = await s.kinded.pushTask(t.taskId);
+      expect(r.error).toBe('issue o/app#9 is not on the Project');
+      expect(issueCount(s.board)).toBe(0);
+    });
+
+    test('a task with no events yet waits', async () => {
+      const s = mk('blocks');
+      const t = await add(s);
+      expect(await s.kinded.pushTask(t.taskId)).toMatchObject({ skipped: 'waiting', error: null });
+      expect((await s.store.getGitHubLink(t.taskId)) ?? null).toBeNull();
+      expect(issueCount(s.board)).toBe(0);
+    });
+
+    test('a Board task with a create event by you is created as usual', async () => {
+      const s = mk('blocks');
+      const t = await own(s);
+      const r = await s.kinded.pushTask(t.taskId);
+      expect(r.done[0]).toBe('created');
+      expect(issueCount(s.board)).toBe(1);
+    });
   });
 });

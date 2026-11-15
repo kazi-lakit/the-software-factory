@@ -6,7 +6,8 @@ import { resolveGates, resolveSettings } from './gates.js';
 import type { GitHubBoard, GitHubBoardFor, ProjectInfo, ProjectItem, RepoRef } from './githubBoard.js';
 import type { GitHubSettings } from './githubConfig.js';
 import { emptyPushed, type GitHubLink } from './githubLink.js';
-import { blockedKey, bodyHash, issueText, markerIn, planPush, stripMarker, projectKey, type PushAction } from './githubPush.js';
+import { blockedKey, bodyHash, issueBody, issueText, markerIn, planPush, stripMarker, projectKey, type PushAction } from './githubPush.js';
+import { createdFromIssue, type IssueRef } from './githubPull.js';
 import { githubConfigProblems } from './githubConfig.js';
 import { parseRemote } from './remote.js';
 import type { FactoryDef, FactoryRepo } from './factories.js';
@@ -22,13 +23,17 @@ export interface PushResult {
   done: string[];
   error: string | null;
   /** `busy`: the factory's pull holds its lock, so a task it is creating may not have its link yet. */
-  skipped: 'not-github' | 'leased' | 'backoff' | 'busy' | null;
+  skipped: 'not-github' | 'waiting' | 'leased' | 'backoff' | 'busy' | null;
 }
 export interface PusherDeps {
   store: BoardStore; boardFor: GitHubBoardFor; now: () => Date; claimant: string;
   /** True while a pull of the factory runs (its lock is held). Default: never. */
   pullBusy?: (factoryId: string) => boolean;
+  /** Which store the tasks live in: `file` pushes github-only factories, `blocks` pushes connected ones. Default `file`. */
+  storeKind?: 'file' | 'blocks';
 }
+
+const modeOf = (kind: 'file' | 'blocks'): 'github-only' | 'connected' => (kind === 'file' ? 'github-only' : 'connected');
 
 export const LEASE_MS = 60_000;
 export const backoffMs = (attempts: number): number => Math.min(5_000 * 2 ** (attempts - 1), 600_000);
@@ -75,7 +80,7 @@ export class GitHubPusher {
       defs, repos: await store.listFactoryRepos(), stored: await store.getSettings(),
       links: new Map((await store.listGitHubLinks()).map((l) => [l.taskId, l])),
     };
-    const ids = new Set(defs.filter((f) => f.github?.mode === 'github-only' && (!factoryIds || factoryIds.includes(f.factoryId))).map((f) => f.factoryId));
+    const ids = new Set(defs.filter((f) => f.github?.mode === modeOf(this.d.storeKind ?? 'file') && (!factoryIds || factoryIds.includes(f.factoryId))).map((f) => f.factoryId));
     const tasks = (await this.d.store.listTasks()).filter((t) => ids.has(t.factoryId)).sort((a, b) => numericId(a.taskId) - numericId(b.taskId));
     const cache = newCache();
     const out: PushResult[] = [];
@@ -100,7 +105,7 @@ export class GitHubPusher {
     const result: PushResult = { taskId, issue: null, done: [], error: null, skipped: null };
     const def = snap.defs.find((f) => f.factoryId === task.factoryId);
     const settings = def?.github;
-    if (!def || !settings || settings.mode !== 'github-only') return { ...result, skipped: 'not-github' };
+    if (!def || !settings || settings.mode !== modeOf(this.d.storeKind ?? 'file')) return { ...result, skipped: 'not-github' };
     if (this.d.pullBusy?.(task.factoryId)) return { ...result, skipped: 'busy' }; // the next push, after the pull, does it
     const link = snap.links.get(taskId);
     if (link) result.issue = this.issueName(link);
@@ -108,12 +113,20 @@ export class GitHubPusher {
     if (link?.pushed.closed || (!link && isTerminal(task))) return result;
     if (link?.error && !opts.ignoreBackoff && Date.parse(link.error.nextAttemptAt) > now.getTime()) return { ...result, skipped: 'backoff' };
 
+    // A connected task without an issue: wait for its create event, or adopt the issue it was created from.
+    let from: IssueRef | null = null;
+    if (settings.mode === 'connected' && link?.issueNumber == null) {
+      const events = await store.listEvents(taskId);
+      if (events.length === 0) return { ...result, skipped: 'waiting' };
+      from = createdFromIssue(events);
+    }
+
     const factoryRepo = snap.repos.find((r) => r.factoryId === task.factoryId && r.repoId === task.repo);
     if (!factoryRepo) return this.fail(link, task, '', `repo ${task.repo} is not configured for factory ${task.factoryId}`, result);
     let ref: RepoRef;
     try { ref = parseRemote(factoryRepo.remote); } catch (e) { return this.fail(link, task, '', this.firstLine(e), result); }
     const repoName = `${ref.owner}/${ref.repo}`;
-    const problem = githubConfigProblems(snap.defs, snap.repos, 'file')
+    const problem = githubConfigProblems(snap.defs, snap.repos, this.d.storeKind ?? 'file')
       .find((p) => (p.factoryId === task.factoryId && (p.repoId === undefined || p.repoId === task.repo))
         || (p.clashWith?.factoryId === task.factoryId && p.clashWith.repoId === task.repo)); // the first owner is blocked too: it is a clash
     if (problem) return this.fail(link, task, repoName, problem.message, result);
@@ -122,6 +135,8 @@ export class GitHubPusher {
     const gates = resolveGates(resolveSettings(stored?.factory ?? DEFAULT_SETTINGS, stored?.repos[task.repo]), task.gateOverrides);
     const docs = { spec: await store.currentDoc(taskId, 'spec'), plan: await store.currentDoc(taskId, 'plan') };
     const actions = planPush({ task, link, settings, docs, gates });
+    // The adopted issue has no marker yet: write it in this pass, right after the adopt.
+    if (from && actions[0]?.kind === 'create') actions.splice(1, 0, { kind: 'updateIssue', title: task.title, body: issueBody(task.description, task.taskId, task.factoryId) });
     const key = blockedKey(task);
     if (actions.length === 0 && !link?.error && (link?.pushed.blocked ?? null) === key) return result;
 
@@ -139,7 +154,7 @@ export class GitHubPusher {
     }
 
     try {
-      cur = await this.run(task, def, ref, settings, actions, cur, result, cache, (l) => { cur = l; });
+      cur = await this.run(task, def, ref, settings, actions, from, cur, result, cache, (l) => { cur = l; });
       const pushed = { ...cur.pushed, blocked: key };
       try {
         cur = await store.saveGitHubLink(cur, { ...cur, pushed, error: null, lease: null });
@@ -185,7 +200,7 @@ export class GitHubPusher {
     return l.issueNumber == null ? null : `${l.repo}#${l.issueNumber}`;
   }
 
-  private async run(task: Task, def: FactoryDef, ref: RepoRef, settings: GitHubSettings, actions: PushAction[], start: GitHubLink, result: PushResult, cache: ProjectCache, track: (l: GitHubLink) => void): Promise<GitHubLink> {
+  private async run(task: Task, def: FactoryDef, ref: RepoRef, settings: GitHubSettings, actions: PushAction[], from: IssueRef | null, start: GitHubLink, result: PushResult, cache: ProjectCache, track: (l: GitHubLink) => void): Promise<GitHubLink> {
     if (actions.length === 0) return start;
     const board = this.d.boardFor(def.ghUser);
     let project: ProjectInfo | undefined;
@@ -207,6 +222,17 @@ export class GitHubPusher {
       const note = (): void => { const p = phrase(a); if (p) result.done.push(p); }; // right after the GitHub call, before its save
       switch (a.kind) {
         case 'create': {
+          if (from) {
+            const item = (await this.items(board, def.ghUser, settings, project!, cache)).find((it) =>
+              it.issue.repo.owner.toLowerCase() === from.repo.split('/')[0]!.toLowerCase() && it.issue.repo.repo.toLowerCase() === from.repo.split('/')[1]!.toLowerCase() && it.issue.number === from.number);
+            if (!item) throw new Error(`issue ${from.repo}#${from.number} is not on the Project`);
+            result.done.push('adopted');
+            await save((l) => ({
+              ...l, issueNumber: item.issue.number, issueNodeId: item.issue.nodeId, itemId: item.itemId, project: projectKey(settings.project),
+              pushed: { ...l.pushed, title: item.issue.title, bodyHash: null, label: settings.label !== '' && item.issue.labels.includes(settings.label) ? settings.label : null },
+            }));
+            break;
+          }
           const found = await this.findMarked(board, def.ghUser, settings, project!, ref, task, cache);
           if (found) {
             result.done.push('adopted');
@@ -267,14 +293,19 @@ export class GitHubPusher {
 
   /** An open or closed issue of the repo on the Project whose marker names this task and factory (listed once per pass). */
   private async findMarked(board: GitHubBoard, ghUser: string, s: GitHubSettings, project: ProjectInfo, ref: RepoRef, task: Task, cache: ProjectCache): Promise<ProjectItem | undefined> {
-    const k = `${ghUser}|${projectKey(s.project)}`;
-    if (!cache.items.has(k)) cache.items.set(k, await board.listItems(project));
     const same = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
-    return cache.items.get(k)!.find((it) => {
+    return (await this.items(board, ghUser, s, project, cache)).find((it) => {
       if (!same(it.issue.repo.owner, ref.owner) || !same(it.issue.repo.repo, ref.repo)) return false;
       const m = markerIn(it.issue.body);
       return m?.taskId === task.taskId && m.factoryId === task.factoryId;
     });
+  }
+
+  /** The items of the Project, listed once per pass. */
+  private async items(board: GitHubBoard, ghUser: string, s: GitHubSettings, project: ProjectInfo, cache: ProjectCache): Promise<ProjectItem[]> {
+    const k = `${ghUser}|${projectKey(s.project)}`;
+    if (!cache.items.has(k)) cache.items.set(k, await board.listItems(project));
+    return cache.items.get(k)!;
   }
 
   private async project(board: GitHubBoard, ghUser: string, s: GitHubSettings, cache: ProjectCache): Promise<ProjectInfo> {

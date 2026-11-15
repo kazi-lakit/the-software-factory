@@ -3,7 +3,7 @@ import type { PrReview } from '../src/github.js';
 import type { IssueComment, ProjectItem } from '../src/githubBoard.js';
 import type { GitHubSettings } from '../src/githubConfig.js';
 import { emptyPushed, type GitHubLink, type PushedState } from '../src/githubLink.js';
-import { parseCommand, planPull, pullNeeds, type PullInput, type PullTaskView } from '../src/githubPull.js';
+import { createdFromIssue, parseCommand, planPull, pullNeeds, type PullInput, type PullTaskView } from '../src/githubPull.js';
 import { blockedKey, bodyHash, issueText, markerOf } from '../src/githubPush.js';
 import type { Approval, Status, Task } from '../src/types.js';
 
@@ -320,5 +320,20 @@ describe('planPull: PR reviews', () => {
     expect(needs.reviews).toEqual([]);
     const withComments = { ...spec, comments: [comment(1, '/approve', 1)] };
     expect(planPull(input({ settings: s, tasks: [withComments], items: [item({ status: 'In progress' })] })).actions).toEqual([]);
+  });
+});
+
+describe('connected mode helpers', () => {
+  const ev = (actor: string, reason: string) => ({ taskId: 'T-1', factoryId: 'f', actor, action: 'create' as const, field: null, from: null, to: 'inbox', reason, at: T0 });
+  it('createdFromIssue reads the github create event; a Board create gives null', () => {
+    expect(createdFromIssue([ev('github', 'created from GitHub issue o/app#4')])).toEqual({ repo: 'o/app', number: 4 });
+    expect(createdFromIssue([ev('owner', 'created')])).toBeNull();
+    expect(createdFromIssue([ev('owner', 'created from GitHub issue o/app#4')])).toBeNull();
+    expect(createdFromIssue([])).toBeNull();
+  });
+  it('pending issues are not planned again', () => {
+    const items = [newIssue({ status: 'Todo' })];
+    expect(planPull(input({ items, pendingIssues: ['O/App#4'] })).actions).toEqual([]);
+    expect(planPull(input({ items, pendingIssues: ['o/app#5'] })).actions).toHaveLength(1);
   });
 });
