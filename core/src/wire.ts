@@ -138,6 +138,9 @@ class LazyGitHubBoard implements GitHubBoard {
   async closeIssue(r: RepoRef, number: number, reason: 'completed' | 'not_planned') {
     return (await this.b).closeIssue(r, number, reason);
   }
+  async addLabels(r: RepoRef, number: number, labels: string[]) {
+    return (await this.b).addLabels(r, number, labels);
+  }
   async addToProject(p: ProjectInfo, issueNodeId: string) {
     return (await this.b).addToProject(p, issueNodeId);
   }

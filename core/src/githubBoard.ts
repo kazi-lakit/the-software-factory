@@ -33,6 +33,8 @@ export interface GitHubBoard {
   createIssue(r: RepoRef, i: { title: string; body: string; labels: string[] }): Promise<{ number: number; nodeId: string }>;
   updateIssue(r: RepoRef, number: number, patch: { title?: string; body?: string; labels?: string[] }): Promise<void>;
   closeIssue(r: RepoRef, number: number, reason: 'completed' | 'not_planned'): Promise<void>;
+  /** Adds the labels and keeps the issue's other labels. */
+  addLabels(r: RepoRef, number: number, labels: string[]): Promise<void>;
   /** Returns the item id; adding an issue already on the Project returns its existing item. */
   addToProject(p: ProjectInfo, issueNodeId: string): Promise<string>;
   /** Sets the Status option with this exact name; UnknownStatusOptionError when there is none. */
@@ -97,7 +99,7 @@ interface IssueNode {
   updatedAt: string; labels: { nodes: { name: string }[] }; repository: { owner: { login: string }; name: string };
 }
 interface ItemsPage {
-  nodes: { id: string; fieldValueByName: { name?: string } | null; content: IssueNode | { __typename: string } | null }[];
+  nodes: ({ id: string; fieldValueByName: { name?: string } | null; content: IssueNode | { __typename: string } | null } | null)[];
   pageInfo: { hasNextPage: boolean; endCursor: string | null };
 }
 
@@ -142,7 +144,7 @@ export class OctokitGitHubBoard implements GitHubBoard {
       const res: { node: { items: ItemsPage } } = await this.octokit.graphql(ITEMS_QUERY, { id: p.projectId, after });
       const page = res.node.items;
       for (const n of page.nodes) {
-        if (n.content?.__typename !== 'Issue') continue;
+        if (n?.content?.__typename !== 'Issue') continue;
         const c = n.content as IssueNode;
         out.push({
           itemId: n.id,
@@ -173,6 +175,10 @@ export class OctokitGitHubBoard implements GitHubBoard {
     await this.octokit.rest.issues.update({ owner: r.owner, repo: r.repo, issue_number: number, state: 'closed', state_reason: reason });
   }
 
+  async addLabels(r: RepoRef, number: number, labels: string[]): Promise<void> {
+    await this.octokit.rest.issues.addLabels({ owner: r.owner, repo: r.repo, issue_number: number, labels });
+  }
+
   async addToProject(p: ProjectInfo, issueNodeId: string): Promise<string> {
     const res: { addProjectV2ItemById: { item: { id: string } } } = await this.octokit.graphql(ADD_ITEM, { project: p.projectId, content: issueNodeId });
     return res.addProjectV2ItemById.item.id;
@@ -188,7 +194,7 @@ export class OctokitGitHubBoard implements GitHubBoard {
       owner: r.owner, repo: r.repo, issue_number: number, per_page: 100, ...(since ? { since } : {}),
     });
     // The API's `since` filters on the update time; keep only comments created after it.
-    return data.map(toComment).filter((c) => !since || c.createdAt > since);
+    return data.map(toComment).filter((c) => !since || Date.parse(c.createdAt) > Date.parse(since));
   }
 
   async addComment(r: RepoRef, number: number, body: string): Promise<IssueComment> {
@@ -298,6 +304,12 @@ export class FakeGitHubBoard implements GitHubBoard {
     i.updatedAt = this.now();
   }
 
+  async addLabels(r: RepoRef, number: number, labels: string[]): Promise<void> {
+    const i = this.issue(r, number);
+    for (const l of labels) if (!i.labels.includes(l)) i.labels.push(l);
+    i.updatedAt = this.now();
+  }
+
   async addToProject(p: ProjectInfo, issueNodeId: string): Promise<string> {
     const items = this.projectItems(p);
     const issue = [...this.issues.values()].find((i) => i.nodeId === issueNodeId);
@@ -323,7 +335,7 @@ export class FakeGitHubBoard implements GitHubBoard {
   }
 
   async listComments(r: RepoRef, number: number, since?: string): Promise<IssueComment[]> {
-    return this.issue(r, number).comments.filter((c) => !since || c.createdAt > since).map((c) => ({ ...c }));
+    return this.issue(r, number).comments.filter((c) => !since || Date.parse(c.createdAt) > Date.parse(since)).map((c) => ({ ...c }));
   }
 
   async addComment(r: RepoRef, number: number, body: string, author = 'kazi-lakit'): Promise<IssueComment> {

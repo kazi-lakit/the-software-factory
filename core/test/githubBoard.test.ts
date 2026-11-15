@@ -108,6 +108,32 @@ describe('OctokitGitHubBoard', () => {
     expect(variables).toMatchObject({ project: 'P1', item: 'IT1', field: 'F1', singleSelectOptionId: 'o1' });
   });
 
+  test('Octokit addLabels posts to the labels endpoint', async () => {
+    const fetchStub = vi.fn(async (_u: Request | string | URL, _i?: RequestInit) => json([{ name: 'factory' }]));
+    await board(fetchStub).addLabels({ owner: 'o', repo: 'r' }, 7, ['factory']);
+    const [url, init] = fetchStub.mock.calls[0] as Call;
+    expect(urlOf(url)).toMatch(/\/repos\/o\/r\/issues\/7\/labels$/);
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toEqual({ labels: ['factory'] });
+  });
+
+  test('listItems skips null nodes', async () => {
+    const page = { nodes: [null, { id: 'IT1', fieldValueByName: null, content: null }, { id: 'IT2', fieldValueByName: null, content: issueNode(2) }], pageInfo: { hasNextPage: false, endCursor: null } };
+    const fetchStub = vi.fn(async () => json({ data: { node: { items: page } } }));
+    const items = await board(fetchStub).listItems(info);
+    expect(items.map((i) => i.itemId)).toEqual(['IT2']);
+  });
+
+  test('listComments compares since as dates', async () => {
+    const comments = [
+      { id: 1, user: { login: 'a' }, body: 'x', created_at: '2026-11-15T10:00:00Z' },
+      { id: 2, user: { login: 'a' }, body: 'y', created_at: '2026-11-15T10:00:01.500Z' },
+    ];
+    const fetchStub = vi.fn(async () => json(comments));
+    const got = await board(fetchStub).listComments({ owner: 'o', repo: 'r' }, 1, '2026-11-15T10:00:00.000Z');
+    expect(got.map((c) => c.id)).toEqual([2]);
+  });
+
   test('closeIssue patches the issue with its state reason', async () => {
     const fetchStub = vi.fn(async (_u: Request | string | URL, _i?: RequestInit) => json({ number: 5 }));
     await board(fetchStub).closeIssue({ owner: 'o', repo: 'r' }, 5, 'not_planned');
@@ -153,6 +179,23 @@ describe('FakeGitHubBoard', () => {
     expect(a.author).toBe('kazi-lakit');
     expect(await fake.listComments(r, number)).toEqual([a, b]);
     expect(await fake.listComments(r, number, a.createdAt)).toEqual([b]);
+  });
+
+  test('addLabels keeps existing labels', async () => {
+    const fake = new FakeGitHubBoard();
+    const { number } = await fake.createIssue(r, { title: 'T', body: 'B', labels: ['bug'] });
+    await fake.addLabels(r, number, ['factory']);
+    expect(fake.issue(r, number).labels).toEqual(['bug', 'factory']);
+    await fake.addLabels(r, number, ['factory']);
+    expect(fake.issue(r, number).labels).toEqual(['bug', 'factory']);
+  });
+
+  test('listComments compares since as dates', async () => {
+    const fake = new FakeGitHubBoard();
+    const { number } = await fake.createIssue(r, { title: 'T', body: 'B', labels: [] });
+    const cs = fake.issue(r, number).comments;
+    cs.push({ id: 1, author: 'a', body: 'x', createdAt: '2026-11-15T10:00:00Z' }, { id: 2, author: 'a', body: 'y', createdAt: '2026-11-15T10:00:01.500Z' });
+    expect((await fake.listComments(r, number, '2026-11-15T10:00:00.000Z')).map((c) => c.id)).toEqual([2]);
   });
 
   test('issue throws for an unknown issue', () => {
