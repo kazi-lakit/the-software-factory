@@ -26,11 +26,11 @@ blocks iam roles create --name "Factory Owner" --slug factory-owner --descriptio
 
 ## 3. Tables, fields, indexes
 
-There are 12 tables: `FactoryTask`, `FactoryDoc`, `FactoryApproval`, `FactorySettings`, `FactoryRun`, `FactoryEvent`, `FactorySpike`, and (plan 6, multiple factories) `FactoryDef`, `FactoryRepo` and `FactoryHealth`, and (stage 4, GitHub connected mode) `FactoryGitHubLink` and `FactorySyncRequest`. Each table's fields are in `blocks/data/factory/<Table>.fields.json` and its unique index is in `blocks/data/factory/indexes.json`. The core generates these files; `cd core && npm run -s blocks:resources -- --check` confirms they are current.
+There are 12 tables: `FactoryTask`, `FactoryDoc`, `FactoryApproval`, `FactorySettings`, `FactoryRun`, `FactoryEvent`, `FactorySpike`; (plan 6, multiple factories) `FactoryDef`, `FactoryRepo` and `FactoryHealth`; and (stage 4, GitHub connected mode) `FactoryGitHubLink` and `FactorySyncRequest`. Each table's fields are in `blocks/data/factory/<Table>.fields.json` and its unique index is in `blocks/data/factory/indexes.json`. The core generates these files; `cd core && npm run -s blocks:resources -- --check` confirms they are current.
 
 **Warning:** a new table is open to any signed-in project user until step 4 deploys its rules. `FactoryRepo.checks` holds shell commands that the core runs on the owner's Mac. Run step 4 in the same sitting, straight after this step, before anything else touches the project.
 
-A project set up from scratch creates all 12 tables. For each table, create its schema, its fields and its unique index from the table below. A project set up before plan 6 only creates `FactoryDef`, `FactoryRepo` and `FactoryHealth` (its other 7 tables already exist, see "Existing tables" below).
+A project set up from scratch creates all 12 tables. For each table, create its schema, its fields and its unique index from the table below. A project set up before plan 6 creates `FactoryDef`, `FactoryRepo` and `FactoryHealth` here (its other 7 tables already exist, see "Existing tables" below) and then does step 8 for the two stage 4 tables. A project set up after plan 6 but before stage 4 does only step 8.
 
 For each new table, create the schema, then its fields:
 
