@@ -38,6 +38,24 @@ describe('doctor', () => {
     ]);
   });
 
+  test('an inactive factory is skipped with one passing line, the next is still checked', async () => {
+    const off = defFixture('a', { ghUser: 'someone', active: false });
+    for (const store of ['file', 'blocks'] as const) {
+      const out = await doctor({ defs: [off, def('b')], repos: [repoFixture('b', 'api')], store, loggedIn: LOGGED, boardFor: () => setup() });
+      expect(out).toEqual([
+        { factoryId: 'a', check: 'active', ok: true, detail: 'skipped: the factory is inactive (name it with --factory to check it)' },
+        { factoryId: 'b', check: 'gh login', ok: true, detail: 'kazi-lakit logged in' },
+      ]);
+    }
+  });
+
+  test('an inactive factory named with --factory is checked in full', async () => {
+    const off = defFixture('a', { ghUser: 'someone', active: false });
+    expect(await run(setup(), [off], undefined, { only: ['a'] })).toEqual([
+      { factoryId: 'a', check: 'gh login', ok: false, detail: 'someone is not logged in (run: gh auth login --hostname github.com)' },
+    ]);
+  });
+
   test('all good: checks in order', async () => {
     const board = setup();
     board.labels.set('org/api', new Set(['factory']));

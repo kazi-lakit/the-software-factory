@@ -45,6 +45,11 @@ export async function doctor(o: {
       try { return await fn(); } catch (e) { add(check, false, firstLine(e)); return undefined; }
     };
 
+    // An inactive factory does no work, so it is not checked unless named with --factory.
+    if (!def.active && !o.only) {
+      add('active', true, 'skipped: the factory is inactive (name it with --factory to check it)');
+      continue;
+    }
     // On the file store, a factory with no GitHub board and no repos uses no gh login: its ghUser may only be the
     // legacy default, so it is not named. The Blocks store's output stays as it was.
     const myRepoCount = o.repos.filter((r) => r.factoryId === factoryId).length;
