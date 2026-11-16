@@ -1,6 +1,6 @@
 @echo off
 rem Sets up this clone on Windows: checks the tools, installs and builds the core, writes factory.cmd,
-rem installs the Claude Code plugin (user scope) and starts "factory.cmd init". Safe to run again.
+rem installs the Claude Code plugin (user scope). Then run "factory.cmd init" yourself. Safe to run again.
 setlocal
 set "ROOT=%~dp0"
 if "%ROOT:~-1%"=="\" set "ROOT=%ROOT:~0,-1%"
@@ -48,7 +48,8 @@ if errorlevel 1 (
 call claude plugin install factory@the-software-factory || exit /b 1
 :plugin_done
 
-rem 5. The wizard.
+rem 5. Next step: the wizard is run by the user.
 echo Note: the factory steps themselves (git worktrees, the guard hook, shell checks) have not been tested on Windows yet.
-call "%ROOT%\factory.cmd" init
-exit /b %errorlevel%
+echo.
+echo Setup is done. Next, run: factory.cmd init
+exit /b 0

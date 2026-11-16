@@ -59,7 +59,7 @@ function setup(env: Record<string, string> = {}) {
 const lines = () => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n') : []);
 
 describe.skipIf(win)('setup.sh', () => {
-  test('first run: npm ci in core and plugin, build, launchers, plugin install, then init', () => {
+  test('first run: npm ci in core and plugin, build, launchers, plugin install, no init, prints the next step', () => {
     const r = setup();
     expect(r.status, r.stderr + r.stdout).toBe(0);
     expect(lines()).toEqual([
@@ -68,8 +68,8 @@ describe.skipIf(win)('setup.sh', () => {
       'claude plugin marketplace list @clone',
       `claude plugin marketplace add ${clone} @clone`,
       'claude plugin install factory@the-software-factory @clone',
-      `cli init root=${clone}`,
     ]);
+    expect(r.stdout).toContain('Setup is done. Next, run: ./factory init');
     expect(statSync(join(clone, 'factory')).mode & 0o111).not.toBe(0);
     expect(existsSync(join(clone, 'factory.cmd'))).toBe(true);
   });
@@ -80,7 +80,7 @@ describe.skipIf(win)('setup.sh', () => {
     const l = lines();
     expect(l).toContain('claude plugin list @clone');
     expect(l.some((x) => x.startsWith('claude plugin marketplace add') || x.startsWith('claude plugin install'))).toBe(false);
-    expect(l[l.length - 1]).toBe(`cli init root=${clone}`);
+    expect(l.some((x) => x.startsWith('cli '))).toBe(false);
   });
 
   test('a registered marketplace without the plugin: skips marketplace add and installs the plugin', () => {
@@ -90,7 +90,7 @@ describe.skipIf(win)('setup.sh', () => {
     expect(l).toContain('claude plugin marketplace list @clone');
     expect(l.some((x) => x.startsWith('claude plugin marketplace add'))).toBe(false);
     expect(l).toContain('claude plugin install factory@the-software-factory @clone');
-    expect(l[l.length - 1]).toBe(`cli init root=${clone}`);
+    expect(l.some((x) => x.startsWith('cli '))).toBe(false);
   });
 
   test('a missing gh stops with the install hint and exit 1', () => {

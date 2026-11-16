@@ -5,8 +5,8 @@
 You need Node 22 or newer, git, [Claude Code](https://docs.claude.com/claude-code) and the [GitHub CLI](https://cli.github.com).
 
 1. Clone this repository and go into it.
-2. Run `./setup.sh` (macOS, Linux) or `setup.cmd` (Windows, in cmd.exe). It checks the tools, installs and builds the core, writes the local `./factory` and `factory.cmd` launchers (git-ignored), installs the Claude Code plugin at user scope and starts `./factory init`. Run it again any time: every step checks first and skips what is done.
-3. Answer the questions in `./factory init`. It sets up your GitHub login, a Project board, gates, models and repos, and writes `factories/<id>/factory.yaml`. After "Add another factory" the wizard finishes; run `./factory init` again for more changes.
+2. Run `./setup.sh` (macOS, Linux) or `setup.cmd` (Windows, in cmd.exe). It checks the tools, installs and builds the core, writes the local `./factory` and `factory.cmd` launchers (git-ignored), and installs the Claude Code plugin at user scope. Run it again any time: every step checks first and skips what is done.
+3. Run `./factory init` (Windows: `factory.cmd init`) and answer its questions. It sets up your GitHub login, a Project board, gates, models and repos, and writes `factories/<id>/factory.yaml`. After "Add another factory" the wizard finishes; run `./factory init` again for more changes.
 4. To change settings later, run `./factory init` again: it shows a menu (models, gates, approvers, status map, repos, doctor). Your comments in `factory.yaml` are kept.
 5. Open Claude Code and run `/factory:run`.
 

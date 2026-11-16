@@ -1,6 +1,6 @@
 #!/bin/sh
 # Sets up this clone: checks the tools, installs and builds the core, writes the local ./factory and
-# factory.cmd launchers, installs the Claude Code plugin (user scope) and starts `./factory init`.
+# factory.cmd launchers, installs the Claude Code plugin (user scope). Then run `./factory init` yourself.
 # Running it again is safe: every step checks first. Nothing is installed globally except the plugin.
 set -e
 
@@ -52,5 +52,6 @@ else
   claude plugin install factory@the-software-factory
 fi
 
-# 5. The wizard.
-exec "$ROOT/factory" init
+# 5. Next step: the wizard is run by the user.
+echo
+echo "Setup is done. Next, run: ./factory init"
