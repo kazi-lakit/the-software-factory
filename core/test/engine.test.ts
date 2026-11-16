@@ -5,9 +5,11 @@ import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { ClaimError, Engine, StageError, UnknownFactoryError, withRetry, type EngineDeps } from '../src/engine.js';
 import type { Exec } from '../src/checks.js';
 import type { GitRepos } from '../src/git.js';
+import { emptyPushed } from '../src/githubLink.js';
 import { FakeGitHub, type GitHub } from '../src/github.js';
 import { IllegalInputError } from '../src/machine.js';
 import { FactoryConfig, type FactoryDef, type FactoryRepo } from '../src/factories.js';
+import { normaliseChecks } from '../src/checksSchema.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
 import { nextTicket } from './nextTicket.js';
 import { GhLoginMissingError, SecretMissingError } from '../src/secrets.js';
@@ -24,11 +26,16 @@ const ROOT = join(tmpdir(), 'factory-engine-test');
 const REMOTE = 'git@github.com:SELISEdigitalplatforms/blocks-data.git';
 
 const DEFS: FactoryDef[] = [defFixture('blocks')];
-const CHECKS = {
+const OLD_CHECKS = {
   server: { cwd: 'server', build: 'dotnet build', test: 'dotnet test' },
   client: { cwd: 'client', install: 'npm ci', typecheck: 'npm run tc', lint: 'npm run lint', test: 'npm test' },
   e2e: 'off',
 } as const;
+const CHECKS = (() => {
+  const r = normaliseChecks(OLD_CHECKS);
+  if (!r.ok) throw new Error(r.error);
+  return r.value;
+})();
 const REPOS: FactoryRepo[] = [
   repoFixture('blocks', 'data', { remote: REMOTE, checks: structuredClone(CHECKS) as never }),
   repoFixture('blocks', 'iam', { remote: 'git@github.com:SELISEdigitalplatforms/blocks-iam.git', checks: structuredClone(CHECKS) as never }),
@@ -38,6 +45,8 @@ class FakeGit implements GitRepos {
   readonly calls: string[] = [];
   readonly bases: string[] = [];
   readonly pushes: { path: string; branch: string }[] = [];
+  /** The protected list each push was given. */
+  readonly pushProtected: (readonly string[] | undefined)[] = [];
   async ensureClone(factoryId: string, c: FactoryRepo) {
     this.calls.push(`clone ${factoryId}/${c.repoId}`);
     return join(ROOT, '.clones', factoryId, c.repoId);
@@ -47,8 +56,9 @@ class FakeGit implements GitRepos {
     this.bases.push(c.baseBranch);
     return join(ROOT, '.clones', 'worktrees', taskId);
   }
-  async push(path: string, branch: string) {
+  async push(path: string, branch: string, protectedBranches?: readonly string[]) {
     this.pushes.push({ path, branch });
+    this.pushProtected.push(protectedBranches);
   }
   async isClean() {
     return true;
@@ -102,7 +112,7 @@ const TWO = (over: { a?: Partial<FactoryDef>; b?: Partial<FactoryDef> } = {}) =>
   defs: [defFixture('a', over.a), defFixture('b', { docsPath: '/docs/b', ...over.b })],
   repos: [
     repoFixture('a', 'api'),
-    repoFixture('b', 'api', { checks: { ...structuredClone(CHECKS), e2e: 'off', server: { cwd: 'srv', build: 'make', test: 'make test' } } as never }),
+    repoFixture('b', 'api', { checks: structuredClone(CHECKS).map((c) => (c.name.startsWith('server.') ? { ...c, cwd: 'srv', run: c.name === 'server.build' ? 'make' : 'make test' } : c)) }),
     repoFixture('b', 'web'),
   ],
 });
@@ -312,6 +322,19 @@ describe('next across factories', () => {
       expect((await engine.ship('T-2')).status).toBe('done');
       expect([...github.prs.values()][0]).toMatchObject({ base: 'dev', state: 'merged' });
     });
+
+    test('ship pushes with the repo protectedBranches override when it has one', async () => {
+      const t = TWO();
+      t.repos[0] = { ...t.repos[0]!, protectedBranches: ['release', 'main'] };
+      const { store, engine, git, github } = setup(t);
+      await store.setSettings({ factories: { a: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: false } }, repos: {} } } });
+      await putIn(store, 'a', { status: 'review', stage: 'ship', branch: 'factory/T-1-x' });
+      await nextTicket(engine, 'T-1');
+      expect((await engine.ship('T-1')).status).toBe('done');
+      expect(git.pushProtected).toEqual([['release', 'main']]);
+      // dev is not protected for this repo, so the PR into dev merges.
+      expect([...github.prs.values()][0]).toMatchObject({ base: 'dev', state: 'merged' });
+    });
   });
 
   test('a gate resolved from b/api repo settings overrides b', async () => {
@@ -332,7 +355,8 @@ describe('next across factories', () => {
     await putIn(store, 'b', { status: 'ready' }, 'api');
     const ticket = await nextTicket(engine);
     expect(ticket!.context.factory).toEqual({ factoryId: 'b', name: 'b', docsPath: '/docs/b' });
-    expect(ticket!.context.checks.server).toEqual({ cwd: 'srv', build: 'make', test: 'make test' });
+    expect(ticket!.context.checks.slice(0, 2)).toEqual([
+      { name: 'server.build', cwd: 'srv', run: 'make' }, { name: 'server.test', cwd: 'srv', run: 'make test', needs: 'server.build' }]);
     expect(git.calls[0]).toBe('clone b/api');
   });
 
@@ -926,8 +950,8 @@ describe('check', () => {
 });
 
 describe('ship', () => {
-  async function atShip(base: string, prGate: boolean) {
-    const s = setup();
+  async function atShip(base: string, prGate: boolean, log?: (m: string) => void) {
+    const s = setup(log ? { log } : {});
     await s.store.setSettings({ factories: { blocks: { factory: { ...DEFAULT_SETTINGS, gates: { ...DEFAULT_SETTINGS.gates, pr: prGate } }, repos: {} } } });
     await put(s.store, { status: 'review', stage: 'ship', branch: 'factory/T-1-add-widget' }, base);
     await s.store.addDoc('T-1', 'spec', 'S'.repeat(5000), 'a');
@@ -940,7 +964,7 @@ describe('ship', () => {
     const t = await engine.ship('T-1');
     expect(t).toMatchObject({ status: 'pr_open', stage: null, prUrl: 'https://github.com/SELISEdigitalplatforms/blocks-data/pull/1' });
     expect(git.pushes).toEqual([{ path: join(ROOT, '.clones', 'worktrees', 'T-1'), branch: 'factory/T-1-add-widget' }]);
-    expect([...github.prs.values()]).toEqual([{ base: 'dev', head: 'factory/T-1-add-widget', state: 'open' }]);
+    expect([...github.prs.values()]).toMatchObject([{ base: 'dev', head: 'factory/T-1-add-widget', state: 'open' }]);
   });
 
   test('base feature/x with the PR gate off merges and is done', async () => {
@@ -967,6 +991,38 @@ describe('ship', () => {
       title: '[T-1] Add widget',
       body: `Factory task T-1\n\n${'S'.repeat(3000)}`,
     });
+  });
+
+  const linkFor = (repo: string, issueNumber: number | null) => ({
+    taskId: 'T-1', factoryId: 'blocks', repo, issueNumber, issueNodeId: null, project: null, itemId: null,
+    pushed: emptyPushed(), error: null, lease: null, reported: [], version: 1,
+  });
+
+  test('ship adds Closes #n when the task has an issue', async () => {
+    const { engine, github, store } = await atShip('dev', true);
+    await store.saveGitHubLink(null, linkFor('selisedigitalplatforms/Blocks-Data', 12));
+    const openPr = vi.spyOn(github, 'openPr');
+    await engine.ship('T-1');
+    expect(openPr.mock.calls[0]![0].body.endsWith('\n\nCloses #12')).toBe(true);
+  });
+
+  test('a failed link read is logged and the PR still opens', async () => {
+    const logs: string[] = [];
+    const { engine, github, store } = await atShip('dev', true, (m) => logs.push(m));
+    vi.spyOn(store, 'getGitHubLink').mockRejectedValue(new Error('boom\nsecond'));
+    await engine.ship('T-1');
+    expect(logs).toContain('PR body: issue link not read (boom)');
+    expect(github.prs.size).toBe(1);
+  });
+
+  test('ship body unchanged without a link, with another repo, or without an issue number', async () => {
+    for (const link of [undefined, linkFor('other/repo', 12), linkFor('SELISEdigitalplatforms/blocks-data', null)]) {
+      const { engine, github, store } = await atShip('dev', true);
+      if (link) await store.saveGitHubLink(null, link);
+      const openPr = vi.spyOn(github, 'openPr');
+      await engine.ship('T-1');
+      expect(openPr.mock.calls[0]![0].body).toBe(`Factory task T-1\n\n${'S'.repeat(3000)}`);
+    }
   });
 
   test.each(['main', 'origin/main', 'refs/heads/main'])('base %s blocks the task before the gh login check and pushes nothing', async (base) => {
@@ -1222,6 +1278,26 @@ describe('sync', () => {
     expect(await store.getTask('T-1')).toMatchObject({ status: 'build', stage: 'build', question: null, answer: 'do x' });
     expect((await store.getTask('T-2')).status).toBe('blocked');
     expect((await store.getTask('T-3')).status).toBe('blocked');
+  });
+
+  const GH_ONLY = { mode: 'github-only' as const, project: { owner: 'o', number: 1 }, label: 'factory', approvers: ['kazi-lakit'],
+    statusMap: { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress', plan_review: 'In progress',
+      build: 'In progress', verify: 'In progress', review: 'In progress', pr_open: 'In review', done: 'Merged', blocked: 'In progress', cancelled: 'Backlog' } as never };
+
+  test('an answered stage-less blocked task restarts in a github-only factory', async () => {
+    const { store, engine } = setup({ defs: [defFixture('blocks', { github: GH_ONLY })] });
+    await put(store, { status: 'blocked', stage: null, attempt: 2, question: 'q?', blockedReason: 'rebuilt from GitHub, check status', answer: 'unblocked by x' });
+    await put(store, { status: 'blocked', stage: null, answer: '  ' });
+    await engine.sync();
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'ready', stage: null, attempt: 0, question: null, blockedReason: null, answer: null });
+    expect((await store.getTask('T-2')).status).toBe('blocked');
+  });
+
+  test('the same task stays blocked in a factory without github', async () => {
+    const { store, engine } = setup();
+    await put(store, { status: 'blocked', stage: null, question: 'q?', answer: 'unblocked by x' });
+    await engine.sync();
+    expect(await store.getTask('T-1')).toMatchObject({ status: 'blocked', answer: 'unblocked by x' });
   });
 
   test('a working task over the cost limit is blocked; waiting-without-stage and blocked tasks are left alone', async () => {

@@ -11,12 +11,15 @@ const SRC = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 /** Counted when this guard was written (T-18). A new control makes the count test fail, so it is looked at.
  *  +2 / +1 file: DependsOnPicker's checkboxes (task dependencies).
- *  +1: FactoryForm's per-stage agent model select (T-19). */
-const EXPECTED_CONTROLS = 45;
-const EXPECTED_FILES = 13;
-
-/** Spreads props into the control and no file renders it, so there is no caller that could omit the class. */
-const EXEMPT: Record<string, string> = { "shared/ui/FormField.tsx": "unused scaffold wrapper; the guard below fails once something imports it" };
+ *  +1: FactoryForm's per-stage agent model select (T-19).
+ *  -1 / -1 file: FormField deleted (T-23).
+ *  +1: the Board's Search tasks by title or id field (T-24).
+ *  -1 / +1 file: DependsOnPicker dropdown, New task page (T-26).
+ *  -2: History drops Mode, Kind, From and To and adds the search and When (T-28).
+ *  +4 / +1 file: New factory page's text field, Factory id, Active switch and Add a branch (T-32).
+ *  +3: RepoForm's checks list replaces the JSON textarea with name, folder, command inputs and a needs select (factory init). */
+const EXPECTED_CONTROLS = 54;
+const EXPECTED_FILES = 16;
 
 type Control = { file: string; tag: string; text: string };
 
@@ -64,7 +67,7 @@ const controls: Control[] = sourceFiles(SRC).flatMap((path) => scanControls(read
 
 describe("control audit", () => {
   it("every non-checkbox control has sf-input or sf-select", () => {
-    const problems = controls.filter((c) => !(c.file in EXEMPT)).map(problemWith).filter((p): p is string => p !== null);
+    const problems = controls.map(problemWith).filter((p): p is string => p !== null);
     expect(problems).toEqual([]);
   });
 
@@ -78,10 +81,5 @@ describe("control audit", () => {
     expect(bad.map(problemWith)).toEqual(["inline.tsx: <input> lacks sf-input", "inline.tsx: <select> lacks sf-select", null]);
     expect(scanControls(`<input type="checkbox" />`).map(problemWith)).toEqual([null]);
     expect(scanControls(`<input\n  id="x"\n  type="date"\n  className="sf-input"\n/>`).map(problemWith)).toEqual([null]);
-  });
-
-  it("the FormField exemption holds only while nothing uses FormField", () => {
-    const users = sourceFiles(SRC).filter((path) => !path.endsWith("FormField.tsx") && /\bFormField\b/.test(readFileSync(path, "utf8")));
-    expect(users).toEqual([]);
   });
 });

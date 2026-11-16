@@ -1,0 +1,82 @@
+{
+  "fields": [
+    {
+      "name": "requestId",
+      "type": "String",
+      "isArray": false,
+      "description": "Unique id of the sync request."
+    },
+    {
+      "name": "factoryId",
+      "type": "String",
+      "isArray": false,
+      "description": "Id of the factory to sync."
+    },
+    {
+      "name": "requestedAt",
+      "type": "String",
+      "isArray": false,
+      "description": "ISO time the owner asked for the sync."
+    },
+    {
+      "name": "requestedBy",
+      "type": "String",
+      "isArray": false,
+      "description": "Who asked for the sync."
+    },
+    {
+      "name": "state",
+      "type": "String",
+      "isArray": false,
+      "description": "Request state in its lifecycle."
+    },
+    {
+      "name": "plan",
+      "type": "String",
+      "isArray": false,
+      "description": "JSON text of the sync plan."
+    },
+    {
+      "name": "plannedAt",
+      "type": "String",
+      "isArray": false,
+      "description": "ISO time the plan was made."
+    },
+    {
+      "name": "applyingSince",
+      "type": "String",
+      "isArray": false,
+      "description": "ISO time the apply started."
+    },
+    {
+      "name": "result",
+      "type": "String",
+      "isArray": false,
+      "description": "JSON text of the apply result."
+    },
+    {
+      "name": "appliedAt",
+      "type": "String",
+      "isArray": false,
+      "description": "ISO time the apply finished."
+    },
+    {
+      "name": "error",
+      "type": "String",
+      "isArray": false,
+      "description": "Error text when the request failed."
+    },
+    {
+      "name": "version",
+      "type": "Int",
+      "isArray": false,
+      "description": "Row version; bumped on every update."
+    },
+    {
+      "name": "writeId",
+      "type": "String",
+      "isArray": false,
+      "description": "Id of the write that produced this version."
+    }
+  ]
+}

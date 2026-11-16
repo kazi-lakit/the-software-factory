@@ -19,3 +19,6 @@ if (!window.matchMedia) {
     removeListener: () => undefined
   });
 }
+
+// jsdom has no canvas backend and logs "not implemented" for getContext; tests that need a context mock it.
+HTMLCanvasElement.prototype.getContext = (() => null) as typeof HTMLCanvasElement.prototype.getContext;

@@ -11,7 +11,7 @@
 #   --factory only this factory (default: every active factory)
 #   --max     runs at the same time (default 1, at most 10; match the factories' maxParallel to fill them)
 #   --once    check once, start a run if there is work, and exit (for cron or a systemd timer)
-# Env: FACTORY_STORE (default blocks); FACTORY_CLAUDE_ARGS, the flags for `claude -p`
+# Env: FACTORY_STORE (default local); FACTORY_CLAUDE_ARGS, the flags for `claude -p`
 #   (default `--permission-mode auto`). FACTORY_CLI, FACTORY_CLAUDE and FACTORY_WATCH_DIR replace the commands and
 #   the state folder (tests only).
 # Logs: runs/.watch/watch.log (only changes) and one runs/.watch/run-<time>.log per run. Stop with Ctrl-C.
@@ -34,7 +34,7 @@ done
 [ -z "$factory" ] || [[ "$factory" =~ ^[a-z][a-z0-9-]{0,39}$ ]] || { echo "watch: --factory must be a factory id" >&2; exit 2; }
 
 export FACTORY_ROOT="$root"
-export FACTORY_STORE="${FACTORY_STORE:-blocks}"
+export FACTORY_STORE="${FACTORY_STORE:-local}"
 cli=${FACTORY_CLI:-node "$root/core/dist/cli.js"}
 claude_cmd=${FACTORY_CLAUDE:-claude}
 claude_args=${FACTORY_CLAUDE_ARGS:---permission-mode auto}

@@ -1,19 +1,41 @@
-import { useCallback, useId, useRef } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { GATE_DOC, GATE_STATUS, NotFoundError, unfinishedDeps, type FactoryEvent, type Gate, type Run, type Task } from "@factory/core";
-import { ageOf, formatCost, NEEDS_YOU, STATUS_LABEL, taskPath } from "../board/status";
+import {
+  DEFAULT_SETTINGS,
+  GATE_DOC,
+  GATE_STATUS,
+  NotFoundError,
+  resolveSettings,
+  unfinishedDeps,
+  type Doc,
+  type DocKind,
+  type FactoryEvent,
+  type Gate,
+  type Task
+} from "@factory/core";
+import { describeEvent, eventContexts } from "../../lib/describeEvent";
+import { formatTime, formatWhenShort } from "../../lib/formatTime";
+import { NEEDS_YOU, STATUS_LABEL, taskPath } from "../board/status";
 import { useTopBarLead } from "../../app/topBarLead";
 import { followInApp } from "../board/TaskCard";
 import { useBoard } from "../board/useBoard";
 import { useFactories } from "../factories/useFactories";
+import { clearReadyProblem, peekReadyProblem } from "../newTask/createdNotice";
+import { useSettings } from "../settings/useSettings";
 import { AnswerPanel } from "./AnswerPanel";
 import { DocVersions } from "./DocVersions";
 import { GatePanel } from "./GatePanel";
+import { Markdown } from "./Markdown";
 import { QaLog } from "./QaLog";
 import { buildQaLog } from "./qaEntries";
 import { Stepper } from "./Stepper";
 import { TaskActions } from "./TaskActions";
-import { useTask } from "./useTask";
+import { RunsTable } from "./RunsTable";
+import { attemptsLabel, costLabel } from "./taskDetails";
+import { TaskHistory } from "./TaskHistory";
+import { TaskTabs } from "./TaskTabs";
+import { currentOf, useTask } from "./useTask";
+import { WriteProblemNotice } from "./writeOutcome";
 
 const GITHUB = "https://github.com/";
 
@@ -28,43 +50,45 @@ function githubUrl(value: string | null): string | undefined {
   }
 }
 
-const formatTime = (iso: string | null): string => {
-  if (!iso) return "—";
-  const date = new Date(iso);
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString();
-};
-
 const gateOf = (task: Task): Gate | undefined =>
   (Object.entries(GATE_STATUS) as [Gate, Task["status"]][]).find(([, status]) => status === task.status)?.[0];
 
-const short = (value: string | null): string => {
-  if (value === null) return "—";
-  const line = value.replace(/\s+/g, " ").trim();
-  return line.length > 120 ? `${line.slice(0, 119)}…` : line;
-};
+const HOW_QUESTIONS_WORK =
+  "An agent that can't go on asks one question, offers 2 to 4 answers and marks the one it recommends, with a reason. Pick one or write your own. Every question and answer stays on the task and in History.";
 
-function Section({ children, title }: { children: ReactNode; title: string }) {
+function Section({ children, className = "sf-task-section", title }: { children: ReactNode; className?: string; title: string }) {
   const id = useId();
   return (
-    <section className="sf-task-section" aria-labelledby={id}>
+    <section className={className} aria-labelledby={id}>
       <h3 id={id}>{title}</h3>
       {children}
     </section>
   );
 }
 
-function BackToBoard({ label, onNavigate }: { label: string; onNavigate: (path: string) => void }) {
+/** The in-page link back to the Board, shared by the task and New task breadcrumbs. */
+export function BackToBoard({ label, onNavigate }: { label: string; onNavigate: (path: string) => void }) {
   return <a href="/" className="sf-back" onClick={(event) => followInApp(event, "/", onNavigate)}>{label}</a>;
 }
 
-/** One task: its header, description, docs, the gate or answer panel when it waits for you, runs and history. */
+/**
+ * One task: the header, then a main column (the gate or answer panel when it waits for you, questions and answers,
+ * then a tab strip: History, Spec, Plan, Checks, Review, Runs) and a side column (details, description, how questions work).
+ */
 export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) => void; taskId: string }) {
+  const [selectedTab, setSelectedTab] = useState("description");
+  const [answerSent, setAnswerSent] = useState(false);
+  useEffect(() => { setSelectedTab("description"); setAnswerSent(false); }, [taskId]);
   const query = useTask(taskId);
+  useEffect(() => setAnswerSent(false), [query.data?.task.question]);
   const { refetch } = query;
   // Phones: Back sits at the left of the top bar in every state (the in-page link is hidden there).
   useTopBarLead({ label: "Back", onClick: () => onNavigate("/") });
   // Reload after a conflict: resolves with the latest task so open forms can rebase on its version.
   const reload = useCallback(async () => (await refetch()).data?.task, [refetch]);
+  // Set by New task when this task was created but not marked ready: shown once, then forgotten.
+  const [readyProblem] = useState(() => peekReadyProblem(taskId));
+  useEffect(() => clearReadyProblem(taskId), [taskId]);
 
   if (!query.data) {
     if (query.isError) {
@@ -89,183 +113,193 @@ export function TaskView({ onNavigate, taskId }: { onNavigate: (path: string) =>
   const { approvals, docs, events, runs, task } = query.data;
   const gate = gateOf(task);
   const qaEntries = buildQaLog(events, task.status === "blocked" ? task.question : null);
+  const blocked = task.status === "blocked";
+  const earlier = qaEntries.filter((entry) => !entry.open);
 
   return (
     <div className="sf-view sf-task">
       <nav aria-label="Breadcrumb" className="sf-breadcrumb">
         <BackToBoard label="Board" onNavigate={onNavigate} />
+        <span aria-hidden="true">/</span>
+        <span className="sf-mono" aria-current="page">{task.taskId}</span>
       </nav>
-      {query.isError ? <p className="sf-problem" role="alert">Could not refresh this task; showing what was loaded last.</p> : null}
-      <TaskHeader task={task} events={events} onReload={reload} />
-
-      <Section title="Description">
-        {task.description.trim() ? <pre className="sf-doc-body">{task.description}</pre> : <p className="sf-empty">No description.</p>}
-      </Section>
-      <div className="sf-task-body">
-        <div className="sf-task-docs">
-          <Section title="Spec"><DocVersions label="Spec" docs={docs.spec} /></Section>
-          <Section title="Plan"><DocVersions label="Plan" docs={docs.plan} /></Section>
-        </div>
-        <Details task={task} events={events} onNavigate={onNavigate} />
-      </div>
-      <Section title="Verify report"><DocVersions label="Verify report" docs={docs.verify} /></Section>
-      <Section title="Review report"><DocVersions label="Review report" docs={docs.review} /></Section>
-
-      {gate ? (
-        <GatePanel key={`${task.taskId}:${gate}`} task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} />
+      {readyProblem ? (
+        <>
+          <WriteProblemNotice problem={readyProblem} />
+          <p className="sf-problem" role="alert">The task was created but not marked ready.</p>
+        </>
       ) : null}
-      {task.status === "blocked" ? <AnswerPanel key={task.taskId} task={task} events={events} onReload={reload} /> : null}
-      {qaEntries.length > 0 ? <Section title="Questions and answers"><QaLog entries={qaEntries} /></Section> : null}
+      {query.isError ? <p className="sf-problem" role="alert">Could not refresh this task; showing what was loaded last.</p> : null}
+      <TaskHeader task={task} gate={gate} docs={docs} onReload={reload} />
 
-      <Section title="Runs"><RunsTable runs={runs} /></Section>
-      <Section title="History"><History events={events} /></Section>
+      <div className="sf-task-body">
+        <div className={blocked ? "sf-task-main sf-task-answering" : "sf-task-main"}>
+          <TaskMore events={events} task={task} onNavigate={onNavigate} />
+          {blocked ? <p className="sf-pending-action">{task.answer || answerSent ? "Answer received." : "Your answer is needed."} <button type="button" className="sf-button" onClick={() => setSelectedTab("qa")}>View question</button></p> : null}
+          {gate ? <p className="sf-pending-action">{gate === "pr" ? "PR review" : `${gate === "spec" ? "Spec" : "Plan"} approval`} needed. <button type="button" className="sf-button" onClick={() => setSelectedTab(gate === "pr" ? "review" : gate)}>Review {gate === "pr" ? "PR" : gate}</button></p> : null}
+          <TaskTabs
+            key={task.taskId}
+            label="Task sections"
+            value={selectedTab}
+            onChange={setSelectedTab}
+            tabs={[
+              { id: "description", label: "Description", content: task.description.trim() ? <Markdown body={task.description} /> : <p className="sf-empty">No description.</p> },
+              { id: "spec", label: `Spec (${docs.spec.length})`, keepMounted: true, content: <>{gate === "spec" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : <DocVersions label="Spec" docs={docs.spec} />}</> },
+              { id: "plan", label: `Plan (${docs.plan.length})`, keepMounted: true, content: <>{gate === "plan" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : <DocVersions label="Plan" docs={docs.plan} />}</> },
+              { id: "qa", label: "Q&A", keepMounted: true, content: <>{blocked ? <AnswerPanel key={task.taskId} task={task} events={events} onReload={reload} onAnswerSent={() => setAnswerSent(true)} /> : null}{earlier.length ? <QaLog entries={earlier} /> : !blocked ? <p className="sf-empty">No questions yet.</p> : null}</> },
+              { id: "checks", label: "Checks", content: <DocVersions label="Checks" docs={docs.verify} /> },
+              { id: "review", label: "Review", keepMounted: true, content: <>{gate === "pr" ? <GatePanel task={task} gate={gate} docs={docs[GATE_DOC[gate]]} approvals={approvals} onReload={reload} /> : <DocVersions label="Review" docs={docs.review} />}</> },
+              { id: "runs", label: `Runs (${runs.length})`, content: <RunsTable runs={runs} /> },
+              { id: "history", label: "History", content: <TaskHistory events={events} /> }
+            ]}
+          />
+        </div>
+        <aside className="sf-task-side" aria-label="Task side panels">
+          <Details task={task} onNavigate={onNavigate} />
+          {qaEntries.length > 0 ? (
+            <Section title="How questions work" className="sf-panel">
+              <p className="sf-muted sf-qa-how">{HOW_QUESTIONS_WORK}</p>
+            </Section>
+          ) : null}
+        </aside>
+      </div>
     </div>
   );
 }
 
-function Details({ events, onNavigate, task }: { events: readonly FactoryEvent[]; onNavigate: (path: string) => void; task: Task }) {
-  const last = events.at(-1);
-  const board = useBoard().data ?? [];
-  const waiting = task.status === "ready" ? unfinishedDeps(task, board) : [];
+/** The cost limit the engine uses: the factory's settings with the repo's override. Unknown until the settings load. */
+function useCostLimit(task: Task): number | undefined {
+  const stored = useSettings().data;
+  const entry = stored?.factories[task.factoryId];
+  return stored ? resolveSettings(entry?.factory ?? DEFAULT_SETTINGS, entry?.repos[task.repo]).maxCostPerTaskUsd : undefined;
+}
+
+function PrLink({ url }: { url: string }) {
   return (
-    <aside className="sf-details" aria-label="Details">
-      <dl>
-        <div><dt>Branch</dt><dd className="sf-mono">{task.branch ?? "—"}</dd></div>
-        {task.dependsOn.length > 0 ? (
-          <div>
-            <dt>Depends on</dt>
-            <dd>
-              <ul className="sf-deps">
-                {task.dependsOn.map((id) => {
-                  const dep = board.find((t) => t.taskId === id);
-                  const href = taskPath(id);
-                  return (
-                    <li key={id}>
-                      <a className="sf-mono" href={href} onClick={(event) => followInApp(event, href, onNavigate)}>{id}</a>
-                      {dep ? <span> {STATUS_LABEL[dep.status]}</span> : null}
-                    </li>
-                  );
-                })}
-              </ul>
-              {waiting.length > 0 ? <span className="sf-badge">Waiting on {waiting.join(", ")}</span> : null}
-            </dd>
-          </div>
-        ) : null}
-        <div><dt>Cost</dt><dd className="sf-mono">{formatCost(task.costUsd)}</dd></div>
-        <div>
-          <dt>Last event</dt>
-          <dd>{last ? `${last.field ?? last.action}: ${short(last.to)} · ${formatTime(last.at)}` : "—"}</dd>
-        </div>
-      </dl>
-    </aside>
+    <a className="sf-mono" href={url} target="_blank" rel="noopener noreferrer">
+      {url.slice(GITHUB.length)}
+      <span className="sf-visually-hidden"> (opens in a new tab)</span>
+    </a>
   );
 }
 
-function TaskHeader({ events, onReload, task }: { events: readonly FactoryEvent[]; onReload: () => Promise<Task | undefined>; task: Task }) {
-  const age = ageOf(events.find((event) => event.action === "create")?.at);
+/** The tasks this one waits for, each with its status, and a badge naming the unfinished ones while the task is ready. */
+function WaitsFor({ onNavigate, task }: { onNavigate: (path: string) => void; task: Task }) {
+  const board = useBoard().data ?? [];
+  const waiting = task.status === "ready" ? unfinishedDeps(task, board) : [];
+  return (
+    <>
+      <ul className="sf-deps">
+        {task.dependsOn.map((id) => {
+          const dep = board.find((t) => t.taskId === id);
+          const href = taskPath(id);
+          return (
+            <li key={id}>
+              <a className="sf-mono" href={href} onClick={(event) => followInApp(event, href, onNavigate)}>{id}</a>
+              {dep ? <span> {STATUS_LABEL[dep.status]}</span> : null}
+            </li>
+          );
+        })}
+      </ul>
+      {waiting.length > 0 ? <span className="sf-badge">Waiting on {waiting.join(", ")}</span> : null}
+    </>
+  );
+}
+
+/**
+ * Phones: Branch, Cost, PR, Waits for and the last event in a closed disclosure at the top of the main column
+ * (the base CSS hides it; the Details panel shows them at 640px and up).
+ */
+function TaskMore({ events, onNavigate, task }: { events: readonly FactoryEvent[]; onNavigate: (path: string) => void; task: Task }) {
+  const limit = useCostLimit(task);
+  const prUrl = githubUrl(task.prUrl);
+  const newest = events[events.length - 1];
+  return (
+    <details className="sf-task-more">
+      <summary className="sf-label">Details and history</summary>
+      <dl>
+        <div><dt>Branch</dt><dd className="sf-mono">{task.branch ?? "—"}</dd></div>
+        <div><dt>Cost</dt><dd className="sf-mono">{costLabel(task.costUsd, limit)}</dd></div>
+        {prUrl ? <div><dt>PR</dt><dd><PrLink url={prUrl} /></dd></div> : null}
+        {task.dependsOn.length > 0 ? <div><dt>Waits for</dt><dd><WaitsFor task={task} onNavigate={onNavigate} /></dd></div> : null}
+        <div>
+          <dt>Last event</dt>
+          <dd>
+            {newest ? (
+              <>
+                {describeEvent(newest, eventContexts([...events].reverse()).get(newest)).text}{" "}
+                <time className="sf-muted" dateTime={newest.at} title={formatTime(newest.at)}>{formatWhenShort(newest.at)}</time>
+              </>
+            ) : "No history yet."}
+          </dd>
+        </div>
+      </dl>
+    </details>
+  );
+}
+
+function Details({ onNavigate, task }: { onNavigate: (path: string) => void; task: Task }) {
   const prUrl = githubUrl(task.prUrl);
   // The factory's name when it is visible, else its id.
   const factoryName = useFactories().byId.get(task.factoryId)?.def.name ?? task.factoryId;
-  // After a cancel the Cancel button is gone; focus lands on the task's heading instead of the page.
-  const heading = useRef<HTMLHeadingElement>(null);
+  const limit = useCostLimit(task);
+  const headingId = useId();
   return (
-    <section className="sf-task-header" aria-label="Task details">
-      <h2 ref={heading} tabIndex={-1}>{task.title}</h2>
-      <p className="sf-task-meta">
-        <span>{task.repo}</span>
-        <span aria-hidden="true">·</span>
-        <span className="sf-mono">{task.baseBranch}</span>
-        {age ? (
-          <>
-            <span aria-hidden="true">·</span>
-            <span>{age}</span>
-          </>
-        ) : null}
-      </p>
-      <Stepper status={task.status} stage={task.stage} />
-      <dl className="sf-facts">
-        <div><dt>Task</dt><dd className="sf-mono">{task.taskId}</dd></div>
+    <section className="sf-details" aria-labelledby={headingId}>
+      <h3 id={headingId}>Details</h3>
+      <dl>
+        <div><dt>Repo</dt><dd>{task.repo}</dd></div>
+        <div><dt>Base</dt><dd className="sf-mono">{task.baseBranch}</dd></div>
+        <div><dt>Branch</dt><dd className="sf-mono">{task.branch ?? "—"}</dd></div>
         <div><dt>Factory</dt><dd>{factoryName}</dd></div>
         <div>
           <dt>PR</dt>
           <dd>
-            {prUrl ? (
-              <a className="sf-mono" href={prUrl} target="_blank" rel="noopener noreferrer">
-                {prUrl.slice(GITHUB.length)}
-                <span className="sf-visually-hidden"> (opens in a new tab)</span>
-              </a>
-            ) : "—"}
+            {prUrl ? <PrLink url={prUrl} /> : "Not yet"}
           </dd>
         </div>
-        <div>
-          <dt>Status</dt>
-          <dd>
-            <span>{STATUS_LABEL[task.status]}</span>
-            {NEEDS_YOU.has(task.status) ? <span className="sf-badge">Waiting for you</span> : null}
-          </dd>
-        </div>
-        <div><dt>Stage</dt><dd>{task.stage ?? "—"}</dd></div>
-        <div><dt>Attempt</dt><dd className="sf-mono">{task.attempt}</dd></div>
+        {task.dependsOn.length > 0 ? (
+          <div>
+            <dt>Waits for</dt>
+            <dd>
+              <WaitsFor task={task} onNavigate={onNavigate} />
+            </dd>
+          </div>
+        ) : null}
+        {/* core's browser entry does not export MAX_RETURNS, so no limit is shown. */}
+        <div><dt>Attempts</dt><dd>{attemptsLabel(task.attempt)}</dd></div>
+        <div><dt>Cost</dt><dd className="sf-mono">{costLabel(task.costUsd, limit)}</dd></div>
       </dl>
-      <TaskActions key={task.taskId} task={task} onReload={onReload} onCancelled={() => heading.current?.focus()} />
     </section>
   );
 }
 
-function RunsTable({ runs }: { runs: readonly Run[] }) {
-  if (runs.length === 0) return <p className="sf-empty">No runs yet.</p>;
+function TaskHeader({ docs, gate, onReload, task }: {
+  docs: Record<DocKind, Doc[]>;
+  gate: Gate | undefined;
+  onReload: () => Promise<Task | undefined>;
+  task: Task;
+}) {
+  const waitsForYou = NEEDS_YOU.has(task.status);
+  // The version of the doc the owner decides on, for the stepper's "Spec · vN waiting".
+  const waitingVersion = gate === "spec" || gate === "plan" ? currentOf(docs[GATE_DOC[gate]])?.version : undefined;
+  // After a cancel the Cancel button is gone; focus lands on the task's heading instead of the page.
+  const heading = useRef<HTMLHeadingElement>(null);
   return (
-    <div className="sf-table-wrap">
-      <table className="sf-table" aria-label="Runs">
-        <thead>
-          <tr>
-            <th scope="col">Step</th>
-            <th scope="col">Agent</th>
-            <th scope="col">Mode</th>
-            <th scope="col">Started</th>
-            <th scope="col">Ended</th>
-            <th scope="col">Turns</th>
-            <th scope="col">Cost</th>
-            <th scope="col">Result</th>
-          </tr>
-        </thead>
-        <tbody>
-          {runs.map((run) => (
-            <tr key={run.runId}>
-              <td>{run.step}</td>
-              <td>{run.agent}</td>
-              <td>{run.mode}</td>
-              <td><time dateTime={run.startedAt}>{formatTime(run.startedAt)}</time></td>
-              <td>{run.endedAt ? <time dateTime={run.endedAt}>{formatTime(run.endedAt)}</time> : "running"}</td>
-              <td className="sf-mono">{run.turns ?? "—"}</td>
-              <td className="sf-mono">{formatCost(run.costUsd)}</td>
-              <td>{run.result ?? "—"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function describeEvent(event: FactoryEvent): string {
-  if (event.action === "create") return `created in ${event.to ?? "inbox"}`;
-  return `${event.field ?? event.action}: ${short(event.from)} → ${short(event.to)}`;
-}
-
-function History({ events }: { events: readonly FactoryEvent[] }) {
-  if (events.length === 0) return <p className="sf-empty">No history yet.</p>;
-  const newestFirst = [...events].reverse();
-  return (
-    <ol className="sf-history" aria-label="History">
-      {newestFirst.map((event, index) => (
-        <li key={`${event.at}-${index}`}>
-          <time className="sf-muted" dateTime={event.at}>{formatTime(event.at)}</time>
-          <span className="sf-history-actor">{event.actor}</span>
-          <span>{describeEvent(event)}</span>
-          {event.reason ? <span className="sf-muted">({event.reason})</span> : null}
+    <section className="sf-task-header" aria-label="Task details">
+      <ul className="sf-chips sf-task-chips" aria-label="Task summary">
+        <li className="sf-chip sf-mono">{task.taskId}</li>
+        <li className={waitsForYou ? "sf-chip sf-chip-waiting" : "sf-chip"}>
+          {waitsForYou ? `${STATUS_LABEL[task.status]} · waiting for you` : STATUS_LABEL[task.status]}
         </li>
-      ))}
-    </ol>
+        <li className="sf-chip sf-chip-repo">{`${task.repo} → ${task.baseBranch}`}</li>
+      </ul>
+      <div className="sf-task-title-row">
+        <h1 ref={heading} tabIndex={-1} className="sf-page-title">{task.title}</h1>
+        <TaskActions key={task.taskId} task={task} onReload={onReload} onCancelled={() => heading.current?.focus()} />
+      </div>
+      <p className="sf-task-repo sf-mono">{`${task.repo} → ${task.baseBranch}`}</p>
+      <Stepper status={task.status} stage={task.stage} baseBranch={task.baseBranch} waitingVersion={waitingVersion} />
+    </section>
   );
 }

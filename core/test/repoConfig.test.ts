@@ -6,6 +6,7 @@ import { describe, expect, test } from 'vitest';
 import { RepoConfigError, loadRepoConfig } from '../src/repoConfig.js';
 
 const REPO_IDS = ['os', 'iam', 'monitor', 'logic', 'data', 'localization', 'release'];
+const find = (c: { checks: { name: string; run: string }[] }, name: string) => c.checks.find((k) => k.name === name)?.run;
 const reposDir = fileURLToPath(new URL('./fixtures/repos', import.meta.url));
 
 function tempDir(files: Record<string, string>): string {
@@ -21,15 +22,15 @@ describe('repo configs', () => {
     for (const c of Object.values(all)) {
       expect(c.remote).toMatch(/SELISEdigitalplatforms\/blocks-[a-z]+\.git$/);
       expect(c.baseBranch).toBe('dev');
-      expect(c.checks.e2e).toBe('off');
+      expect(c.checks.map((k) => k.name)).toContain('server.build');
     }
   });
 
   test('solution files per repo', () => {
     const all = Object.fromEntries(REPO_IDS.map((id) => [id, loadRepoConfig(reposDir, id)])) as Record<string, ReturnType<typeof loadRepoConfig>>;
-    expect(all.iam.checks.server.build).toBe('dotnet build BlocksIAM.sln');
-    expect(all.os.checks.server.test).toBe('dotnet test BlocksOS.sln');
-    expect(all.data.checks.server.build).toBe('dotnet build Blocks.slnx');
+    expect(find(all.iam, 'server.build')).toBe('dotnet build BlocksIAM.sln');
+    expect(find(all.os, 'server.test')).toBe('dotnet test BlocksOS.sln');
+    expect(find(all.data, 'server.build')).toBe('dotnet build Blocks.slnx');
   });
 
   test('repo id must match the file name', () => {
@@ -41,7 +42,7 @@ describe('repo configs', () => {
   test('missing field names the dotted path', () => {
     const body = readFileSync(join(reposDir, 'data.yaml'), 'utf8').replace(/ {4}lint:.*\n/, '');
     const dir = tempDir({ 'data.yaml': body });
-    expect(() => loadRepoConfig(dir, 'data')).toThrow(/data\.yaml: checks\.client\.lint is required/);
+    expect(() => loadRepoConfig(dir, 'data')).toThrow(/data\.yaml: checks\.client\.lint/);
   });
 
   test('baseBranch defaults to dev and remote may be a local path', () => {

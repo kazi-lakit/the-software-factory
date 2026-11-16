@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { ACCESS, FIELDS, generateFields, UNIQUE, TABLES, PROTECTED_TASK_FIELDS, generateIndexes, generateRules, collectionOf } from '../../src/blocks/schema.js';
+import { ACCESS, FIELDS, GITHUB_SCHEMA, generateFields, UNIQUE, TABLES, PROTECTED_TASK_FIELDS, generateIndexes, generateRules, collectionOf } from '../../src/blocks/schema.js';
 import { CORE_TASK_FIELDS } from '../../src/blocks/store.js';
 
 const coreRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -17,6 +17,8 @@ const MATRIX = {
   FactoryDef: { read: ['factory-owner', 'factory-core'], insert: ['factory-owner'], edit: ['factory-owner'] },
   FactoryRepo: { read: ['factory-owner', 'factory-core'], insert: ['factory-owner'], edit: ['factory-owner'] },
   FactoryHealth: { read: ['factory-owner', 'factory-core'], insert: ['factory-core'], edit: ['factory-core'] },
+  FactoryGitHubLink: { read: ['factory-owner', 'factory-core'], insert: ['factory-core'], edit: ['factory-core'] },
+  FactorySyncRequest: { read: ['factory-owner', 'factory-core'], insert: ['factory-owner'], edit: ['factory-owner', 'factory-core'] },
 };
 const CLS_FIELDS = ['title', 'description', 'repo', 'baseBranch', 'gateOverrides', 'dependsOn', 'factoryId'];
 
@@ -26,7 +28,7 @@ type Rules = { security: { schemaName: string; operation: number; policyType: nu
 describe('blocks schema', () => {
   it('ACCESS equals the matrix', () => {
     expect(ACCESS).toEqual(MATRIX);
-    expect(TABLES).toHaveLength(10);
+    expect(TABLES).toHaveLength(12);
     expect(collectionOf('FactoryTask')).toBe('FactoryTasks');
   });
 
@@ -45,7 +47,7 @@ describe('blocks schema', () => {
     expect(new Set(deletes)).toEqual(new Set(['FactorySpike']));
     const rowLevel = rules.policies.filter(p => p.policyType === 0);
     expect(rowLevel.every(p => Array.isArray(p.fieldNames) && p.fieldNames.length === 0)).toBe(true);
-    expect(rules.security.filter(e => e.policyType === 0)).toHaveLength(10 * 4);
+    expect(rules.security.filter(e => e.policyType === 0)).toHaveLength(12 * 4);
     expect(rules.policies.map(p => p.policyName)).toContain('factory-task-edit-factory-core');
     expect(rules.policies.map(p => p.policyName)).toContain('factory-settings-insert-factory-owner');
   });
@@ -65,7 +67,7 @@ describe('blocks schema', () => {
     expect(cls[0]).toMatchObject({ schemaName: 'FactoryTask', policyName: 'factory-task-edit-fields-factory-owner', operation: 2, isAllowPolicy: true, fieldNames: CLS_FIELDS });
     expect(cls[0]!.ruleGroup.rules.map(r => r.staticValue)).toEqual([['factory-owner']]);
     expect(JSON.stringify(cls[0])).not.toContain('factory-core');
-    expect(rules.security).toHaveLength(41);
+    expect(rules.security).toHaveLength(49);
     expect(rules.security.filter(e => e.policyType === 1)).toEqual([{ schemaName: 'FactoryTask', operation: 2, policyType: 1, accessLevel: 3, fieldNames: CLS_FIELDS }]);
     expect(PROTECTED_TASK_FIELDS).toEqual(cls[0]!.fieldNames);
     for (const f of PROTECTED_TASK_FIELDS) expect(FIELDS.FactoryTask.map(x => x.name)).toContain(f);
@@ -103,10 +105,27 @@ describe('blocks schema', () => {
     const indexes = generateIndexes() as { schemaName: string; fields: string[]; name: string }[];
     expect(indexes).toContainEqual({ schemaName: 'FactoryTask', fields: ['taskId'], name: 'factory_task_taskid_unique' });
     for (const i of indexes) expect(i.name).toBe(`factory_${i.schemaName.replace('Factory', '').toLowerCase()}_${i.fields[0]!.toLowerCase()}_unique`);
-    expect(indexes).toHaveLength(10);
+    expect(indexes).toHaveLength(12);
     expect(indexes).toContainEqual({ schemaName: 'FactoryDef', fields: ['factoryId'], name: 'factory_def_factoryid_unique' });
     expect(indexes).toContainEqual({ schemaName: 'FactoryRepo', fields: ['repoKey'], name: 'factory_repo_repokey_unique' });
+    expect(indexes).toContainEqual({ schemaName: 'FactoryGitHubLink', fields: ['taskId'], name: 'factory_githublink_taskid_unique' });
+    expect(indexes).toContainEqual({ schemaName: 'FactorySyncRequest', fields: ['requestId'], name: 'factory_syncrequest_requestid_unique' });
     expect(indexes).toContainEqual({ schemaName: 'FactoryHealth', fields: ['factoryId'], name: 'factory_health_factoryid_unique' });
+  });
+
+  it('GitHub link rows are core-written, sync requests owner-inserted and edited by both', () => {
+    expect(ACCESS.FactoryGitHubLink).toEqual({ read: ['factory-owner', 'factory-core'], insert: ['factory-core'], edit: ['factory-core'] });
+    expect(ACCESS.FactorySyncRequest).toEqual({ read: ['factory-owner', 'factory-core'], insert: ['factory-owner'], edit: ['factory-owner', 'factory-core'] });
+  });
+
+  it('FactoryDef has the github column; FactoryHealth has watcherSeenAt and githubProblems', () => {
+    expect(generateFields('FactoryDef').fields).toContainEqual(expect.objectContaining({ name: 'github', type: 'String' }));
+    for (const name of ['watcherSeenAt', 'githubProblems']) expect(generateFields('FactoryHealth').fields).toContainEqual(expect.objectContaining({ name, type: 'String' }));
+  });
+
+  it('GITHUB_SCHEMA names only existing tables and fields', () => {
+    for (const t of GITHUB_SCHEMA.tables) expect(TABLES).toContain(t);
+    for (const [t, names] of Object.entries(GITHUB_SCHEMA.fields)) for (const n of names) expect(FIELDS[t as keyof typeof FIELDS].map(f => f.name)).toContain(n);
   });
 
   it('--check passes against the committed files', () => {

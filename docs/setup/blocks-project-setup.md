@@ -26,16 +26,16 @@ blocks iam roles create --name "Factory Owner" --slug factory-owner --descriptio
 
 ## 3. Tables, fields, indexes
 
-There are 10 tables: `FactoryTask`, `FactoryDoc`, `FactoryApproval`, `FactorySettings`, `FactoryRun`, `FactoryEvent`, `FactorySpike`, and (plan 6, multiple factories) `FactoryDef`, `FactoryRepo` and `FactoryHealth`. Each table's fields are in `blocks/data/factory/<Table>.fields.json` and its unique index is in `blocks/data/factory/indexes.json`. The core generates these files; `cd core && npm run -s blocks:resources -- --check` confirms they are current.
+There are 12 tables: `FactoryTask`, `FactoryDoc`, `FactoryApproval`, `FactorySettings`, `FactoryRun`, `FactoryEvent`, `FactorySpike`; (plan 6, multiple factories) `FactoryDef`, `FactoryRepo` and `FactoryHealth`; and (stage 4, GitHub connected mode) `FactoryGitHubLink` and `FactorySyncRequest`. Each table's fields are in `blocks/data/factory/<Table>.fields.json` and its unique index is in `blocks/data/factory/indexes.json`. The core generates these files; `cd core && npm run -s blocks:resources -- --check` confirms they are current.
 
 **Warning:** a new table is open to any signed-in project user until step 4 deploys its rules. `FactoryRepo.checks` holds shell commands that the core runs on the owner's Mac. Run step 4 in the same sitting, straight after this step, before anything else touches the project.
 
-A project set up from scratch creates all 10 tables. For each table, create its schema, its fields and its unique index from the table below. A project set up before plan 6 only creates `FactoryDef`, `FactoryRepo` and `FactoryHealth` (its other 7 tables already exist, see "Existing tables" below).
+A project set up from scratch creates all 12 tables. For each table, create its schema, its fields and its unique index from the table below. A project set up before plan 6 creates `FactoryDef`, `FactoryRepo` and `FactoryHealth` here (its other 7 tables already exist, see "Existing tables" below) and then does step 8 for the two stage 4 tables. A project set up after plan 6 but before stage 4 does only step 8.
 
 For each new table, create the schema, then its fields:
 
 ```bash
-S=FactoryTask     # repeat for each of the 10 tables: FactoryTask, FactoryDoc, FactoryApproval, FactorySettings, FactoryRun, FactoryEvent, FactorySpike, FactoryDef, FactoryRepo, FactoryHealth
+S=FactoryTask     # repeat for each of the 12 tables: FactoryTask, FactoryDoc, FactoryApproval, FactorySettings, FactoryRun, FactoryEvent, FactorySpike, FactoryDef, FactoryRepo, FactoryHealth, FactoryGitHubLink, FactorySyncRequest
 blocks data schema info save --schema-name $S --collection-name ${S}s --schema-type 1 --dry-run   # then --yes; note the schema id it prints
 blocks data schema fields --schema-id <id> --file blocks/data/factory/$S.fields.json --dry-run    # then --yes
 ```
@@ -54,6 +54,8 @@ Each table has one unique index:
 | FactoryDef | factoryId | factory_def_factoryid_unique |
 | FactoryRepo | repoKey | factory_repo_repokey_unique |
 | FactoryHealth | factoryId | factory_health_factoryid_unique |
+| FactoryGitHubLink | taskId | factory_githublink_taskid_unique |
+| FactorySyncRequest | requestId | factory_syncrequest_requestid_unique |
 
 ```bash
 blocks data schema indexes create --schema-id <id> --fields <field> --unique --name <index name> --dry-run   # then --yes
@@ -113,6 +115,31 @@ It should print only `saved blocks-credential (client …)`. If it prints an err
 ## 7. Tell Claude
 
 Paste the tenantId and anything that failed. Don't paste the client secret, the password or any token.
+
+## 8. GitHub connected mode (stage 4)
+
+Until this is applied, connected mode is off and the Board shows the schema message. A project set up before stage 4 does this once, in the same sitting (the new tables are open to any signed-in project user until the rules are deployed).
+
+```bash
+cd core && npm run -s blocks:resources -- --check && cd ..    # the generated files are current
+# 1. Create the two schemas, their fields and their unique indexes
+for S in FactoryGitHubLink FactorySyncRequest; do
+  blocks data schema info save --schema-name $S --collection-name ${S}s --schema-type 1 --dry-run   # then --yes; note the schema id it prints
+  blocks data schema fields --schema-id <id> --file blocks/data/factory/$S.fields.json --dry-run    # then --yes
+done
+blocks data schema indexes create --schema-id <FactoryGitHubLink id>   --fields taskId    --unique --name factory_githublink_taskid_unique --dry-run      # then --yes
+blocks data schema indexes create --schema-id <FactorySyncRequest id>  --fields requestId --unique --name factory_syncrequest_requestid_unique --dry-run  # then --yes
+# 2. Save the two changed files again (adds FactoryDef.github, FactoryHealth.watcherSeenAt and githubProblems)
+blocks data schema fields --schema-id <FactoryDef id>    --file blocks/data/factory/FactoryDef.fields.json --dry-run      # then --yes
+blocks data schema fields --schema-id <FactoryHealth id> --file blocks/data/factory/FactoryHealth.fields.json --dry-run   # then --yes
+# 3. Rules (the step 4 commands), then check the new table
+blocks data validate
+blocks data rules deploy --dry-run       # then --yes
+blocks data reload --dry-run             # then --yes
+blocks data schema aggregation --schema-name FactoryGitHubLink   # every operation should say Custom
+# 4. Check
+factory doctor --store blocks
+```
 
 ## Then: the two live checks (Tasks 8 and 9)
 

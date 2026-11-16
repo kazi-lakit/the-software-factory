@@ -8,6 +8,10 @@ test('core moves follow spec §5', () => {
     ['pr_open','done'],['pr_open','build'],['blocked','build'],['blocked','verify'],['spec','blocked'],['pr_open','blocked']] as const)
     expect(canMove(f, t, 'core')).toBe(true);
 });
+test('core may move blocked to ready; you may not', () => {
+  expect(canMove('blocked', 'ready', 'core')).toBe(true);
+  expect(canMove('blocked', 'ready', 'you')).toBe(false);
+});
 test('core cannot skip stages or leave terminal states', () => {
   expect(canMove('ready','build','core')).toBe(false);
   expect(canMove('spec','build','core')).toBe(false);

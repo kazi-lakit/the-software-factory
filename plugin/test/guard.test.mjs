@@ -297,7 +297,7 @@ describe('lib', () => {
     const home = '/h';
     const dflt = '/h/scratchpad/selise/the-software-factory';
     const exists = fsWith('/env', '/proj', dflt);
-    const resolve = (env, h, ex = exists, rd = readFactory) => resolveFactoryRoot(env, h, ex, rd);
+    const resolve = (env, h, ex = exists, rd = readFactory) => resolveFactoryRoot(env, h, ex, rd, '/nowhere');
 
     it('FACTORY_ROOT wins first', () => {
       expect(resolve({ FACTORY_ROOT: '/env', CLAUDE_PROJECT_DIR: '/proj' }, home, exists))
@@ -380,8 +380,11 @@ describe('entry script', () => {
   const projectMode = { HOME: bareHome, CLAUDE_PROJECT_DIR: projRoot };
   const elsewhere = { HOME: home, CLAUDE_PROJECT_DIR: plain };
 
+  // The hooks find the clone that holds them; run a copy outside any factory clone so these tests control the root.
+  const isolated = path.join(tmp, 'iso', 'plugin');
+  fs.cpSync(path.join(pluginDir, 'hooks'), path.join(isolated, 'hooks'), { recursive: true });
   const runScript = (dir, stdin, env = projectMode) =>
-    spawnSync('node', [path.join(dir, 'hooks', 'guard.mjs')], { input: stdin, env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' });
+    spawnSync('node', [path.join(dir === pluginDir ? isolated : dir, 'hooks', 'guard.mjs')], { input: stdin, env: { PATH: process.env.PATH, ...env }, encoding: 'utf8' });
   const call = (tool_input, extra = {}, tool_name = 'Bash') => JSON.stringify({ tool_name, tool_input, ...extra });
   const gitPush = call({ command: 'git push' }, { session_id: 's' });
   const reason = (r) => JSON.parse(r.stdout).hookSpecificOutput.permissionDecisionReason;

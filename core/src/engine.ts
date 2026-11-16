@@ -5,12 +5,12 @@ import { claim, claimExpired, release, renew } from './claims.js';
 import { AGENT_FOR, DEFAULT_SETTINGS } from './defaults.js';
 import { GATE_DOC, resolveGates, resolveSettings, shouldMerge, validApproval } from './gates.js';
 import type { GitRepos } from './git.js';
-import { PrBaseMismatchError, type GitHub, type GitHubFor } from './github.js';
+import { PrBaseMismatchError, parseRemote, type GitHub, type GitHubFor } from './github.js';
 import { unfinishedDeps } from './dependencies.js';
 import { diffEvents } from './history.js';
 import { decide, IllegalInputError, type Decision, type Input } from './machine.js';
 import type { Checks } from './checksSchema.js';
-import type { AgentModel, FactoryConfig, FactoryDef, FactoryRepo } from './factories.js';
+import { protectedFor, type AgentModel, type FactoryConfig, type FactoryDef, type FactoryRepo } from './factories.js';
 import { GhLoginMissingError, SecretMissingError } from './secrets.js';
 import { DocTooLargeError, MAX_DOC_BYTES } from './limits.js';
 import { assertMove, IllegalMoveError, TERMINAL } from './status.js';
@@ -192,7 +192,8 @@ export class Engine {
           continue;
         }
         const settings = this.settingsFor(stored, task);
-        const moved = await this.syncGate(task, settings, cfg.factory(task.factoryId)!);
+        const def = cfg.factory(task.factoryId)!;
+        const moved = await this.syncGate(task, settings, def, protectedFor(def, cfg.repo(task.factoryId, task.repo)));
         const t = moved ?? task;
         if (t.stage !== null && t.status !== 'blocked' && !TERMINAL.has(t.status) && t.costUsd > settings.maxCostPerTaskUsd) {
           await this.apply(t, this.decideFor(t, { kind: 'limit', reason: costReason(t.costUsd, settings) }, settings), this.coreActor);
@@ -353,7 +354,8 @@ export class Engine {
     const claimed = await this.claimedAt(taskId, 'ship');
     const { def, repo: cfg } = this.repoOf(await this.loadFactories(), claimed);
     const branch = requireBranch(claimed);
-    assertPushAllowed(branch, def.protectedBranches);
+    const protectedBranches = protectedFor(def, cfg);
+    assertPushAllowed(branch, protectedBranches);
     const settings = this.settingsFor(await retry(() => store.getSettings()), claimed);
     const block = (task: Task, reason: string) =>
       this.apply(task, this.decideFor(task, { kind: 'limit', reason }, settings), this.coreActor);
@@ -375,6 +377,7 @@ export class Engine {
   }): Promise<Task> {
     const { github, def, cfg, claimed, branch, settings, block } = c;
     const taskId = claimed.taskId;
+    const protectedBranches = protectedFor(def, cfg);
 
     // A task returned from pr_open already has a PR: reuse it while open. If it merged meanwhile, the commits
     // made for the requested changes are not in it, so the task waits for the user instead of counting as done.
@@ -383,7 +386,7 @@ export class Engine {
     if (existing && state === 'merged') return block(claimed, 'previous PR was merged; new commits are not shipped');
 
     const worktree = await this.worktreeFor(def, cfg, claimed, branch);
-    await this.deps.git.push(worktree, branch, def.protectedBranches);
+    await this.deps.git.push(worktree, branch, protectedBranches);
 
     // An earlier ship may have opened the PR and failed before recording it: find it before opening a new one.
     const pr =
@@ -396,10 +399,10 @@ export class Engine {
     let task = await this.claimedAt(taskId, 'ship');
     if (task.prUrl !== pr.url) task = await this.record(task, { prUrl: pr.url }, 'PR opened');
 
-    const merged = shouldMerge(task.baseBranch, resolveGates(settings, task.gateOverrides).pr, def.protectedBranches);
+    const merged = shouldMerge(task.baseBranch, resolveGates(settings, task.gateOverrides).pr, protectedBranches);
     if (merged) {
       try {
-        await retry(() => github.mergePr(pr.url, task.baseBranch, def.protectedBranches));
+        await retry(() => github.mergePr(pr.url, task.baseBranch, protectedBranches));
       } catch (e) {
         if (e instanceof PrBaseMismatchError) return block(task, e.message);
         if (e instanceof ProtectedBranchError) return block(task, `${pr.url} targets ${e.branch}, a protected branch; not merged`);
@@ -478,19 +481,33 @@ export class Engine {
     return updated;
   }
 
+  /** The task's issue number when the issue lives in the PR's repo; undefined on no link, another repo or a failed read. */
+  private async linkedIssue(taskId: string, remote: string): Promise<number | undefined> {
+    try {
+      const link = await retry(() => this.deps.store.getGitHubLink(taskId));
+      if (link?.issueNumber == null) return undefined;
+      const { owner, repo } = parseRemote(remote);
+      return link.repo.toLowerCase() === `${owner}/${repo}`.toLowerCase() ? link.issueNumber : undefined;
+    } catch (e) {
+      this.deps.log?.(`PR body: issue link not read (${firstLine(e)})`);
+      return undefined;
+    }
+  }
+
   private async openPr(github: GitHub, task: Task, cfg: FactoryRepo, branch: string): Promise<{ url: string }> {
     const spec = (await retry(() => this.deps.store.currentDoc(task.taskId, 'spec')))?.body ?? '';
+    const issue = await this.linkedIssue(task.taskId, cfg.remote);
     return github.openPr({
       remote: cfg.remote,
       head: branch,
       base: task.baseBranch,
       title: `[${task.taskId}] ${task.title}`,
-      body: `Factory task ${task.taskId}\n\n${spec.slice(0, 3000)}`,
+      body: `Factory task ${task.taskId}\n\n${spec.slice(0, 3000)}${issue ? `\n\nCloses #${issue}` : ''}`,
     });
   }
 
-  /** Approval, PR and answer moves for one task; returns the moved task, or undefined if nothing moved. */
-  private async syncGate(task: Task, settings: Settings, def: FactoryDef): Promise<Task | undefined> {
+  /** Approval, PR and answer moves for one task (`protectedBranches`: its repo's list); returns the moved task, or undefined if nothing moved. */
+  private async syncGate(task: Task, settings: Settings, def: FactoryDef, protectedBranches: string[]): Promise<Task | undefined> {
     const { store } = this.deps;
     const github = this.deps.githubFor(def.ghUser);
     const approval = async (gate: Gate) => {
@@ -514,8 +531,8 @@ export class Engine {
         if (a?.decision === 'changes') {
           return this.apply(task, this.decideFor(task, { kind: 'approval', approval: a }, settings), this.coreActor);
         }
-        if (a?.decision === 'approve' && url && shouldMerge(task.baseBranch, false, def.protectedBranches)) {
-          await retry(() => github.mergePr(url, task.baseBranch, def.protectedBranches));
+        if (a?.decision === 'approve' && url && shouldMerge(task.baseBranch, false, protectedBranches)) {
+          await retry(() => github.mergePr(url, task.baseBranch, protectedBranches));
           return this.apply(task, this.decideFor(task, { kind: 'pr', state: 'merged' }, settings), this.coreActor);
         }
         return undefined;
@@ -523,6 +540,9 @@ export class Engine {
       case 'blocked':
         if (task.answer?.trim() && task.stage !== null) {
           return this.apply(task, this.decideFor(task, { kind: 'answered' }, settings), this.coreActor);
+        }
+        if (task.answer?.trim() && task.stage === null && def.github?.mode === 'github-only') {
+          return this.apply(task, this.decideFor(task, { kind: 'restart' }, settings), this.coreActor);
         }
         return undefined;
       default:
@@ -538,7 +558,7 @@ export class Engine {
     let worktree: string;
     if (task.status === 'ready') {
       const branch = branchName(task.taskId, task.title);
-      await git.ensureClone(def.factoryId, repo, def.protectedBranches);
+      await git.ensureClone(def.factoryId, repo, protectedFor(def, repo));
       worktree = await this.worktreeFor(def, repo, task, branch);
       const d = this.decideFor(task, { kind: 'claimed' }, settings);
       const moved = await this.apply(task, { ...d, patch: { ...d.patch, branch } }, this.coreActor);
@@ -622,7 +642,7 @@ export class Engine {
   /** The task's worktree; a new one branches from the task's base, not the repo default. */
   private worktreeFor(def: FactoryDef, repo: FactoryRepo, task: Task, branch: string): Promise<string> {
     return this.deps.git.worktree(
-      def.factoryId, { ...repo, baseBranch: task.baseBranch }, task.taskId, branch, def.protectedBranches, { gitName: def.gitName, gitEmail: def.gitEmail },
+      def.factoryId, { ...repo, baseBranch: task.baseBranch }, task.taskId, branch, protectedFor(def, repo), { gitName: def.gitName, gitEmail: def.gitEmail },
     );
   }
 

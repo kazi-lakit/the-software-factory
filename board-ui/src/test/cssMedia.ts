@@ -4,11 +4,11 @@
 // lost to `.sf-view h3` and nothing caught it).
 
 export type Rule = { selector: string; decls: Record<string, string>; index: number };
-type Item = { kind: "rule"; selector: string; body: string; index: number } | { kind: "at"; prelude: string; inner: string; index: number };
+export type Item = { kind: "rule"; selector: string; body: string; index: number } | { kind: "at"; prelude: string; inner: string; index: number };
 
-const stripComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, "");
+export const stripComments = (css: string): string => css.replace(/\/\*[\s\S]*?\*\//g, "");
 
-function parseItems(css: string): Item[] {
+export function parseItems(css: string): Item[] {
   const items: Item[] = [];
   let i = 0;
   let index = 0;
@@ -57,7 +57,7 @@ function splitList(list: string): string[] {
   return out;
 }
 
-function expand(items: Item[], offset: (item: Item) => number): Rule[] {
+export function expand(items: Item[], offset: (item: Item) => number): Rule[] {
   const rules: Rule[] = [];
   for (const item of items) {
     if (item.kind !== "rule") continue;
@@ -126,7 +126,7 @@ export function specificity(selector: string): Spec {
 }
 
 /** The compound after the last combinator. */
-function subject(selector: string): string {
+export function subject(selector: string): string {
   let depth = 0;
   let start = 0;
   for (let i = 0; i < selector.length; i++) {
@@ -139,7 +139,7 @@ function subject(selector: string): string {
 }
 
 const withoutNot = (compound: string): string => compound.replace(/:(not|is|has|where)\([^()]*\)/g, "");
-const classesOf = (compound: string): string[] => [...withoutNot(compound).matchAll(/\.([\w-]+)/g)].map((m) => m[1] as string);
+export const classesOf = (compound: string): string[] => [...withoutNot(compound).matchAll(/\.([\w-]+)/g)].map((m) => m[1] as string);
 const elementOfCompound = (compound: string): string | null => /^[a-zA-Z][\w-]*/.exec(compound)?.[0] ?? null;
 // State qualifiers on the subject: pseudo-classes, pseudo-elements and attribute selectors.
 const states = (compound: string): string[] => [...withoutNot(compound).matchAll(/::?[\w-]+(?:\([^)]*\))?|\[[^\]]*\]/g)].map((m) => m[0]);

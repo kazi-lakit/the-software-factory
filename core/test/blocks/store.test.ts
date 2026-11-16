@@ -6,13 +6,31 @@ import {
 } from '../../src/blocks/store.js';
 import { DEFAULT_SETTINGS } from '../../src/defaults.js';
 import { CoreFieldError, ForbiddenError, MissingVersionError, NotFoundError, RereadAfterUpdateError, VersionConflictError } from '../../src/store.js';
-import { PROTECTED_TASK_FIELDS } from '../../src/blocks/schema.js';
+import { GITHUB_SCHEMA, PROTECTED_TASK_FIELDS } from '../../src/blocks/schema.js';
 import { defFixture, repoFixture, seedBlocksFactories } from '../factoryFixtures.js';
 import { FactoryConfig } from '../../src/factories.js';
 import { runStoreContract } from '../storeContract.js';
+import { emptyPushed, type GitHubLink } from '../../src/githubLink.js';
+import type { GitHubSettings } from '../../src/githubConfig.js';
+import { GITHUB_SCHEMA_MISSING } from '../../src/githubSync.js';
 
 // R1: the contract suite runs on role 'any' (owner identity, no access checks).
-runStoreContract('BlocksStore', (identity) => new BlocksStore(new FakeBlocksData('any'), identity ?? 'owner'));
+/** No identity (contract tests that check no role): the owner store, except that a sync move either identity may make is allowed, as MemoryStore does. */
+function eitherIdentity(): BlocksStore {
+  const data = new FakeBlocksData('any');
+  const owner = new BlocksStore(data, 'owner');
+  const core = new BlocksStore(data, 'core');
+  owner.saveSyncRequest = async (before, after) => {
+    try {
+      return await BlocksStore.prototype.saveSyncRequest.call(owner, before, after);
+    } catch (e) {
+      if (!(e instanceof ForbiddenError)) throw e;
+      return core.saveSyncRequest(before, after);
+    }
+  };
+  return owner;
+}
+runStoreContract('BlocksStore', (identity) => (identity ? new BlocksStore(new FakeBlocksData('any'), identity) : eitherIdentity()));
 
 /** Counts every BlocksData call, and updates on their own. */
 function counting(inner: BlocksData): BlocksData & { calls: number; updates: number } {
@@ -82,6 +100,37 @@ describe('BlocksStore factories', () => {
       expect(cfg.skipped()).toEqual([{ id: 'delta', reason: 'protectedBranches must be a list of branch names' }]);
     },
   );
+
+  const seedRepo = (data: FakeBlocksData, checks: unknown) => {
+    const row = { ...repoFixture('delta', 'api'), checks, writeId: '', repoKey: 'delta/api' } as Record<string, unknown>;
+    if (checks === undefined) delete row.checks;
+    data.seed('FactoryRepo', row as never);
+  };
+  const loadRepos = async (data: FakeBlocksData) => {
+    const s = new BlocksStore(data, 'owner');
+    return new FactoryConfig([defFixture('delta')], await s.listFactoryRepos('delta')).repos('delta');
+  };
+
+  it.each([['missing', undefined], ['not JSON', 'not json'], ['a JSON string', '"x"'], ['JSON null', 'null'], ['a JSON number', '5'], ['broken JSON', '{nope'], ['an invalid list', '[{"name":""}]']])(
+    'a repo whose checks are %s is skipped, never read as no checks',
+    async (_what, raw) => {
+      const data = new FakeBlocksData('any');
+      seedRepo(data, raw);
+      expect(await loadRepos(data)).toEqual([]);
+    },
+  );
+
+  it('decodes a checks list, and an old-shape checks object as the list', async () => {
+    const list = repoFixture('delta', 'api').checks;
+    const old = { server: { cwd: 'server', build: 'b', test: 't' }, client: { cwd: 'client', install: 'i', typecheck: 'tc', lint: 'l', test: 't' }, e2e: 'off' };
+    for (const raw of [JSON.stringify(list), JSON.stringify(old)]) {
+      const data = new FakeBlocksData('any');
+      seedRepo(data, raw);
+      const repos = await loadRepos(data);
+      expect(repos).toHaveLength(1);
+      expect(repos[0]!.checks.map((c) => c.name)).toEqual(['server.build', 'server.test', 'client.install', 'client.typecheck', 'client.lint', 'client.test']);
+    }
+  });
 
   it('stores agentModels as JSON text and reads it back', async () => {
     const data = new FakeBlocksData('any');
@@ -318,6 +367,11 @@ describe('BlocksStore', () => {
     await expect(s.addApproval({ taskId: 'T-1', gate: 'spec', docVersion: 1, decision: 'approve', comment: '' })).rejects.toBeInstanceOf(OwnerOnlyError);
     await expect(s.setSettings({ factories: { blocks: { factory: DEFAULT_SETTINGS, repos: {} } } })).rejects.toThrow('setSettings is done on the Board, not by the factory core');
     expect(data.calls).toBe(0);
+  });
+
+  it('restoreTask is forbidden', async () => {
+    const s = new BlocksStore(new FakeBlocksData('factory-core'), 'core');
+    await expect(s.restoreTask({} as never)).rejects.toThrow('tasks are restored only on the file store');
   });
 
   it('core identity: createTask inserts (the rules allow a core insert) as inbox or ready', async () => {
@@ -778,5 +832,195 @@ describe('legacySettingsStatus', () => {
     expect(await core.legacySettingsStatus()).toEqual({ unmoved: [], unretired: ['global', 'data'] });
     await owner.retireLegacySettings();
     expect(await core.legacySettingsStatus()).toEqual({ unmoved: [], unretired: [] });
+  });
+});
+
+const linkFixture = (over: Partial<GitHubLink> = {}): GitHubLink => ({
+  taskId: 'T-1', factoryId: 'delta', repo: 'o/r', issueNumber: 7, issueNodeId: 'N', project: 'o/1', itemId: 'PVTI', pushed: emptyPushed(), error: null, lease: null, reported: [], version: 0, ...over,
+});
+const githubSettings = (): GitHubSettings => ({
+  mode: 'connected', project: { owner: 'o', number: 1 }, label: 'factory', approvers: ['kazi'],
+  statusMap: { inbox: 'Backlog', ready: 'Todo' } as GitHubSettings['statusMap'],
+});
+const emptyPlan = { actions: [], notApplied: [], done: [], errors: [] };
+
+describe('BlocksStore GitHub (connected mode)', () => {
+  it('stores a link as JSON in its own row; the owner reads it but may not save it', async () => {
+    const storage = newFakeStorage();
+    const core = new BlocksStore(new FakeBlocksData('any', { storage }), 'core');
+    const saved = await core.saveGitHubLink(null, linkFixture());
+    expect(saved.version).toBe(1);
+    const row = new FakeBlocksData('any', { storage }).rows('FactoryGitHubLink')[0]!;
+    expect(row).toMatchObject({ taskId: 'T-1', factoryId: 'delta', version: 1 });
+    expect(JSON.parse(String(row.json))).not.toHaveProperty('taskId');
+    expect(await core.getGitHubLink('T-1')).toMatchObject({ taskId: 'T-1', factoryId: 'delta', repo: 'o/r', issueNumber: 7, version: 1 });
+    const next = await core.saveGitHubLink(saved, { ...saved, issueNumber: 8 });
+    expect(next.version).toBe(2);
+    await expect(core.saveGitHubLink(saved, { ...saved, issueNumber: 9 })).rejects.toBeInstanceOf(VersionConflictError);
+    await expect(core.saveGitHubLink(null, linkFixture())).rejects.toBeInstanceOf(VersionConflictError);
+    const owner = new BlocksStore(new FakeBlocksData('any', { storage }), 'owner');
+    expect(await owner.listGitHubLinks('delta')).toHaveLength(1);
+    expect(await owner.listGitHubLinks('other')).toEqual([]);
+    await expect(owner.saveGitHubLink(next, next)).rejects.toThrow('GitHub links are written by the factory core');
+  });
+
+  it('a sync request round-trips plan and result JSON; nullable texts read back as null', async () => {
+    const storage = newFakeStorage();
+    const owner = new BlocksStore(new FakeBlocksData('any', { storage }), 'owner');
+    const core = new BlocksStore(new FakeBlocksData('any', { storage }), 'core');
+    const q = await owner.requestSync('delta', 'kazi');
+    expect(q).toMatchObject({ plan: null, plannedAt: null, applyingSince: null, result: null, appliedAt: null, error: null, version: 1 });
+    expect((await owner.listSyncRequests('delta'))[0]).toEqual(q);
+    const plan = { actions: [], notApplied: [{ taskId: null, issue: 'o/r#1', change: 'new issue', reason: 'r' }], done: [{ taskId: 'T-1', issue: 'o/r#2', change: 'c' }], errors: [] };
+    const planned = await core.saveSyncRequest(q, { ...q, state: 'planned', plan, plannedAt: 'p' });
+    const applying = await owner.saveSyncRequest(planned, { ...planned, state: 'applying', applyingSince: 'a' });
+    const result = { created: [{ taskId: 'T-2', issue: 'o/r#3', status: 'inbox' as const }], applied: [], notApplied: [], errors: [] };
+    const applied = await owner.saveSyncRequest(applying, { ...applying, state: 'applied', result, appliedAt: 'z' });
+    const [back] = await owner.listSyncRequests('delta');
+    expect(back).toEqual(applied);
+    expect(back).toMatchObject({ plan, result, plannedAt: 'p', applyingSince: 'a', appliedAt: 'z', error: null });
+  });
+
+  it('an unrelated save keeps the stored github block when an earlier read happened before the schema probe was ready', async () => {
+    let t = Date.parse('2026-11-15T00:00:00Z');
+    const storage = newFakeStorage();
+    const ready = new FakeBlocksData('any', { storage });
+    const missing = new FakeBlocksData('any', { storage, missing: GITHUB_SCHEMA });
+    const first = await new BlocksStore(ready, 'owner').saveFactoryDef(null, defFixture('delta', { github: githubSettings() }));
+    expect(first.github).toBeDefined();
+    let current: BlocksData = missing;
+    const data: BlocksData = { list: (...a) => current.list(...a), insert: (...a) => current.insert(...a), update: (...a) => current.update(...a), hardDelete: (...a) => current.hardDelete(...a) };
+    const s = new BlocksStore(data, 'owner', { now: () => new Date(t) });
+    const [before] = await s.listFactoryDefs();
+    expect(before).not.toHaveProperty('github');
+    current = ready;
+    t += 61_000;
+    expect(await s.githubSchemaReady()).toBe(true);
+    await s.saveFactoryDef(before!, { ...before!, name: 'x' });
+    expect(JSON.parse(String(ready.rows('FactoryDef')[0]!.github))).toMatchObject({ mode: 'connected' });
+    expect(ready.rows('FactoryDef')[0]!.name).toBe('x');
+  });
+
+  it('the github block is stored as JSON text and read back; turning it off writes empty text', async () => {
+    const storage = newFakeStorage();
+    const data = new FakeBlocksData('any', { storage });
+    const s = new BlocksStore(data, 'owner');
+    const def = await s.saveFactoryDef(null, defFixture('delta', { github: githubSettings() }));
+    expect(JSON.parse(String(data.rows('FactoryDef')[0]!.github))).toMatchObject({ mode: 'connected' });
+    expect((await s.listFactoryDefs())[0]!.github).toEqual(githubSettings());
+    const { github: _g, ...off } = def;
+    await s.saveFactoryDef(def, off);
+    expect(data.rows('FactoryDef')[0]!.github).toBe('');
+    expect((await s.listFactoryDefs())[0]!.github).toBeUndefined();
+    data.seed('FactoryDef', { ...data.rows('FactoryDef')[0]!, factoryId: 'bad', github: '{nope' });
+    expect((await s.listFactoryDefs()).find((d) => d.factoryId === 'bad')!.github).toBe('{nope');
+  });
+
+  it('health keeps watcher fields when written without them', async () => {
+    const s = new BlocksStore(new FakeBlocksData('any'), 'core');
+    await s.setFactoryHealth({ factoryId: 'delta', ghLoggedIn: true, checkedAt: 't1', watcherSeenAt: 'w', githubProblems: ['p'] });
+    await s.setFactoryHealth({ factoryId: 'delta', ghLoggedIn: false, checkedAt: 't2' });
+    expect(await s.listFactoryHealth()).toEqual([{ factoryId: 'delta', ghLoggedIn: false, checkedAt: 't2', watcherSeenAt: 'w', githubProblems: ['p'] }]);
+  });
+
+  it('under the access rules the core writes links and plans requests; the owner requests and applies', async () => {
+    const storage = newFakeStorage();
+    const core = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core');
+    const owner = new BlocksStore(new FakeBlocksData('factory-owner', { storage }), 'owner');
+    await core.saveGitHubLink(null, linkFixture());
+    expect(await owner.listGitHubLinks()).toHaveLength(1);
+    const q = await owner.requestSync('delta', 'kazi');
+    const planned = await core.saveSyncRequest(q, { ...q, state: 'planned', plan: emptyPlan, plannedAt: 'p' });
+    expect(planned.plan).toEqual(emptyPlan);
+    const applying = await owner.saveSyncRequest(planned, { ...planned, state: 'applying', applyingSince: 'a' });
+    const result = { created: [], applied: [], notApplied: [], errors: [] };
+    const applied = await owner.saveSyncRequest(applying, { ...applying, state: 'applied', result, appliedAt: 'z' });
+    expect(applied).toMatchObject({ version: 4, result });
+    expect((await core.listSyncRequests('delta'))[0]).toMatchObject({ state: 'applied', plan: emptyPlan, result });
+  });
+
+  it('only the owner refreshes an applying row', async () => {
+    const storage = newFakeStorage();
+    const core = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core');
+    const owner = new BlocksStore(new FakeBlocksData('factory-owner', { storage }), 'owner');
+    const q = await owner.requestSync('delta', 'kazi');
+    const planned = await core.saveSyncRequest(q, { ...q, state: 'planned', plan: emptyPlan, plannedAt: 'p' });
+    const applying = await owner.saveSyncRequest(planned, { ...planned, state: 'applying', applyingSince: 'a' });
+    await expect(core.saveSyncRequest(applying, { ...applying, applyingSince: 'b' })).rejects.toBeInstanceOf(ForbiddenError);
+    expect(await owner.saveSyncRequest(applying, { ...applying, applyingSince: 'b' })).toMatchObject({ applyingSince: 'b', version: 4 });
+  });
+
+  describe('before the schema is applied', () => {
+    const make = (extra: { now?: () => Date } = {}) => {
+      const storage = newFakeStorage();
+      const data = new FakeBlocksData('any', { storage, missing: GITHUB_SCHEMA });
+      return { data, owner: new BlocksStore(data, 'owner', extra), core: new BlocksStore(data, 'core', extra) };
+    };
+
+    it('defs, tasks and health still load; links and requests are empty', async () => {
+      const { data, owner, core } = make();
+      seedBlocksFactories(data, { defs: [defFixture('delta')], repos: [] });
+      await core.setFactoryHealth({ factoryId: 'delta', ghLoggedIn: true, checkedAt: 't', watcherSeenAt: 'w', githubProblems: ['p'] });
+      expect(await owner.listFactoryDefs()).toMatchObject([{ factoryId: 'delta' }]);
+      expect((await owner.listFactoryDefs())[0]).not.toHaveProperty('github');
+      expect(await owner.listFactoryHealth()).toEqual([{ factoryId: 'delta', ghLoggedIn: true, checkedAt: 't' }]);
+      expect(await owner.listTasks()).toEqual([]);
+      expect(await owner.listGitHubLinks()).toEqual([]);
+      expect(await owner.getGitHubLink('T-1')).toBeUndefined();
+      expect(await owner.listSyncRequests()).toEqual([]);
+      expect(await owner.githubSchemaReady()).toBe(false);
+    });
+
+    it('a def without github saves; with github, a link save, requestSync are refused with the schema message', async () => {
+      const { owner, core } = make();
+      const def = await owner.saveFactoryDef(null, defFixture('delta'));
+      await owner.saveFactoryDef(def, { ...def, name: 'Delta 2' });
+      await expect(owner.saveFactoryDef(null, defFixture('mods', { github: githubSettings() }))).rejects.toThrow(GITHUB_SCHEMA_MISSING);
+      await expect(owner.saveFactoryDef(null, defFixture('mods', { github: githubSettings() }))).rejects.toBeInstanceOf(ForbiddenError);
+      await expect(core.saveGitHubLink(null, linkFixture())).rejects.toThrow(GITHUB_SCHEMA_MISSING);
+      await expect(owner.requestSync('delta', 'kazi')).rejects.toThrow(GITHUB_SCHEMA_MISSING);
+      const q = { requestId: 'r', factoryId: 'delta', requestedAt: 't', requestedBy: 'k', state: 'queued' as const, plan: null, plannedAt: null, applyingSince: null, result: null, appliedAt: null, error: null, version: 1 };
+      await expect(core.saveSyncRequest(q, { ...q, state: 'planned' })).rejects.toThrow(GITHUB_SCHEMA_MISSING);
+    });
+
+    it('the probe result true is kept; false is probed again after 60 s', async () => {
+      let t = Date.parse('2026-11-15T00:00:00Z');
+      const storage = newFakeStorage();
+      const missing = new FakeBlocksData('any', { storage, missing: GITHUB_SCHEMA });
+      const ready = new FakeBlocksData('any', { storage });
+      let current: BlocksData = missing;
+      const data = counting({ list: (...a) => current.list(...a), insert: (...a) => current.insert(...a), update: (...a) => current.update(...a), hardDelete: (...a) => current.hardDelete(...a) });
+      const s = new BlocksStore(data, 'owner', { now: () => new Date(t) });
+      expect(await s.githubSchemaReady()).toBe(false);
+      const calls = data.calls;
+      current = ready;
+      t += 59_000;
+      expect(await s.githubSchemaReady()).toBe(false);
+      expect(data.calls).toBe(calls);
+      t += 2_000;
+      expect(await s.githubSchemaReady()).toBe(true);
+      const after = data.calls;
+      current = missing;
+      t += 3_600_000;
+      expect(await s.githubSchemaReady()).toBe(true);
+      expect(data.calls).toBe(after);
+    });
+
+    it('parallel callers share one probe', async () => {
+      const data = counting(new FakeBlocksData('any', { storage: newFakeStorage() }));
+      const s = new BlocksStore(data, 'owner');
+      const one = counting(new FakeBlocksData('any', { storage: newFakeStorage() }));
+      await new BlocksStore(one, 'owner').githubSchemaReady();
+      expect(await Promise.all([s.githubSchemaReady(), s.githubSchemaReady(), s.githubSchemaReady()])).toEqual([true, true, true]);
+      expect(data.calls).toBe(one.calls);
+    });
+
+    it('an unauthorized probe is thrown, not read as missing', async () => {
+      const data: BlocksData = {
+        list: async () => { throw new BlocksUnauthorizedError(); }, insert: async () => ({ kind: 'forbidden' }),
+        update: async () => ({ kind: 'forbidden' }), hardDelete: async () => undefined,
+      };
+      await expect(new BlocksStore(data, 'owner').githubSchemaReady()).rejects.toBeInstanceOf(BlocksUnauthorizedError);
+    });
   });
 });

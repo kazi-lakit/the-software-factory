@@ -1,6 +1,6 @@
 // Board tables, indexes and access rules as code. `tools/blocks-resources.ts` renders these into the
 // files the `blocks` CLI deploys. Ported from ACR's tools/blocks-store/resources.ts.
-export const TABLES = ['FactoryTask', 'FactoryDoc', 'FactoryApproval', 'FactorySettings', 'FactoryRun', 'FactoryEvent', 'FactorySpike', 'FactoryDef', 'FactoryRepo', 'FactoryHealth'] as const;
+export const TABLES = ['FactoryTask', 'FactoryDoc', 'FactoryApproval', 'FactorySettings', 'FactoryRun', 'FactoryEvent', 'FactorySpike', 'FactoryDef', 'FactoryRepo', 'FactoryHealth', 'FactoryGitHubLink', 'FactorySyncRequest'] as const;
 export type SchemaName = (typeof TABLES)[number];
 export type Role = 'factory-owner' | 'factory-core';
 export type Operation = 'read' | 'insert' | 'edit' | 'delete';
@@ -45,6 +45,7 @@ export const FIELDS: Record<SchemaName, Field[]> = {
     s('gitName', 'Git author name.'), s('gitEmail', 'Git author email.'), s('docsPath', 'Folder the factory writes docs to.'),
     s('ghUser', 'GitHub login of the gh CLI account the factory uses (never a token).'), i('active', '1 if the factory is active, else 0.'),
     s('agentModels', 'JSON text of the per-stage agent models (stage to opus, sonnet, haiku or fable).'),
+    s('github', 'JSON text of the GitHub settings; empty = no GitHub.'),
     i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
   ],
   FactoryRepo: [
@@ -54,6 +55,19 @@ export const FIELDS: Record<SchemaName, Field[]> = {
   ],
   FactoryHealth: [
     s('factoryId', 'Unique id of the factory.'), i('ghLoggedIn', "1 if the factory's gh login was found, else 0."), s('checkedAt', 'ISO time of the check.'),
+    s('watcherSeenAt', 'ISO time the watcher last reported in.'), s('githubProblems', 'JSON text of the GitHub setup problems the watcher found.'),
+    i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
+  ],
+  FactoryGitHubLink: [
+    s('taskId', 'Unique id of the task the link belongs to.'), s('factoryId', 'Id of the factory the task belongs to.'),
+    s('json', 'JSON text of the GitHub link (issue, PR and sync state).'),
+    i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
+  ],
+  FactorySyncRequest: [
+    s('requestId', 'Unique id of the sync request.'), s('factoryId', 'Id of the factory to sync.'), s('requestedAt', 'ISO time the owner asked for the sync.'),
+    s('requestedBy', 'Who asked for the sync.'), s('state', 'Request state in its lifecycle.'), s('plan', 'JSON text of the sync plan.'),
+    s('plannedAt', 'ISO time the plan was made.'), s('applyingSince', 'ISO time the apply started.'), s('result', 'JSON text of the apply result.'),
+    s('appliedAt', 'ISO time the apply finished.'), s('error', 'Error text when the request failed.'),
     i('version', 'Row version; bumped on every update.'), s('writeId', 'Id of the write that produced this version.'),
   ],
 };
@@ -63,6 +77,7 @@ export const UNIQUE: Record<SchemaName, string[]> = {
   FactoryTask: ['taskId'], FactoryDoc: ['docKey'], FactoryApproval: ['approvalId'], FactorySettings: ['scope'],
   FactoryRun: ['runId'], FactoryEvent: ['eventId'], FactorySpike: ['spikeKey'],
   FactoryDef: ['factoryId'], FactoryRepo: ['repoKey'], FactoryHealth: ['factoryId'],
+  FactoryGitHubLink: ['taskId'], FactorySyncRequest: ['requestId'],
 };
 
 const both: Role[] = ['factory-owner', 'factory-core'];
@@ -78,7 +93,15 @@ export const ACCESS: Record<SchemaName, Partial<Record<Operation, Role[]>>> = {
   FactoryDef: { read: both, insert: ['factory-owner'], edit: ['factory-owner'] },
   FactoryRepo: { read: both, insert: ['factory-owner'], edit: ['factory-owner'] },
   FactoryHealth: { read: both, insert: ['factory-core'], edit: ['factory-core'] },
+  FactoryGitHubLink: { read: both, insert: ['factory-core'], edit: ['factory-core'] },
+  FactorySyncRequest: { read: both, insert: ['factory-owner'], edit: both },
 };
+
+/** What connected mode needs beyond the base schema; the store probes for it. */
+export const GITHUB_SCHEMA = {
+  tables: ['FactoryGitHubLink', 'FactorySyncRequest'],
+  fields: { FactoryDef: ['github'], FactoryHealth: ['watcherSeenAt', 'githubProblems'] },
+} as const;
 
 // Operation numbers follow the Blocks probe entries.
 const OPERATIONS: { key: Operation; number: number; verb: string }[] = [

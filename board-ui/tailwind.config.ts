@@ -5,8 +5,8 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: "#18181b",
-        surface: "#f6f7f9"
+        ink: "#0c1114",
+        surface: "#eef2f3"
       }
     }
   },

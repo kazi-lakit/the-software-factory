@@ -1,16 +1,19 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ComponentType } from "react";
+import { allowNavigation } from "../../lib/navigationGuard";
 import { AppShell } from "../AppShell";
 import { RedirectIfAuthenticated, RequireAuth, RequireOwner } from "./guards";
 import { ErrorPage } from "../../features/auth/ErrorPage";
 import { NotFoundPage } from "../../features/auth/NotFoundPage";
 import { BoardView } from "../../features/board/BoardView";
 import { HistoryView } from "../../features/history/HistoryView";
+import { NewTaskPage } from "../../features/newTask/NewTaskPage";
+import { NewFactoryPage } from "../../features/settings/NewFactoryPage";
 import { SettingsView } from "../../features/settings/SettingsView";
 import { TaskView } from "../../features/task/TaskView";
 import { ProfilePage } from "../../features/profile/ProfilePage";
 import { CallbackPage } from "../../pages/Callback";
-import { LoginPage } from "../../pages/Login";
+import { LandingPage } from "../../pages/Landing";
 
 type PageProps = { onNavigate: (path: string) => void };
 
@@ -19,15 +22,22 @@ const protectedRoutes: Record<string, ComponentType<PageProps>> = {
   "/error": ErrorPage,
   "/history": HistoryView,
   "/profile": ProfilePage,
-  "/settings": SettingsView
+  "/settings": SettingsView,
+  "/settings/factories/new": NewFactoryPage
 };
 
 export function AppRouter() {
   const [path, setPath] = useState(() => window.location.pathname);
   const [search, setSearch] = useState(() => window.location.search);
+  const route = useRef({ path, search });
+  route.current = { path, search };
 
   useEffect(() => {
     const onPopState = () => {
+      if (window.location.pathname !== route.current.path && !allowNavigation()) {
+        window.history.pushState({}, "", `${route.current.path}${route.current.search}#settings-factories`);
+        return;
+      }
       setPath(window.location.pathname);
       setSearch(window.location.search);
     };
@@ -36,7 +46,10 @@ export function AppRouter() {
   }, []);
 
   function navigate(nextPath: string) {
-    const [nextPathname = "/", queryString = ""] = nextPath.split("?");
+    // A #fragment is the browser's (an anchor on the page), never part of the route.
+    const [beforeHash = "/"] = nextPath.split("#");
+    const [nextPathname = "/", queryString = ""] = beforeHash.split("?");
+    if (nextPathname !== path && !allowNavigation()) return;
     window.history.pushState({}, "", nextPath);
     setPath(nextPathname);
     setSearch(queryString ? `?${queryString}` : "");
@@ -51,15 +64,16 @@ export function AppRouter() {
     const returnTo = new URLSearchParams(search).get("returnTo") || undefined;
     return (
       <RedirectIfAuthenticated onNavigate={navigate}>
-        <LoginPage returnTo={returnTo} />
+        <LandingPage returnTo={returnTo} />
       </RedirectIfAuthenticated>
     );
   }
 
-  // /tasks/<taskId>: one task, shown under the Board view.
-  const taskMatch = /^\/tasks\/([^/]+)$/.exec(path);
+  // /tasks/new: the New task page; /tasks/<taskId>: one task. Both are shown under the Board view.
+  const isNewTask = path === "/tasks/new";
+  const taskMatch = isNewTask ? null : /^\/tasks\/([^/]+)$/.exec(path);
   const taskId = taskMatch ? decodeSegment(taskMatch[1] ?? "") : undefined;
-  const Page = taskId === undefined ? protectedRoutes[path] : undefined;
+  const Page = isNewTask ? NewTaskPage : taskId === undefined ? protectedRoutes[path] : undefined;
   if (!taskId && !Page) {
     return <NotFoundPage onNavigate={navigate} />;
   }

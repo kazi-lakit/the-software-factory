@@ -19,7 +19,7 @@ const OUTCOME_TEXT = { already: "already there", created: "created", kept: "kept
  * Imports the JSON `factory migrate --export` wrote: pick or paste it, review what it creates, confirm. The owner's
  * session does the writes (repos, then the definition, then the legacy settings move). Repeating it is safe.
  */
-export function ImportFactory({ onClose }: { onClose: () => void }) {
+export function ImportFactory({ heading = true, onClose, onDone = onClose }: { heading?: boolean; onClose: () => void; onDone?: () => void }) {
   const ids = useId();
   const client = useQueryClient();
   const [text, setText] = useState("");
@@ -98,14 +98,14 @@ export function ImportFactory({ onClose }: { onClose: () => void }) {
           <li>Legacy settings left: {result.remaining.join(", ") || "none"}.</li>
         </ul>
         {result.remaining.length > 0 ? <p className="sf-hint">Left rows have no value under the new scopes yet. Import again after fixing the factory.</p> : null}
-        <div className="sf-actions"><button type="button" className="sf-button" onClick={onClose}>Done</button></div>
+        <div className="sf-actions"><button type="button" className="sf-button" onClick={onDone}>Done</button></div>
       </section>
     );
   }
 
   return (
     <section className="sf-panel sf-form sf-import" aria-label="Import factory">
-      <h3>Import factory</h3>
+      {heading ? <h3>Import factory</h3> : null}
       <p className="sf-hint">Use the file written by <span className="sf-mono">factory migrate --export</span>. It holds no secrets.</p>
       <div className="sf-field">
         <label className="sf-field-label" htmlFor={`${ids}-file`}>Import file</label>

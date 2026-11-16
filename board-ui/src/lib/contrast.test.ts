@@ -44,7 +44,8 @@ const textPairs: [string, string][] = [
   ["done", "bg"], ["done", "surface"], ["done", "surface-sunk"], ["done", "done-soft"],
   ["accent-text", "accent-soft"], ["accent-text", "bg"], ["accent-text", "surface"],
   ["on-accent", "accent"], ["on-primary", "primary"], ["on-primary", "primary-hover"], ["on-primary-soft", "primary-soft"],
-  ["added", "added-soft"], ["removed", "removed-soft"]
+  ["added", "added-soft"], ["removed", "removed-soft"],
+  ["progress-text", "bg"], ["progress-text", "surface"], ["progress-text", "progress-soft"]
 ];
 
 describe("ratio_helper_matches_known_values", () => {
@@ -84,7 +85,8 @@ describe("task_page_text_pairs_meet_4_5_to_1", () => {
     [".sf-stepper-label", "muted", "bg"],
     [".sf-stepper-item-waiting .sf-stepper-label", "accent-text", "bg"],
     [".sf-details dt", "muted", "surface"],
-    [".sf-task-meta", "muted", "bg"]
+    [".sf-breadcrumb", "muted", "bg"],
+    [".sf-gate-hint", "muted", "surface"]
   ];
   const cases = Object.keys(themes).flatMap((t) => rules.map(([sel, fg, bg]) => [t, sel, fg, bg] as const));
   it.each(cases)("%s: %s (%s on %s)", (theme, selector, fg, bg) => {
@@ -123,5 +125,49 @@ describe("danger_button_meets_4_5_to_1", () => {
     const t = themes[theme] as Record<string, string>;
     const r = ratio(parse(t["--sf-removed"] as string).rgb, parse(t[`--sf-${bg}`] as string).rgb);
     expect(r, `${theme}: removed on ${bg} is ${r.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+// Text remains readable over the combined CSS and shader grid at maximum opacity.
+describe("landing_text_meets_4_5_over_the_field", () => {
+  const cases = (["dark", "light"] as const).flatMap((theme) => ["text", "muted", "accent-text"].map((fg) => [theme, fg] as const));
+  it.each(cases)("%s: %s over the field", (theme, fg) => {
+    const t = themes[theme] as Record<string, string>;
+    const bg = parse(t["--sf-bg"] as string).rgb;
+    const field = over({ rgb: [133, 148, 158], alpha: .06 }, over({ rgb: [150, 164, 174], alpha: .08 }, bg));
+    const text = parse(t[`--sf-${fg}`] as string).rgb;
+    const onField = ratio(text, field);
+    expect(onField, `${theme}: ${fg} over the field is ${onField.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+    const onBg = ratio(text, bg);
+    expect(onBg, `${theme}: ${fg} on bg is ${onBg.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
+  });
+});
+
+describe("landing_selectors_use_only_text_tokens", () => {
+  const rules: [string, string][] = [
+    [".sf-landing-title", "text"],
+    [".sf-landing-heading", "text"],
+    [".sf-landing-cell-title", "text"],
+    [".sf-landing-brand", "text"],
+    [".sf-landing-lead", "muted"],
+    [".sf-landing-kicker", "muted"],
+    [".sf-landing-cell-text", "muted"],
+    [".sf-landing-footer", "muted"]
+  ];
+  it.each(rules)("%s is %s", (selector, fg) => {
+    expect(tokens(css, selector).color, `${selector} colour`).toBe(`var(--sf-${fg})`);
+  });
+});
+
+describe("landing_notice_is_a_readable_warning", () => {
+  it("uses the warning surface pair", () => {
+    const t = tokens(css, ".sf-landing-notice");
+    expect(t.color).toBe("var(--sf-on-primary-soft)");
+    expect(t.background).toBe("var(--sf-primary-soft)");
+  });
+  it.each(["dark", "light"])("%s: notice text meets 4.5:1 on its surface", (theme) => {
+    const t = themes[theme] as Record<string, string>;
+    const value = ratio(parse(t["--sf-on-primary-soft"] as string).rgb, parse(t["--sf-primary-soft"] as string).rgb);
+    expect(value, `${theme}: ${value.toFixed(2)}:1`).toBeGreaterThanOrEqual(4.5);
   });
 });

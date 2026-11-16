@@ -1,13 +1,22 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { shellExec } from '../src/checks.js';
 import { Engine, type EngineDeps } from '../src/engine.js';
-import { LocalGitRepos } from '../src/git.js';
+import { LocalGitRepos, type GitIdentity } from '../src/git.js';
 import { FakeGitHub } from '../src/github.js';
-import { FactoryConfig } from '../src/factories.js';
+import { FactoryConfig, type FactoryRepo } from '../src/factories.js';
+import { run, type CliDeps } from '../src/cli.js';
+import { FakeGitHubBoard } from '../src/githubBoard.js';
+import { BlocksStore } from '../src/blocks/store.js';
+import { FakeBlocksData, newFakeStorage } from '../src/blocks/fakeData.js';
+import { DEFAULT_STATUS_MAP } from '../src/githubConfig.js';
+import { applySyncRequest, syncSummary, type SyncRequest } from '../src/githubSync.js';
+import { createTask } from '../src/owner.js';
+import { FileStore } from '../src/store.js';
+import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { defFixture, repoFixture } from './factoryFixtures.js';
 import { nextTicket } from './nextTicket.js';
 import { MemoryStore } from '../src/store.js';
@@ -18,11 +27,24 @@ const git = (cwd: string, ...args: string[]) =>
 
 /** FakeGitHub only parses github.com remotes; the engine passes the temp bare repo path, so give it a github-shaped one. */
 class PathRemoteGitHub extends FakeGitHub {
+  /** The body of every PR opened. */
+  readonly bodies: string[] = [];
   override openPr(p: Parameters<FakeGitHub['openPr']>[0]) {
+    this.bodies.push(p.body);
     return super.openPr({ ...p, remote: 'git@github.com:SELISEdigitalplatforms/blocks-data.git' });
   }
   override findOpenPr(p: Parameters<FakeGitHub['findOpenPr']>[0]) {
     return super.findOpenPr({ ...p, remote: 'git@github.com:SELISEdigitalplatforms/blocks-data.git' });
+  }
+}
+
+/** Clones and pushes the temp bare repo while the engine and the store keep the repo's real GitHub remote (the PR body reads the issue number from it). */
+class BareRemoteGit extends LocalGitRepos {
+  override ensureClone(f: string, repo: FactoryRepo, protectedBranches: string[]) {
+    return super.ensureClone(f, { ...repo, remote: bare }, protectedBranches);
+  }
+  override worktree(f: string, repo: FactoryRepo, taskId: string, branch: string, protectedBranches: string[], identity?: GitIdentity) {
+    return super.worktree(f, { ...repo, remote: bare }, taskId, branch, protectedBranches, identity);
   }
 }
 
@@ -51,11 +73,14 @@ afterEach(() => {
 function setup(clientTest = 'true') {
   const cfg = repoFixture('blocks', 'data', {
     remote: bare,
-    checks: {
-      server: { cwd: 'server', build: 'true', test: 'true' },
-      client: { cwd: 'client', install: 'true', typecheck: 'true', lint: 'true', test: clientTest },
-      e2e: 'off',
-    },
+    checks: [
+      { name: 'server.build', cwd: 'server', run: 'true' },
+      { name: 'server.test', cwd: 'server', run: 'true', needs: 'server.build' },
+      { name: 'client.install', cwd: 'client', run: 'true' },
+      { name: 'client.typecheck', cwd: 'client', run: 'true', needs: 'client.install' },
+      { name: 'client.lint', cwd: 'client', run: 'true', needs: 'client.install' },
+      { name: 'client.test', cwd: 'client', run: clientTest, needs: 'client.install' },
+    ],
   });
   const store = new MemoryStore();
   const github = new PathRemoteGitHub();
@@ -175,5 +200,322 @@ describe('integration', () => {
     expect(task.status).toBe('blocked');
     expect(task.attempt).toBe(3);
     expect(task.blockedReason).toBe('returned to build 3 times');
+  });
+});
+
+describe('GitHub-only push', () => {
+  const MAP = { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress', plan_review: 'In progress',
+    build: 'In progress', verify: 'In progress', review: 'In progress', pr_open: 'In review', done: 'Merged', blocked: 'In progress', cancelled: 'Backlog' };
+  const yamlText = (over: Record<string, string> = {}) => 'factoryId: f\nname: F\ngithub:\n  mode: github-only\n  project: o/3\n  statusMap:\n'
+    + Object.entries({ ...MAP, ...over }).map(([k, v]) => `    ${k}: ${v}\n`).join('');
+  const repoYaml = 'repoId: app\nremote: git@github.com:o/app.git\nchecks:\n  server: { cwd: s, build: b, test: t }\n  client: { cwd: c, install: i, typecheck: tc, lint: l, test: t }\n  e2e: off\n';
+
+  test('GitHub-only push follows a task from new to cancelled', async () => {
+    const root = join(tmp, 'froot');
+    mkdirSync(join(root, 'factories', 'f', 'repos'), { recursive: true });
+    const yaml = join(root, 'factories', 'f', 'factory.yaml');
+    writeFileSync(yaml, yamlText());
+    writeFileSync(join(root, 'factories', 'f', 'repos', 'app.yaml'), repoYaml);
+    const board = new FakeGitHubBoard();
+    const info = board.addProject({ owner: 'o', number: 3 }, ['Backlog', 'Todo', 'In progress', 'In review', 'Merged']);
+    const REPO = { owner: 'o', repo: 'app' };
+    const saved = process.env.FACTORY_ROOT;
+    process.env.FACTORY_ROOT = root;
+    try {
+      let out: string[] = [];
+      const go = async (...argv: string[]) => {
+        out = [];
+        const code = await run(['--store', 'file', ...argv], { out: (s) => out.push(s), err: (s) => out.push(s) }, undefined, { githubBoardFor: () => board });
+        expect(code, out.join('\n')).toBe(0);
+        return out.join('\n');
+      };
+      const status = async () => (await board.listItems(info))[0]!.status;
+      const boardFile = join(root, '.factory', 'board.json');
+      const linkVersion = async (id: string) => (await new FileStore(boardFile, { factoriesDir: join(root, 'factories') }).getGitHubLink(id))!.version;
+
+      const created = await go('new', '--repo', 'app', '--title', 'A', '--description', 'D');
+      const id = /^(\S+) created in/m.exec(created)![1]!;
+      expect(created).toContain('issue o/app#1');
+      expect(board.issue(REPO, 1).labels).toEqual(['factory']);
+      expect(board.issue(REPO, 1).body).toMatch(new RegExp(`<!-- tsf:task=${id} factory=f -->$`));
+      expect(await status()).toBe('Backlog');
+
+      await go('dev', 'ready', id);
+      expect(await status()).toBe('Todo');
+
+      // The engine's own write path: a spec doc, then the task in spec_review.
+      const engineSide = new FileStore(boardFile, { factoriesDir: join(root, 'factories') });
+      await engineSide.addDoc(id, 'spec', '# Spec\nDo it.', 'spec-writer');
+      const t = (await engineSide.getTask(id))!;
+      await engineSide.updateTask(id, t.version, { status: 'spec_review', stage: 'spec' });
+      expect(await go('sync')).toContain('pushed 1, failed 0');
+      const comments = board.issue(REPO, 1).comments;
+      expect(comments).toHaveLength(1);
+      expect(comments[0]!.body.startsWith('## Spec v1')).toBe(true);
+      expect(await status()).toBe('In progress');
+
+      writeFileSync(yaml, yamlText({ spec_review: 'In review' }));
+      const later = new Date(Date.now() + 5000);
+      utimesSync(yaml, later, later);
+      await go('sync');
+      expect(await status()).toBe('In review');
+      expect(board.issue(REPO, 1).comments).toHaveLength(1);
+
+      await go('dev', 'cancel', id);
+      expect(board.issue(REPO, 1)).toMatchObject({ state: 'closed', stateReason: 'not_planned' });
+      expect(await status()).toBe('Backlog');
+
+      const v = await linkVersion(id);
+      expect(await go('sync')).toContain('pushed 0, failed 0');
+      expect(await linkVersion(id)).toBe(v);
+    } finally {
+      if (saved === undefined) delete process.env.FACTORY_ROOT; else process.env.FACTORY_ROOT = saved;
+    }
+  });
+});
+
+describe('GitHub-only end to end', () => {
+  const MAP = { inbox: 'Backlog', ready: 'Todo', spec: 'In progress', spec_review: 'In progress', plan: 'In progress', plan_review: 'In progress',
+    build: 'In progress', verify: 'In progress', review: 'In progress', pr_open: 'In review', done: 'Merged', blocked: 'In progress', cancelled: 'Backlog' };
+  const factoryYaml = 'factoryId: f\nname: F\ngithub:\n  mode: github-only\n  project: o/3\n  statusMap:\n'
+    + Object.entries(MAP).map(([k, v]) => `    ${k}: ${v}\n`).join('');
+  const repoYaml = 'repoId: app\nremote: git@github.com:o/app.git\nchecks:\n  server: { cwd: server, build: "true", test: "true" }\n'
+    + '  client: { cwd: client, install: "true", typecheck: "true", lint: "true", test: "true" }\n  e2e: off\n';
+  const reply = (r: object, doc?: string) => `<factory-result>\n${JSON.stringify(r)}\n</factory-result>${doc === undefined ? '' : `\n<factory-doc>\n${doc}\n</factory-doc>`}`;
+
+  test('a hand-made issue goes from Todo to Merged through comments, reviews and the merge', async () => {
+    const root = join(tmp, 'froot');
+    mkdirSync(join(root, 'factories', 'f', 'repos'), { recursive: true });
+    writeFileSync(join(root, 'factories', 'f', 'factory.yaml'), factoryYaml);
+    writeFileSync(join(root, 'factories', 'f', 'repos', 'app.yaml'), repoYaml);
+    const boardFile = join(root, '.factory', 'board.json');
+    const fileStore = () => new FileStore(boardFile, { factoriesDir: join(root, 'factories') });
+    const board = new FakeGitHubBoard();
+    const info = board.addProject({ owner: 'o', number: 3 }, ['Backlog', 'Todo', 'In progress', 'In review', 'Merged']);
+    const fakeGitHub = new PathRemoteGitHub();
+    const REPO = { owner: 'o', repo: 'app' };
+    const held = new Set<string>();
+    const pullLock = async (f: string) => (held.has(f) ? null : (held.add(f), () => { held.delete(f); }));
+    // Spec and PR gates on, plan gate off (the defaults, set explicitly).
+    await fileStore().updateSettingsScope('f', DEFAULT_SETTINGS, { ...DEFAULT_SETTINGS, gates: { spec: true, plan: false, pr: true } });
+
+    const makeEngine = async () => {
+      const store = fileStore();
+      const engine = new Engine({
+        store,
+        git: new BareRemoteGit(root),
+        githubFor: () => fakeGitHub,
+        factories: async () => new FactoryConfig(await store.listFactoryDefs(), await store.listFactoryRepos()),
+        exec: shellExec,
+        now: () => new Date(),
+        mode: 'session',
+        claimant: 'me',
+      });
+      return { engine, store };
+    };
+    const saved = process.env.FACTORY_ROOT;
+    process.env.FACTORY_ROOT = root;
+    try {
+      let out: string[] = [];
+      let err: string[] = [];
+      const go = async (...argv: string[]) => {
+        out = [];
+        err = [];
+        const code = await run(['--store', 'file', ...argv], { out: (s) => out.push(s), err: (s) => err.push(s) }, makeEngine,
+          { githubBoardFor: () => board, githubFor: () => fakeGitHub, pullLock });
+        expect(code, [...out, ...err].join('\n')).toBe(0);
+        return out.join('\n');
+      };
+      let n = 0;
+      const file = (text: string) => {
+        const f = join(tmp, `reply-${n++}.txt`);
+        writeFileSync(f, text);
+        return f;
+      };
+      const ticket = async () => JSON.parse(await go('next', '--json')) as { step: string; worktree: string; context: { feedback?: string } };
+      const status = async () => (await board.listItems(info))[0]!.status;
+      const task = async () => (await fileStore().getTask('T-1'))!;
+      const comment = (body: string, author: string) => board.addComment(REPO, 1, body, author);
+
+      // 1. A hand-made issue in Todo becomes a task.
+      const made = await board.createIssue(REPO, { title: 'Hand made', body: 'Please add a widget.', labels: ['factory'] });
+      const item = await board.addToProject(info, made.nodeId);
+      await board.setStatus(info, item, 'Todo');
+      let t = await ticket();
+      expect(err.join('\n')).toContain('T-1 created from o/app#1 (ready)');
+      expect(t.step).toBe('spec');
+      expect(board.issue(REPO, 1).body).toMatch(/<!-- tsf:task=T-1 factory=f -->$/);
+
+      // 2. The spec is posted as a comment.
+      await go('complete', 'T-1', 'spec', '--reply', file(reply({ status: 'done', summary: 's' }, '# Spec\nv1')));
+      expect(board.issue(REPO, 1).comments[0]!.body).toMatch(/^## Spec v1/);
+      expect(board.issue(REPO, 1).comments[0]!.body).toContain('/approve');
+      expect(await status()).toBe('In progress');
+
+      // 3. Only an approver counts; /changes sends the spec back, /approve moves on.
+      await comment('/approve', 'someone-else');
+      const changes = await comment('/changes add tests', 'kazi-lakit');
+      t = await ticket();
+      expect(t.step).toBe('spec');
+      expect(t.context.feedback).toBe('add tests');
+      expect(board.reactions).toEqual([{ commentId: changes.id, content: '+1' }]);
+      await go('complete', 'T-1', 'spec', '--reply', file(reply({ status: 'done', summary: 's' }, '# Spec\nv2')));
+      expect(board.issue(REPO, 1).comments.some((c) => c.body.startsWith('## Spec v2'))).toBe(true);
+      await comment('/approve', 'kazi-lakit');
+      expect((await ticket()).step).toBe('plan');
+
+      // 4. Plan, build, check, verify, review, ship.
+      await go('complete', 'T-1', 'plan', '--reply', file(reply({ status: 'done', summary: 's' }, '# Plan')));
+      t = await ticket();
+      expect(t.step).toBe('build');
+      writeFileSync(join(t.worktree, 'hello.txt'), 'hello');
+      git(t.worktree, 'add', '.');
+      git(t.worktree, 'commit', '-q', '-m', 'add hello');
+      await go('complete', 'T-1', 'build', '--result', file(result({ status: 'done', summary: 's' })));
+      expect((await ticket()).step).toBe('check');
+      await go('check', 'T-1');
+      expect((await ticket()).step).toBe('verify');
+      await go('complete', 'T-1', 'verify', '--reply', file(reply({ status: 'done', summary: 's', verdict: 'pass' }, '# Verify')));
+      expect((await ticket()).step).toBe('review');
+      await go('complete', 'T-1', 'review', '--reply', file(reply({ status: 'done', summary: 's', verdict: 'approve' }, '# Review')));
+      expect((await ticket()).step).toBe('ship');
+      await go('ship', 'T-1');
+      expect((await task()).status).toBe('pr_open');
+      const [prUrl, pr] = [...fakeGitHub.prs][0]!;
+      expect(pr.base).toBe('dev');
+      expect(await status()).toBe('In review');
+      expect((await task()).prUrl).toBe(prUrl);
+      expect(fakeGitHub.bodies[0]).toContain('Closes #1');
+
+      // 5. An approved review is recorded; the protected base waits for the owner's merge.
+      fakeGitHub.addReview(prUrl, { author: 'kazi-lakit', state: 'approved' });
+      await go('next');
+      expect((await fileStore().listApprovals('T-1')).some((a) => a.gate === 'pr' && a.decision === 'approve')).toBe(true);
+      expect((await task()).status).toBe('pr_open');
+
+      // 6. The merge closes the issue (Closes #1) before the engine sees it; the task is done, not cancelled.
+      fakeGitHub.setState(prUrl, 'merged');
+      await board.closeIssue(REPO, 1, 'completed');
+      await go('next');
+      expect((await task()).status).toBe('done');
+      const synced = await go('sync');
+      expect(await status()).toBe('Merged');
+      expect(synced).toContain('pulled: created 0, applied 0, not applied 0, failed 0');
+    } finally {
+      if (saved === undefined) delete process.env.FACTORY_ROOT; else process.env.FACTORY_ROOT = saved;
+    }
+  });
+});
+
+describe('connected mode end to end', () => {
+  const OPTIONS = ['Backlog', 'Todo', 'In progress', 'In review', 'Merged'];
+  const REPO = { owner: 'o', repo: 'app' };
+  const PROJECT = { owner: 'o', number: 3 };
+
+  afterEach(() => { vi.useRealTimers(); });
+
+  test('a Board task and a GitHub issue round-trip through the watcher and Sync', async () => {
+    // The CLI reads the real clock; faking Date lets the test move it for the stale-claim step.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-11-15T10:00:00Z'));
+    const now = () => new Date();
+    const advance = (ms: number) => vi.setSystemTime(new Date(Date.now() + ms));
+    const storage = newFakeStorage();
+    const core = new BlocksStore(new FakeBlocksData('factory-core', { storage }), 'core');
+    const owner = new BlocksStore(new FakeBlocksData('factory-owner', { storage }), 'owner');
+    await owner.saveFactoryDef(null, defFixture('f', {
+      ghUser: 'me', github: { mode: 'connected', project: PROJECT, label: 'factory', approvers: ['me'], statusMap: DEFAULT_STATUS_MAP },
+    }));
+    await owner.saveFactoryRepo(null, repoFixture('f', 'app', { remote: 'git@github.com:o/app.git' }));
+    const board = new FakeGitHubBoard();
+    board.addProject(PROJECT, OPTIONS);
+    const info = (await board.project(PROJECT))!;
+    const lock = async () => () => undefined;
+    const go = async (...argv: string[]) => goWith({}, ...argv);
+    const goWith = async (extra: Partial<CliDeps>, ...argv: string[]) => {
+      const out: string[] = [];
+      const code = await run(['--store', 'blocks', ...argv], { out: (s) => out.push(s), err: (s) => out.push(s) }, async () => ({ engine: {} as Engine, store: core }), {
+        githubBoardFor: () => board, githubFor: () => new FakeGitHub(), pullLock: lock, loggedIn: async () => new Set(['me']), ...extra,
+      });
+      expect(code, out.join('\n')).toBe(0);
+      return out.join('\n');
+    };
+    const row = async (id: string): Promise<SyncRequest> => (await owner.listSyncRequests('f')).find((r) => r.requestId === id)!;
+    /** Queues a request, lets the watcher plan it, and returns the planned row. */
+    const requestAndPlan = async () => {
+      const q = await owner.requestSync('f', 'me');
+      await go('sync');
+      return row(q.requestId);
+    };
+    const labelled = async (status: string, title: string): Promise<number> => {
+      const made = await board.createIssue(REPO, { title, body: 'please', labels: ['factory'] });
+      await board.setStatus(info, await board.addToProject(info, made.nodeId), status);
+      return made.number;
+    };
+    const statusOf = async (n: number) => (await board.listItems(info)).find((i) => i.issue.number === n)?.status;
+    const issuesOf = (taskId: string) => [1, 2, 3, 4].filter((n) => { try { return board.issue(REPO, n).body.includes(`tsf:task=${taskId} `); } catch { return false; } });
+
+    // 1. A Board task gets an issue in Backlog.
+    const t1 = await createTask(owner, now, { factoryId: 'f', title: 'Do it', description: 'd', repo: 'app' });
+    expect(t1.taskId).toBe('T-1');
+    await go('sync');
+    expect(board.issue(REPO, 1).body).toContain('<!-- tsf:task=T-1 factory=f -->');
+    expect(await statusOf(1)).toBe('Backlog');
+
+    // 2. A new labelled issue, and T-1 moved to Todo on GitHub: one create and one ready are planned.
+    const n2 = await labelled('Todo', 'From GitHub');
+    expect(n2).toBe(2);
+    await board.setStatus(info, (await board.listItems(info)).find((i) => i.issue.number === 1)!.itemId, 'Todo');
+    const planned = await requestAndPlan();
+    expect(planned.state).toBe('planned');
+    expect(planned.plan!.actions.map((a) => a.kind).sort()).toEqual(['create', 'ready']);
+
+    // 3. The owner applies it.
+    const applied = (await applySyncRequest(owner, now, planned))!;
+    expect(applied.state).toBe('applied');
+    expect(await owner.getTask('T-2')).toMatchObject({ status: 'ready', title: 'From GitHub' });
+    expect(await owner.getTask('T-1')).toMatchObject({ status: 'ready' });
+    expect(syncSummary(applied.result!)).toBe('created 1, applied 1, not applied 0, failed 0');
+
+    // 4. The next push marks issue 2 and creates no third issue.
+    await go('sync');
+    expect(board.issue(REPO, 2).body).toMatch(/<!-- tsf:task=T-2 factory=f -->$/);
+    expect(() => board.issue(REPO, 3)).toThrow();
+
+    // 5. An apply interrupted midway: claimed, never finished.
+    const n3 = await labelled('Todo', 'Third');
+    expect(n3).toBe(3);
+    const p3 = await requestAndPlan();
+    expect(p3.state).toBe('planned');
+    await owner.saveSyncRequest(p3, { ...p3, state: 'applying', applyingSince: now().toISOString() });
+    // The watcher fails the claim once it has seen it unchanged for 120 s by its own clock (three passes 61 s apart).
+    const q4 = await owner.requestSync('f', 'me');
+    await goWith({ watchTicks: 3, sleep: async (ms) => { advance(ms); } }, 'sync', '--watch', '--interval', '61');
+    expect(await row(p3.requestId)).toMatchObject({ state: 'failed', error: 'interrupted while applying; click Sync again' });
+    const p4 = await row(q4.requestId);
+    expect(p4.state).toBe('planned');
+    // Its create stays pending for 10 minutes (the interrupted applier may still be running), then a Sync creates it once.
+    expect(p4.plan!.actions).toEqual([]);
+    await applySyncRequest(owner, now, p4);
+    advance(600_000);
+    const p6 = await requestAndPlan();
+    expect(p6.plan!.actions.map((a) => a.kind)).toEqual(['create']);
+    await applySyncRequest(owner, now, p6);
+    await go('sync');
+    const from3 = (await owner.listTasks()).filter((t) => t.title === 'Third');
+    expect(from3).toHaveLength(1);
+    expect(issuesOf(from3[0]!.taskId)).toEqual([3]);
+    const events = await owner.listEvents(from3[0]!.taskId);
+    expect(events.find((e) => e.action === 'create')?.reason).toBe('created from GitHub issue o/app#3');
+
+    // 6. The label is removed from a task in build: the factory machine blocks it.
+    const cur = await core.getTask('T-1');
+    await core.updateTask('T-1', cur.version, { status: 'build', stage: 'build' });
+    await go('sync');
+    board.issue(REPO, 1).labels = [];
+    const p5 = await requestAndPlan();
+    const done = (await applySyncRequest(owner, now, p5))!;
+    expect(await owner.getTask('T-1')).toMatchObject({ status: 'blocked' });
+    expect(done.result!.applied[0]).toMatchObject({ taskId: 'T-1', change: 'blocked (label removed)' });
   });
 });

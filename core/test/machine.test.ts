@@ -57,6 +57,7 @@ const rows: Row[] = [
   ['answered at check', task({ status: 'blocked', stage: 'check', answer: 'a' }), { kind: 'answered' }, G, { status: 'verify', stage: 'check', patch: { answer: null } }],
   ['answered at review keeps answer', task({ status: 'blocked', stage: 'review', answer: 'a' }), { kind: 'answered' }, G, { status: 'review', stage: 'review', patch: { answer: 'a' } }],
   ['answered at verify keeps answer', task({ status: 'blocked', stage: 'verify', answer: 'a' }), { kind: 'answered' }, G, { status: 'verify', stage: 'verify', patch: { answer: 'a' } }],
+  ['restart', task({ status: 'blocked', stage: null, attempt: 2, question: 'q', blockedReason: 'r', answer: 'a' }), { kind: 'restart' }, G, { status: 'ready', stage: null, reason: 'restarted from ready', patch: { attempt: 0, question: null, blockedReason: null, answer: null } }],
   ['answered at ship', task({ status: 'blocked', stage: 'ship', answer: 'a' }), { kind: 'answered' }, G, { status: 'review', stage: 'ship', patch: { answer: null } }],
 ];
 
@@ -122,6 +123,17 @@ describe('decide', () => {
   test('answered blocked task resumes where it stopped with attempt reset, keeping the answer as feedback', () => {
     const t = task({ status: 'blocked', stage: 'verify', attempt: 3, question: 'q', blockedReason: 'r', answer: 'use the v2 API' });
     expect(decide(t, { kind: 'answered' }, G)).toMatchObject({ status: 'verify', stage: 'verify', patch: { attempt: 0, question: null, blockedReason: null, answer: 'use the v2 API' } });
+  });
+
+  test('restart moves a stage-less blocked task to ready and clears the block', () => {
+    const t = task({ status: 'blocked', stage: null, attempt: 3, question: 'q', blockedReason: 'r', answer: 'unblocked by x' });
+    const d = decide(t, { kind: 'restart' }, G);
+    expect(d).toEqual({ status: 'ready', stage: null, reason: 'restarted from ready', patch: { attempt: 0, question: null, blockedReason: null, answer: null } });
+  });
+
+  test('restart with a stage is illegal', () => {
+    expect(() => decide(task({ status: 'blocked', stage: 'build' }), { kind: 'restart' }, G)).toThrow(IllegalInputError);
+    expect(() => decide(task({ status: 'build', stage: null }), { kind: 'restart' }, G)).toThrow(IllegalInputError);
   });
 
   test('agent failure at spec blocks, at review returns to build', () => {

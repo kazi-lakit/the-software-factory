@@ -8,3 +8,5 @@ runs/
 plugin/node_modules
 
 .worktrees/
+/factory
+/factory.cmd

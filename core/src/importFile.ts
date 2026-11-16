@@ -22,6 +22,8 @@ export function validateImportFile(json: unknown): Validated<ImportFile> {
   if (!Array.isArray(json.repos)) return fail('repos must be a list');
   const repos: FactoryRepo[] = [];
   for (const [i, raw] of json.repos.entries()) {
+    // Per-repo protected branches are local-YAML-only in v1 (design section 14, call 5).
+    if (isObject(raw) && raw.protectedBranches !== undefined) return fail(`repos[${i}]: protectedBranches is not supported in the import format`);
     const r = validateFactoryRepo(raw, def.value);
     if (!r.ok) return fail(`repos[${i}]: ${r.error}`);
     if (repos.some((x) => x.repoId === r.value.repoId)) return fail(`repos[${i}]: duplicate repo id ${r.value.repoId}`);

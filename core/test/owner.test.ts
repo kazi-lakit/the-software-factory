@@ -8,7 +8,7 @@ import { DEFAULT_SETTINGS } from '../src/defaults.js';
 import { ClaimError, Engine } from '../src/engine.js';
 import { FakeGitHub } from '../src/github.js';
 import {
-  importFactory, planImport, answerTask, cancelTask, createTask, createTaskAsCore, decideGate, editTask, markReady, OwnerActionError, moveLegacySettings, resetRemovedRepoSettings, saveFactory, saveRepo, saveSettings,
+  importFactory, planImport, answerTask, cancelTask, createTask, createTaskAsCore, createTaskFromGitHub, githubActor, decideGate, editTask, markReady, OwnerActionError, moveLegacySettings, resetRemovedRepoSettings, saveFactory, saveRepo, saveSettings,
   StaleDocError,
 } from '../src/owner.js';
 import { defFixture, repoFixture, seed, seedBlocksFactories } from './factoryFixtures.js';
@@ -87,6 +87,37 @@ describe.each(fixtures)('owner actions on %s', (_name, make) => {
       expect(err).toMatchObject({ code: 'invalid' });
       expect(await owner.listTasks()).toEqual([]);
       expect(await owner.listEvents()).toEqual([]);
+    });
+  });
+
+  describe('GitHub actor', () => {
+    test('markReady with by records the github actor', async () => {
+      const { owner, put, ownerEvents } = setup();
+      await put();
+      await markReady(owner, now, 'T-1', { actor: 'github', reason: 'marked ready on GitHub' });
+      expect(await ownerEvents()).toEqual([you({ actor: 'github', action: 'move', field: 'status', from: 'inbox', to: 'ready', reason: 'marked ready on GitHub' })]);
+    });
+
+    test('decideGate with by records github · login', async () => {
+      const { owner, core, put, ownerEvents } = setup();
+      await put({ status: 'spec_review', stage: 'spec' });
+      await core.addDoc('T-1', 'spec', 'S', 'spec-writer');
+      await decideGate(owner, now, 'T-1', 'spec', 'approve', 1, '', undefined, { actor: githubActor('ann') });
+      expect(await ownerEvents()).toEqual([you({ actor: 'github · ann', field: 'approval', to: 'spec:approve@v1', reason: 'approved' })]);
+    });
+
+    test('createTaskFromGitHub makes a ready task with a github create event', async () => {
+      const { owner } = setup();
+      const t = await createTaskFromGitHub(owner, now, { factoryId: 'blocks', title: 'T', description: 'd', repo: 'data', baseBranch: 'dev', status: 'ready' }, 'o/r#7');
+      expect(t).toMatchObject({ status: 'ready', baseBranch: 'dev' });
+      expect(await owner.listEvents(t.taskId)).toEqual([you({ actor: 'github', action: 'create', to: 'ready', reason: 'created from GitHub issue o/r#7' })]);
+    });
+
+    test('without by the actor is still you', async () => {
+      const { owner, put } = setup();
+      await put();
+      await markReady(owner, now, 'T-1');
+      expect((await owner.listEvents('T-1')).map((e) => e.actor)).toEqual(['you', 'you']);
     });
   });
 
@@ -745,12 +776,12 @@ describe.each([
     await saveFactory(s, now, null, defFixture('delta'));
     const api = await saveRepo(s, now, null, repoFixture('delta', 'api'));
     const before = (await s.listEvents('-')).length;
-    const checks = { ...api.checks, e2e: 'off' as const, server: { build: 'b2', cwd: 'server', test: 't' } };
+    const checks = api.checks.map((c) => (c.name === 'server.build' ? { ...c, run: 'b2' } : c));
     await saveRepo(s, now, api, { ...api, checks });
     expect((await factoryEvents(s)).slice(before)).toEqual([[
       'delta', 'you', 'repo.api.checks',
-      '{"client":{"cwd":"client","install":"i","lint":"l","test":"t","typecheck":"tc"},"e2e":"off","server":{"build":"b","cwd":"server","test":"t"}}',
-      '{"client":{"cwd":"client","install":"i","lint":"l","test":"t","typecheck":"tc"},"e2e":"off","server":{"build":"b2","cwd":"server","test":"t"}}',
+      '[{"cwd":"server","name":"server.build","run":"b"},{"cwd":"server","name":"server.test","needs":"server.build","run":"t"},{"cwd":"client","name":"client.install","run":"i"},{"cwd":"client","name":"client.typecheck","needs":"client.install","run":"tc"},{"cwd":"client","name":"client.lint","needs":"client.install","run":"l"},{"cwd":"client","name":"client.test","needs":"client.install","run":"t"}]',
+      '[{"cwd":"server","name":"server.build","run":"b2"},{"cwd":"server","name":"server.test","needs":"server.build","run":"t"},{"cwd":"client","name":"client.install","run":"i"},{"cwd":"client","name":"client.typecheck","needs":"client.install","run":"tc"},{"cwd":"client","name":"client.lint","needs":"client.install","run":"l"},{"cwd":"client","name":"client.test","needs":"client.install","run":"t"}]',
     ]]);
   });
 

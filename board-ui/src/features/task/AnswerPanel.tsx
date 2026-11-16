@@ -4,27 +4,18 @@ import { answerTask, type FactoryEvent, type Task } from "@factory/core";
 import { boardStore } from "../../lib/board";
 import { useUnsent } from "../../lib/unsent";
 import { optionText, parseQuestion, recommendedLetter } from "./parseQuestion";
-import { askerName } from "./qaEntries";
+import { askerLine, questionFromLine } from "./qaEntries";
 import { describeWriteError, now, useInvalidateAfterWrite, WriteProblemNotice, type WriteProblem } from "./writeOutcome";
 
 const OTHER = "other";
 
-/** The actor of the latest event that set a question: who is asking. */
-function askerOf(events: readonly FactoryEvent[]): string {
-  for (let i = events.length - 1; i >= 0; i--) {
-    const event = events[i]!;
-    if (event.field === "question" && event.to !== null) return askerName(event.actor);
-  }
-  return "";
-}
-
 /** A blocked task's question and the owner's answer; the engine resumes the task once it sees the answer. */
-export function AnswerPanel(props: { events: readonly FactoryEvent[]; onReload: () => unknown; task: Task }) {
+export function AnswerPanel(props: { events: readonly FactoryEvent[]; onReload: () => unknown; onAnswerSent?: () => void; task: Task }) {
   // Keyed by question so a new question starts from its own recommendation, not the old selection.
   return <AnswerPanelBody key={`${props.task.taskId}:${props.task.question ?? ""}`} {...props} />;
 }
 
-function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryEvent[]; onReload: () => unknown; task: Task }) {
+function AnswerPanelBody({ events, onReload, onAnswerSent, task }: { events: readonly FactoryEvent[]; onReload: () => unknown; onAnswerSent?: () => void; task: Task }) {
   const headingId = useId();
   const answerId = useId();
   const groupName = useId();
@@ -37,7 +28,7 @@ function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryE
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
   const invalidate = useInvalidateAfterWrite();
-  const asker = askerOf(events);
+  const asker = askerLine(events);
   const showTextarea = options.length === 0 || choice === OTHER;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -55,6 +46,7 @@ function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryE
       await answerTask(boardStore, now, task.taskId, payload, task.version);
       clear();
       setSent(true);
+      onAnswerSent?.();
       void invalidate(task.taskId);
     } catch (error) {
       setProblem(describeWriteError(error));
@@ -68,11 +60,15 @@ function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryE
 
   return (
     <section className="sf-panel sf-panel-needs-you" aria-labelledby={headingId}>
+      {/* Phone header; the base CSS hides it. */}
+      <h2 className="sf-question-for-you">A question for you</h2>
+      <p className="sf-muted sf-question-from">{questionFromLine(events, task.title)}</p>
       {task.question ? (
         <>
-          <h3 id={headingId} className="sf-question-title">{headingLine || "Choose an answer"}</h3>
-          {restLines ? <p className="sf-question-more">{restLines}</p> : null}
-          {asker ? <p className="sf-muted sf-asker" data-testid="asker">{asker}</p> : null}
+          {asker ? <p className="sf-muted sf-question-asker" data-testid="asker">{asker}</p> : null}
+          <p className="sf-muted sf-question-resume">The task resumes as soon as you answer.</p>
+          <div className="sf-question-highlight">{!sent && !task.answer ? <span className="sf-chip sf-chip-waiting">Waiting for your answer</span> : <span className="sf-chip">Answer received</span>}<h3 id={headingId} className="sf-question-title">{headingLine || "Choose an answer"}</h3>
+          {restLines ? <p className="sf-question-more">{restLines}</p> : null}</div>
         </>
       ) : (
         <>
@@ -97,8 +93,9 @@ function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryE
                 <input type="radio" name={groupName} value={option.letter} checked={choice === option.letter} disabled={busy} onChange={() => setChoice(option.letter)} />
                 <span className="sf-radio-body">
                   <span className="sf-radio-label">
-                    {option.label}
-                    {recommended === option.letter ? <span className="sf-badge">Recommended</span> : null}
+                    <span>{option.letter}.</span> <span>{option.label}</span>
+                    {recommended === option.letter ? <span className="sf-chip sf-chip-waiting">Recommended</span> : null}
+                    {choice === option.letter ? <span className="sf-chip">Selected</span> : null}
                   </span>
                   {option.why ? <span className="sf-radio-why">{option.why}</span> : null}
                 </span>
@@ -107,8 +104,8 @@ function AnswerPanelBody({ events, onReload, task }: { events: readonly FactoryE
             <label className={`sf-radio-card${choice === OTHER ? " sf-radio-card-selected" : ""}`}>
               <input type="radio" name={groupName} value={OTHER} checked={choice === OTHER} disabled={busy} onChange={() => setChoice(OTHER)} />
               <span className="sf-radio-body">
-                <span className="sf-radio-label">Other</span>
-                <span className="sf-radio-why">Write your own answer</span>
+                <span className="sf-radio-label">Other {choice === OTHER ? <span className="sf-chip">Selected</span> : null}</span>
+                <span className="sf-radio-why">Write your own answer.</span>
               </span>
             </label>
           </div>

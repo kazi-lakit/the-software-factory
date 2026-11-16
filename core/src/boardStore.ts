@@ -1,4 +1,6 @@
 import type { FactoryDef, FactoryHealth, FactoryRepo } from './factories.js';
+import type { GitHubLink } from './githubLink.js';
+import type { SyncRequest } from './githubSync.js';
 import type { Approval, Doc, DocKind, FactoryEvent, Mode, RepoId, RepoSettings, Run, Settings, Step, Task } from './types.js';
 
 // The store contract, its errors and updateHeld. Pure (no Node API), so the browser entry can import it; store.ts re-exports it.
@@ -107,6 +109,8 @@ export interface BoardStore {
   createTask(t: NewTask): Promise<Task>;
   /** Throws VersionConflictError; returns the stored task with version + 1. */
   updateTask(id: string, expectedVersion: number, patch: Partial<Task>): Promise<Task>;
+  /** Core only. Inserts the task as given, at version 1 (a rebuild keeps the task's id); VersionConflictError when the id exists. */
+  restoreTask(t: Task): Promise<Task>;
   addDoc(taskId: string, kind: DocKind, body: string, author: string): Promise<Doc>;
   currentDoc(taskId: string, kind: DocKind): Promise<Doc | undefined>;
   /** Every version of a task's doc, ascending; the highest is 'current', the rest 'superseded'. */
@@ -125,6 +129,19 @@ export interface BoardStore {
   saveFactoryDef(before: FactoryDef | null, after: FactoryDef): Promise<FactoryDef>;
   /** Owner only. As saveFactoryDef, keyed by factory and repo id. */
   saveFactoryRepo(before: FactoryRepo | null, after: FactoryRepo): Promise<FactoryRepo>;
+  /** What was last pushed to GitHub per task: one factory's links, or every factory's when `factoryId` is left out. */
+  listGitHubLinks(factoryId?: string): Promise<GitHubLink[]>;
+  getGitHubLink(taskId: string): Promise<GitHubLink | undefined>;
+  /** Core only. Compare-and-set on `version` as saveFactoryDef, keyed by task id. Returns the stored link. */
+  saveGitHubLink(before: GitHubLink | null, after: GitHubLink): Promise<GitHubLink>;
+  /** False while the Blocks schema change is not applied (always true on Memory and File stores). */
+  githubSchemaReady(): Promise<boolean>;
+  /** One factory's sync requests, or all, by requestedAt ascending. */
+  listSyncRequests(factoryId?: string): Promise<SyncRequest[]>;
+  /** Owner only. A new `queued` row with a random requestId and requestedAt = now. */
+  requestSync(factoryId: string, requestedBy: string): Promise<SyncRequest>;
+  /** CAS on version; canSyncMove from the stored state for the store's identity, else ForbiddenError. applying→applying (the heartbeat) changes only applyingSince. */
+  saveSyncRequest(before: SyncRequest, after: SyncRequest): Promise<SyncRequest>;
   listFactoryHealth(): Promise<FactoryHealth[]>;
   /** Core only: the owner reads health, the core writes it. */
   setFactoryHealth(h: FactoryHealth): Promise<void>;

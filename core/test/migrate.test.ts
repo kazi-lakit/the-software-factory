@@ -182,6 +182,12 @@ describe('buildImport and validateImportFile', () => {
     expect(validateImportFile({ ...good, repos: [good.repos[0], good.repos[0]] })).toMatchObject({ ok: false });
     expect(validateImportFile({ ...good, factory: { ...good.factory, factoryId: 'Bad Id' } })).toMatchObject({ ok: false });
   });
+
+  test('validateImportFile refuses a per-repo protectedBranches (local YAML only in v1)', () => {
+    const good = buildImport(root, home);
+    expect(validateImportFile({ ...good, repos: [good.repos[0], { ...good.repos[1], protectedBranches: ['release'] }] }))
+      .toEqual({ ok: false, error: 'repos[1]: protectedBranches is not supported in the import format' });
+  });
 });
 
 test('checkMigration is read-only and reports pending then done', async () => {

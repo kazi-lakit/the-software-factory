@@ -1,5 +1,5 @@
 import { BlocksForbiddenError, cleanRow, listNames, type BlocksData, type Filter, type Row } from './data.js';
-import { ACCESS, FIELDS, UNIQUE, type Operation, type SchemaName } from './schema.js';
+import { ACCESS, FIELDS, UNIQUE, collectionOf, type Operation, type SchemaName } from './schema.js';
 import type { WriteOutcome } from './update.js';
 
 type Role = 'factory-owner' | 'factory-core' | 'any';
@@ -22,21 +22,33 @@ export class FakeBlocksData implements BlocksData {
 
   private readonly storeNullUpdates: boolean;
 
+  private readonly missing: { tables: readonly SchemaName[]; fields: Partial<Record<SchemaName, readonly string[]>> };
+
   /**
    * `now` stamps CreatedDate (default: real time). `columnRules` is test-only: fields of a table that this fake's role
    * may not change; an update that changes one is refused as a whole (answer `forbidden`, nothing written), as a Blocks
    * column write rule does. A value sent back unchanged does not count.
    * As the live gateway does (seen 2026-11-10), an update that sets a field to null is acknowledged but leaves the
    * stored value unchanged; `storeNullUpdates: true` stores the null instead (a gateway that would clear).
+   * `missing` simulates a schema change not applied yet: a list, insert or update on a missing table, or naming a
+   * missing field (in the fields, the filter or the row), throws as the live gateway does for an unknown name.
    */
   constructor(
     private readonly role: Role,
-    opts: { now?: () => Date; storage?: FakeStorage; columnRules?: Partial<Record<SchemaName, string[]>>; storeNullUpdates?: boolean } = {},
+    opts: { now?: () => Date; storage?: FakeStorage; columnRules?: Partial<Record<SchemaName, string[]>>; storeNullUpdates?: boolean;
+      missing?: { tables?: readonly SchemaName[]; fields?: Partial<Record<SchemaName, readonly string[]>> } } = {},
   ) {
     this.columnRules = opts.columnRules ?? {};
     this.storeNullUpdates = opts.storeNullUpdates ?? false;
     this.storage = opts.storage ?? newFakeStorage();
     this.now = opts.now ?? (() => new Date());
+    this.missing = { tables: opts.missing?.tables ?? [], fields: opts.missing?.fields ?? {} };
+  }
+
+  /** Throws like the gateway for an unknown table or field name. */
+  private checkKnown(operationName: string, schema: SchemaName, names: string[]): void {
+    const gone = this.missing.fields[schema] ?? [];
+    if (this.missing.tables.includes(schema) || names.some(n => gone.includes(n))) throw new Error(`blocks: ${operationName} GraphQL error`);
   }
 
   /** Test setup: lets this role do `op` on `schema` although the access matrix says no (proves a gate can fail). */
@@ -78,14 +90,16 @@ export class FakeBlocksData implements BlocksData {
   }
 
   async list(schema: SchemaName, filter: Filter, fields?: string[]): Promise<Row[]> {
-    if (!this.allowed(schema, 'read')) throw new BlocksForbiddenError(`get${schema}s`);
     const names = listNames(schema, fields);
+    this.checkKnown(`get${collectionOf(schema)}`, schema, [...names, ...Object.keys(filter)]);
+    if (!this.allowed(schema, 'read')) throw new BlocksForbiddenError(`get${schema}s`);
     return this.table(schema).filter(r => FakeBlocksData.matches(r, filter)).map(r => Object.fromEntries(names.map(n => [n, r[n] ?? null])));
   }
 
   async insert(schema: SchemaName, row: Record<string, string | number | null>) {
-    if (!this.allowed(schema, 'insert')) return { kind: 'forbidden' as const };
     const input = cleanRow(schema, row);
+    this.checkKnown(`insert${schema}`, schema, Object.keys(input));
+    if (!this.allowed(schema, 'insert')) return { kind: 'forbidden' as const };
     const table = this.table(schema);
     for (const field of UNIQUE[schema]) {
       if (field in input && table.some(r => r[field] === input[field])) return { kind: 'duplicate' as const };
@@ -104,8 +118,9 @@ export class FakeBlocksData implements BlocksData {
   }
 
   async update(schema: SchemaName, filter: Filter, input: Record<string, string | number | null>): Promise<WriteOutcome | { kind: 'forbidden' }> {
-    if (!this.allowed(schema, 'edit')) return { kind: 'forbidden' };
     const clean = cleanRow(schema, input);
+    this.checkKnown(`update${schema}`, schema, [...Object.keys(clean), ...Object.keys(filter)]);
+    if (!this.allowed(schema, 'edit')) return { kind: 'forbidden' };
     const hits = this.table(schema).filter(r => FakeBlocksData.matches(r, filter));
     if (hits.length > 1) throw new Error(`fake: update on ${schema} matched ${hits.length} rows`);
     if (hits.length === 0) return { kind: 'not-applied' };

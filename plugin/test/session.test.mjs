@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { claimantFor, replyTarget, shouldRenew, renewCommand, AGENT_FOR } from '../hooks/lib.mjs';
+import { resolveFactoryRoot, claimantFor, replyTarget, shouldRenew, renewCommand, AGENT_FOR } from '../hooks/lib.mjs';
 import { AGENT_FOR as CORE_AGENT_FOR } from '../../core/src/defaults.ts';
 
 const hooks = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'hooks');
@@ -54,7 +54,7 @@ describe('renewCommand', () => {
   it('builds the CLI invocation', () => {
     const c = renewCommand({ root, session, sessionId: '0123456789ab', host: 'mac', node: 'node', env: {} });
     expect(c.file).toBe('node');
-    expect(c.args).toEqual(['/f/root/core/dist/cli.js', '--mode', 'session', '--store', 'blocks', 'renew', 'T-1']);
+    expect(c.args).toEqual(['/f/root/core/dist/cli.js', '--mode', 'session', '--store', 'local', 'renew', 'T-1']);
     expect(c.env.FACTORY_CLAIMANT).toBe('claude:mac:01234567');
     expect(c.env.FACTORY_ROOT).toBe('/f/root');
     expect(c.log).toBe('/f/root/runs/T-1/renew.log');
@@ -64,11 +64,25 @@ describe('renewCommand', () => {
     expect(args({ FACTORY_STORE: 'file' }).args).toContain('file');
     expect(args({ FACTORY_STORE: 'file' }).args).not.toContain('blocks');
   });
-  it('defaults to blocks when FACTORY_STORE is unset', () => {
-    expect(args({}).args[args({}).args.indexOf('--store') + 1]).toBe('blocks');
+  it('renew accepts local and factory-app and defaults to local', () => {
+    const store = (env) => { const a = args(env).args; return a[a.indexOf('--store') + 1]; };
+    expect(store({})).toBe('local');
+    expect(store({ FACTORY_STORE: 'local' })).toBe('local');
+    expect(store({ FACTORY_STORE: 'factory-app' })).toBe('factory-app');
+    expect(store({ FACTORY_STORE: 'blocks' })).toBe('blocks');
   });
   it('skips an invalid store', () => {
     expect(args({ FACTORY_STORE: 'sqlite' })).toBeNull();
+  });
+  it('passes the factory recorded for the step, so a local factory renews in the local store', () => {
+    const c = renewCommand({ root, session: { ...session, factory: 'myapp' }, sessionId: '0123456789ab', host: 'mac', node: 'node', env: { FACTORY_STORE: 'blocks' } });
+    expect(c.args).toEqual(['/f/root/core/dist/cli.js', '--mode', 'session', '--store', 'blocks', 'renew', 'T-1', '--factory', 'myapp']);
+  });
+  it('leaves out a recorded factory that is not a factory id', () => {
+    for (const factory of ['Bad_Id', '--store=file', 42, '']) {
+      const c = renewCommand({ root, session: { ...session, factory }, sessionId: '0123456789ab', host: 'mac', node: 'node', env: {} });
+      expect(c.args).not.toContain('--factory');
+    }
   });
 });
 
@@ -87,11 +101,73 @@ const bareHome = path.join(tmp, 'home');
 fs.mkdirSync(bareHome);
 const baseEnv = () => {
   const env = { ...process.env, HOME: bareHome };
-  for (const k of ['FACTORY_ROOT', 'FACTORY_STORE', 'CLAUDE_PROJECT_DIR', 'CLAUDE_ENV_FILE']) delete env[k];
+  for (const k of ['FACTORY_ROOT', 'FACTORY_STORE', 'CLAUDE_PROJECT_DIR', 'CLAUDE_ENV_FILE', 'CLAUDE_CONFIG_DIR']) delete env[k];
   return env;
 };
-const runHook = (name, input, env) =>
-  spawnSync('node', [path.join(hooks, name)], { input: typeof input === 'string' ? input : JSON.stringify(input), env, encoding: 'utf8' });
+// The hooks find the clone that holds them; run a copy outside any factory clone so each test controls the root.
+const isolatedHooks = path.join(tmp, 'iso', 'plugin', 'hooks');
+fs.cpSync(hooks, isolatedHooks, { recursive: true });
+const runHook = (name, input, env, dir = isolatedHooks) =>
+  spawnSync('node', [path.join(dir, name)], { input: typeof input === 'string' ? input : JSON.stringify(input), env, encoding: 'utf8' });
+
+describe('resolveFactoryRoot from the plugin clone', () => {
+  it('finds the root as the clone that holds the plugin, before the scratchpad fallback', () => {
+    const home = path.join(tmp, 'home3');
+    makeRoot(path.join(home, 'scratchpad', 'selise', 'the-software-factory'));
+    const clone = makeRoot(path.join(tmp, 'clone'));
+    expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: plain }, home, undefined, undefined, clone)).toEqual({ root: clone, projectMode: false });
+    expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: froot }, home, undefined, undefined, clone)).toEqual({ root: froot, projectMode: true });
+    // A plugin folder that is not inside a factory clone falls through to the scratchpad default.
+    expect(resolveFactoryRoot({}, home, undefined, undefined, plain)?.root).toBe(path.join(home, 'scratchpad', 'selise', 'the-software-factory'));
+  });
+  it('the default plugin root is two levels above lib.mjs', () => {
+    expect(resolveFactoryRoot({}, null)?.root).toBe(path.resolve(hooks, '..', '..'));
+  });
+});
+
+describe('resolveFactoryRoot through the marketplace record', () => {
+  const cfgWith = (name, content) => {
+    const cfg = fs.mkdtempSync(path.join(tmp, 'cfg-'));
+    if (content !== undefined) {
+      fs.mkdirSync(path.join(cfg, 'plugins'), { recursive: true });
+      fs.writeFileSync(path.join(cfg, 'plugins', 'known_marketplaces.json'), typeof content === 'string' ? content : JSON.stringify(content));
+    }
+    return cfg;
+  };
+  const clone = makeRoot(path.join(tmp, 'mclone'));
+  const home = path.join(tmp, 'home4');
+  fs.mkdirSync(home, { recursive: true });
+  const find = (cfg, extra = {}) => resolveFactoryRoot({ CLAUDE_CONFIG_DIR: cfg, CLAUDE_PROJECT_DIR: plain, ...extra }, home, undefined, undefined, plain);
+
+  it('uses installLocation or source.path of the the-software-factory entry', () => {
+    expect(find(cfgWith('a', { 'the-software-factory': { installLocation: clone } }))).toEqual({ root: clone, projectMode: false });
+    expect(find(cfgWith('b', { 'the-software-factory': { source: { path: clone } } }))?.root).toBe(clone);
+  });
+  it('defaults the config dir to ~/.claude', () => {
+    fs.mkdirSync(path.join(home, '.claude', 'plugins'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude', 'plugins', 'known_marketplaces.json'), JSON.stringify({ 'the-software-factory': { installLocation: clone } }));
+    expect(resolveFactoryRoot({ CLAUDE_PROJECT_DIR: plain }, home, undefined, undefined, plain)?.root).toBe(clone);
+  });
+  it('a missing, garbled or non-factory record falls through without throwing', () => {
+    const none = path.join(tmp, 'nohome');
+    const noRoot = (cfg) => resolveFactoryRoot({ CLAUDE_CONFIG_DIR: cfg, CLAUDE_PROJECT_DIR: plain }, none, undefined, undefined, plain);
+    expect(noRoot(cfgWith('c'))).toBeNull();
+    expect(noRoot(cfgWith('d', '{oops'))).toBeNull();
+    expect(noRoot(cfgWith('e', '[1]'))).toBeNull();
+    expect(noRoot(cfgWith('f', { 'the-software-factory': 7 }))).toBeNull();
+    expect(noRoot(cfgWith('g', { 'the-software-factory': { installLocation: plain } }))).toBeNull();
+    expect(noRoot(cfgWith('h', { other: { installLocation: clone } }))).toBeNull();
+  });
+  it('a hook run from the plugin cache finds the clone through the record', () => {
+    const cfg = cfgWith('i', { 'the-software-factory': { installLocation: clone } });
+    const cached = path.join(cfg, 'plugins', 'cache', 'the-software-factory', 'factory', '0.2.0', 'hooks');
+    fs.cpSync(hooks, cached, { recursive: true });
+    const file = path.join(fs.mkdtempSync(path.join(tmp, 'ss-')), 'env');
+    const r = runHook('session-start.mjs', { session_id: 'abcdef123456' }, { ...baseEnv(), CLAUDE_CONFIG_DIR: cfg, CLAUDE_ENV_FILE: file, CLAUDE_PROJECT_DIR: plain }, cached);
+    expect(r.status).toBe(0);
+    expect(fs.readFileSync(file, 'utf8')).toContain(`export FACTORY_ROOT="${clone}"\n`);
+  });
+});
 
 describe('session-start.mjs', () => {
   const envFile = () => path.join(fs.mkdtempSync(path.join(tmp, 'ss-')), 'env');
@@ -104,7 +180,7 @@ describe('session-start.mjs', () => {
     expect(fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)).toEqual([
       `export FACTORY_ROOT="${froot}"`,
       `export FACTORY_CLAIMANT=claude:${os.hostname()}:abcdef12`,
-      'export FACTORY_STORE="${FACTORY_STORE:-blocks}"',
+      'export FACTORY_STORE="${FACTORY_STORE:-local}"',
       'export HUSKY=0',
     ]);
   });
@@ -114,7 +190,7 @@ describe('session-start.mjs', () => {
     expect(fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)).toEqual([
       `export FACTORY_ROOT="${froot}"`,
       `export FACTORY_CLAIMANT=claude:${os.hostname()}:abcdef12`,
-      'export FACTORY_STORE="${FACTORY_STORE:-blocks}"',
+      'export FACTORY_STORE="${FACTORY_STORE:-local}"',
     ]);
   });
   it('exports the default root under home', () => {
@@ -132,11 +208,11 @@ describe('session-start.mjs', () => {
     expect(r.stderr).toBe('');
     expect(fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '').toBe('');
   });
-  it('keeps a FACTORY_STORE from the launch shell and defaults it to blocks', () => {
+  it('keeps a FACTORY_STORE from the launch shell and defaults it to local', () => {
     const file = envFile();
     start({ ...baseEnv(), CLAUDE_ENV_FILE: file, CLAUDE_PROJECT_DIR: froot });
     const sh = (env) => spawnSync('sh', ['-c', `. "${file}" && printf %s "$FACTORY_STORE"`], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } }).stdout;
-    expect(sh({})).toBe('blocks');
+    expect(sh({})).toBe('local');
     expect(sh({ FACTORY_STORE: 'file' })).toBe('file');
   });
   it('quotes a root with spaces so the env file stays valid shell', () => {

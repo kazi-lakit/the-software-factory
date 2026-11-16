@@ -1,3 +1,4 @@
+import { ArrowUpRight, Blocks, History, LayoutDashboard, Settings2 } from "lucide-react";
 import { useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useAuth } from "./providers/AuthProvider";
 import { useCurrentUser, userDisplayName, userInitials } from "../features/profile/useCurrentUser";
@@ -12,14 +13,14 @@ import { TopBarLeadContext, type Lead } from "./topBarLead";
 export const PROJECT_NAME = "the-software-factory";
 
 const views = [
-  { href: "/", label: "Board" },
-  { href: "/history", label: "History" },
-  { href: "/settings", label: "Settings" }
+  { href: "/", label: "Board", icon: LayoutDashboard },
+  { href: "/history", label: "History", icon: History },
+  { href: "/settings", label: "Settings", icon: Settings2 }
 ] as const;
 
 // A task page (/tasks/<id>) belongs to the Board view.
 const isCurrent = (href: string, activePath: string): boolean =>
-  href === "/" ? activePath === "/" || activePath.startsWith("/tasks/") : activePath === href;
+  href === "/" ? activePath === "/" || activePath.startsWith("/tasks/") : activePath === href || activePath.startsWith(`${href}/`);
 
 type ShellProps = { activePath: string; children: ReactNode; onNavigate: (path: string) => void };
 
@@ -98,6 +99,32 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
   return (
     <TopBarLeadContext.Provider value={setLead}>
     <div className={lead ? "sf-app sf-shell-detail" : "sf-app"}>
+      <a className="sf-skip-link" href="#workspace-content">Skip to content</a>
+      <aside className="sf-sidebar" aria-label="Workspace navigation">
+        <a className="sf-sidebar-brand" aria-label="Software Factory home" href="/" onClick={(event) => follow(event, "/")}><Blocks size={30} strokeWidth={1.25} aria-hidden="true" /><span>Software<br /><strong>Factory</strong></span></a>
+        <p className="sf-sidebar-label">Your workspace</p>
+        <nav className="sf-views" aria-label="Views">
+          {views.map((view) => (
+            <a
+              key={view.href}
+              className="sf-view-link"
+              href={view.href}
+              aria-label={view.label}
+              title={view.label}
+              aria-current={isCurrent(view.href, activePath) ? "page" : undefined}
+              onClick={(event) => follow(event, view.href)}
+            >
+              <view.icon size={18} aria-hidden="true" /><span>{view.label}</span>
+            </a>
+          ))}
+        </nav>
+        <div className="sf-sidebar-note">
+          <span className="sf-label">From idea to release</span>
+          <p>You set the direction.<br />The factory does the work.</p>
+          <a href="/tasks/new" onClick={(event) => follow(event, "/tasks/new")}>Start a task <ArrowUpRight size={16} aria-hidden="true" /></a>
+        </div>
+        <span className="sf-sidebar-footer">Built on Blocks</span>
+      </aside>
       <header className="sf-topbar">
         {lead ? (
           <button type="button" className="sf-topbar-lead" onClick={lead.onClick}>
@@ -107,19 +134,7 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
         <a className="sf-project sf-label" href="/" onClick={(event) => follow(event, "/")}>
           {PROJECT_NAME}
         </a>
-        <nav className="sf-views" aria-label="Views">
-          {views.map((view) => (
-            <a
-              key={view.href}
-              className="sf-view-link"
-              href={view.href}
-              aria-current={isCurrent(view.href, activePath) ? "page" : undefined}
-              onClick={(event) => follow(event, view.href)}
-            >
-              {view.label}
-            </a>
-          ))}
-        </nav>
+        <span className="sf-workspace-context"><span className="sf-context-dot" />Workspace / {activePath.startsWith("/settings") ? "Settings" : activePath === "/history" ? "Activity" : "Operations"}</span>
         <div className="sf-topbar-end">
           <ThemeSwitch />
           {waiting > 0 ? <span className="sf-badge">{`${waiting} waiting for you`}</span> : null}
@@ -163,7 +178,7 @@ export function AppShell({ activePath, children, onNavigate }: ShellProps) {
           </div>
         </div>
       </header>
-      <main className="sf-main">{children}</main>
+      <main id="workspace-content" className="sf-main" tabIndex={-1}>{children}</main>
     </div>
     </TopBarLeadContext.Provider>
   );

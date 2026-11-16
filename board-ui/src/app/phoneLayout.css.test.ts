@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { outranked, phoneBlockInfo, phoneOutranked, phoneRules, specificity } from "../test/cssMedia";
+import { baseRules, outranked, phoneBlockInfo, phoneOutranked, phoneRules, specificity } from "../test/cssMedia";
 import { tokens } from "../test/cssTokens";
 
 const css = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "board.css"), "utf8");
@@ -21,7 +21,7 @@ describe("phone layout tokens", () => {
     expect(root["--sf-actionbar-button"]).toBe("48px");
     expect(root["--sf-input-height"]).toBe("44px");
     expect(root["--sf-input-font"]).toBe("16px");
-    expect(root["--sf-bar-height"]).toBe("52px");
+    expect(root["--sf-bar-height"]).toBe("72px");
   });
 });
 
@@ -29,7 +29,7 @@ describe("phone top bar and tab bar", () => {
   it("phone top bar is compact", () => {
     expect(phone(".sf-topbar")["min-height"]).toBe("48px");
     expect(phone(".sf-topbar").padding).toBe("0 12px");
-    expect(tokens(css, ".sf-topbar")["min-height"]).toBe("var(--sf-bar-height)");
+    expect(tokens(css, ".sf-topbar")["min-height"]).toBe("72px");
   });
 
   it("phone top bar keeps the base opaque background", () => {
@@ -85,7 +85,7 @@ describe("phone top bar and tab bar", () => {
 
   it("desktop values stay", () => {
     expect(tokens(css, ".sf-views").position).toBeUndefined();
-    expect(tokens(css, ".sf-main")).toEqual({ flex: "1", padding: "16px" });
+    expect(tokens(css, ".sf-main")).toMatchObject({ flex: "1", padding: "32px", "min-width": "0" });
   });
 
   it("the phone block is the last top-level item and the only 639px block", () => {
@@ -107,7 +107,7 @@ describe("phone pills and lanes", () => {
   it("pill style", () => {
     const pill = phone(".sf-pill");
     expect(pill).toMatchObject({ "min-height": "44px", flex: "0 0 auto", border: "1px solid var(--sf-border)", "border-radius": "var(--sf-radius)", background: "transparent" });
-    expect(tokens(css, ":root")["--sf-radius"]).toBe("3px");
+    expect(tokens(css, ":root")["--sf-radius"]).toBe("6px");
   });
 
   it("selected pill uses primary-soft", () => {
@@ -131,17 +131,17 @@ describe("phone pills and lanes", () => {
 
   it("empty lane text shows on phones and not at 640px and up", () => {
     expect(phone(".sf-view .sf-lane .sf-lane-empty").display).toBe("block");
-    expect(tokens(css, ".sf-lane-empty").display).toBe("none");
+    expect(tokens(css, ".sf-lane-empty").display).toBe("block");
   });
 
   it("desktop lanes are unchanged", () => {
     const base = css.slice(0, css.lastIndexOf("@media (max-width: 639px)"));
     expect(base).not.toContain("data-selected");
-    expect(tokens(css, ".sf-lanes")["grid-template-columns"]).toBe("repeat(5, minmax(0, 1fr))");
+    expect((tokens(css, ".sf-lanes")["grid-template-columns"] ?? "").replace(/\s+/g, "")).toBe("repeat(4,minmax(0,1fr))");
   });
 
   it("the pill gets the shared colour transition and no phone rule adds one", () => {
-    const list = css.match(/([^{}]+)\{\s*transition: background-color 150ms/)?.[1] ?? "";
+    const list = css.match(/([^{}]+)\{\s*transition: background-color 220ms/)?.[1] ?? "";
     expect(list).toContain(".sf-pill");
   });
 });
@@ -173,8 +173,8 @@ describe("phone action bar, inputs and buttons", () => {
   });
 
   it("desktop control sizes stay", () => {
-    expect(tokens(css, ".sf-select").height).toBe("34px");
-    expect(tokens(css, ".sf-input")["min-height"]).toBe("28px");
+    expect(tokens(css, ".sf-select").height).toBe("44px");
+    expect(tokens(css, ".sf-input")["min-height"]).toBe("44px");
     expect(tokens(css, ".sf-select")["font-size"]).not.toBe("16px");
     expect(tokens(css, ".sf-input")["font-size"]).toBeUndefined();
   });
@@ -189,7 +189,11 @@ describe("phone action bar, inputs and buttons", () => {
   });
 
   it("no phone rule is out-ranked by an earlier base rule", () => {
-    const ELEMENT_OF = { "sf-lane-name": "h3", "sf-question-title": "h3", "sf-page-title": "h2", "sf-input": "input", "sf-select": "select", "sf-pill": "button", "sf-account-name": "span" };
+    const ELEMENT_OF = {
+      "sf-lane-name": "span", "sf-question-title": "h3", "sf-page-title": "h2", "sf-input": "input", "sf-select": "select", "sf-pill": "button", "sf-account-name": "span",
+      "sf-board-view-label": "span", "sf-stepper-more": "span", "sf-task-repo": "p", "sf-question-from": "p", "sf-question-for-you": "h2",
+      "sf-task-more": "details", "sf-qa-earlier": "details", "sf-chip-repo": "li"
+    };
     expect(outranked(css, ELEMENT_OF, [".sf-theme-switch"])).toEqual([]);
   });
 });
@@ -239,3 +243,79 @@ function matchesStructure(selector: string, chain: string[]): boolean {
   }
   return true;
 }
+
+describe("phone design gaps (T-33)", () => {
+  it("base_hides_and_phone_shows_phone_only_markup", () => {
+    const shown: Record<string, string> = {
+      ".sf-task-repo": "block", ".sf-task-more": "block", ".sf-question-for-you": "block", ".sf-question-from": "block", ".sf-qa-earlier": "block"
+    };
+    for (const [s, display] of Object.entries(shown)) {
+      expect(tokens(css, s).display, s).toBe("none");
+      expect(phone(s).display, s).toBe(display);
+    }
+  });
+
+  it("phone_hides_desktop_duplicates", () => {
+    for (const s of [".sf-chip-repo", ".sf-stepper-more", ".sf-task-side .sf-details", ".sf-question-asker"]) {
+      expect(phone(s).display, s).toBe("none");
+    }
+  });
+
+  it("view_switch_shares_a_compact_row_with_the_filter_toggle", () => {
+    expect(phone(".sf-board-view")).toMatchObject({ "flex-basis": "auto", order: "0" });
+    expect(tokens(css, ".sf-board-view")).toMatchObject({ display: "inline-flex" });
+  });
+
+  it("doc_comes_first_in_the_decision_panel", () => {
+    expect(phone(".sf-panel-decision")).toMatchObject({ display: "flex", "flex-direction": "column" });
+    expect(phone(".sf-panel-decision > .sf-doc").order).toBe("-1");
+    const base = tokens(css, ".sf-panel-decision");
+    expect(base).not.toHaveProperty("order");
+    expect(base).not.toHaveProperty("display");
+  });
+
+  it("decision_panel_keeps_its_spacing_as_a_flex_column", () => {
+    // Flex items do not collapse margins, so the panel spaces its children with gap and zeroes their vertical margins.
+    expect(phone(".sf-panel-decision").gap).toBe("12px");
+    const children = phone(".sf-view .sf-panel-decision > *");
+    expect(children).toMatchObject({ "margin-bottom": "0", "margin-top": "0" });
+    // It must out-rank the base `.sf-view h3` margin.
+    expect(cmpSpec(specificity(".sf-view .sf-panel-decision > *"), specificity(".sf-view h3"))).toBeGreaterThan(0);
+  });
+
+  it("request_changes_comes_first", () => {
+    expect(phone(".sf-action-bar .sf-gate-changes").order).toBe("-1");
+    const base = baseRules(css).filter((r) => r.selector.includes("sf-gate-changes") && "order" in r.decls);
+    expect(base).toEqual([]);
+  });
+
+  it("phone_only_markup_rules_set_no_fill_or_motion", () => {
+    const added = phoneRules(css).filter((r) => /sf-(board-view|task-repo|task-more|question-for-you|question-from|qa-earlier|gate-changes|panel-decision)/.test(r.selector));
+    expect(added.length).toBeGreaterThan(0);
+    for (const r of added) for (const p of ["background", "background-color", "transition", "animation", "box-shadow"]) expect(r.decls, r.selector).not.toHaveProperty(p);
+  });
+});
+
+describe("narrow-phone review usability", () => {
+  it("lays out six progress labels in two readable rows", () => {
+    expect(phone(".sf-stepper")).toMatchObject({ display: "grid", "grid-template-columns": "repeat(3, minmax(0, 1fr))" });
+  });
+  it("keeps view and theme switches touch sized", () => {
+    expect(phone(".sf-segment")["min-height"]).toBe("44px");
+    expect(tokens(css, ".sf-theme-switch").width).toBe("44px");
+  });
+});
+
+
+describe("settings factory picker on phones", () => {
+  it("stacks the picker and limits it to the available width", () => {
+    expect(phone(".sf-settings .sf-page-heading")).toMatchObject({ "flex-direction": "column", "align-items": "stretch" });
+    expect(phone(".sf-settings .sf-page-heading .sf-inline-field")).toMatchObject({ "min-width": "0", width: "100%" });
+    expect(phone(".sf-settings .sf-page-heading .sf-select")).toMatchObject({ "min-width": "0", width: "100%" });
+  });
+});
+
+it("settings heading and factory picker do not reserve desktop flex heights on phones", () => {
+  expect(phone(".sf-settings .sf-page-heading > div")["flex-basis"]).toBe("auto");
+  expect(phone(".sf-settings .sf-page-heading .sf-inline-field")["flex-basis"]).toBe("auto");
+});

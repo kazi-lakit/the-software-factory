@@ -1,7 +1,11 @@
 // Pure (no Node API): the browser entry validates factory definitions with it.
 import { isMainRef } from './branches.js';
-import { ChecksSchema, type Checks } from './checksSchema.js';
+import { normaliseChecks, type Checks } from './checksSchema.js';
+import { validateGitHubSettings, type GitHubSettings } from './githubConfig.js';
 import type { AgentStep } from './types.js';
+import { GH_USER_PATTERN, type Validated } from './validated.js';
+
+export { GH_USER_PATTERN, type Validated };
 
 /** The stages whose agent a factory can set a model for. */
 export const AGENT_STEPS: readonly AgentStep[] = ['spec', 'plan', 'build', 'verify', 'review'];
@@ -22,6 +26,8 @@ export interface FactoryDef {
   active: boolean;
   /** Model per stage agent; a stage left out runs on the session's model. */
   agentModels?: AgentModels;
+  /** GitHub Issues and Projects integration; absent = the factory does not use GitHub. */
+  github?: GitHubSettings;
   version: number;
 }
 
@@ -31,6 +37,8 @@ export interface FactoryRepo {
   remote: string;
   baseBranch: string;
   checks: Checks;
+  /** Set only when the repo overrides the factory's list (`main` always included). */
+  protectedBranches?: string[];
   version: number;
 }
 
@@ -39,9 +47,11 @@ export interface FactoryHealth {
   /** Whether the factory's gh login was found (`gh auth status`) when last checked. */
   ghLoggedIn: boolean;
   checkedAt: string;
+  /** When the sync watcher last ran for this factory (connected mode); ISO text. */
+  watcherSeenAt?: string | null;
+  /** What the watcher found wrong with the Project setup. */
+  githubProblems?: string[];
 }
-
-export type Validated<T> = { ok: true; value: T } | { ok: false; error: string };
 
 export const ID_PATTERN = /^[a-z][a-z0-9-]*$/;
 export const ID_MAX = 40;
@@ -49,8 +59,6 @@ export const ID_MAX = 40;
 export const RESERVED_ID = 'global';
 /** The gh login a factory uses when its definition leaves `ghUser` empty. */
 export const DEFAULT_GH_USER = 'kazi-lakit';
-/** A GitHub login: letters, digits and single inner hyphens, at most 39 characters. */
-export const GH_USER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/;
 export const isValidId = (v: unknown): v is string => typeof v === 'string' && v.length <= ID_MAX && ID_PATTERN.test(v);
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -65,6 +73,13 @@ export function ensureMain(branches: string[]): string[] {
   }
   return out;
 }
+
+/** The protected branches for a repo: its own override, else the factory's list. */
+export function protectedFor(def: FactoryDef, repo: Pick<FactoryRepo, 'protectedBranches'> | undefined): string[] {
+  return repo?.protectedBranches ?? def.protectedBranches;
+}
+
+const isBranchList = (v: unknown): v is string[] => Array.isArray(v) && v.every((b) => typeof b === 'string');
 
 function text(input: Record<string, unknown>, key: string, fallback: string): string | null {
   const v = input[key];
@@ -104,18 +119,20 @@ export function validateFactoryDef(input: unknown): Validated<FactoryDef> {
   if (gitEmail !== '' && !gitEmail.includes('@')) return fail('gitEmail must contain @');
   if (docsPath !== '' && !docsPath.startsWith('/')) return fail('docsPath must be an absolute folder or empty');
   const rawBranches = input.protectedBranches ?? ['dev', 'stg', 'main'];
-  if (!Array.isArray(rawBranches) || !rawBranches.every((b) => typeof b === 'string')) return fail('protectedBranches must be a list of branch names');
+  if (!isBranchList(rawBranches)) return fail('protectedBranches must be a list of branch names');
   const active = input.active ?? true;
   if (typeof active !== 'boolean') return fail('active must be true or false');
   const version = input.version ?? 1;
   if (typeof version !== 'number' || !Number.isInteger(version) || version < 0) return fail('version must be a whole number');
   const models = agentModelsOf(input.agentModels);
   if (!models.ok) return models;
+  const github = validateGitHubSettings(input.github, ghUser);
+  if (!github.ok) return github;
   return {
     ok: true,
     value: {
-      factoryId, name, protectedBranches: ensureMain(rawBranches as string[]), gitName, gitEmail, docsPath,
-      ghUser, active, ...(models.value ? { agentModels: models.value } : {}), version,
+      factoryId, name, protectedBranches: ensureMain(rawBranches), gitName, gitEmail, docsPath,
+      ghUser, active, ...(models.value ? { agentModels: models.value } : {}), ...(github.value ? { github: github.value } : {}), version,
     },
   };
 }
@@ -131,15 +148,19 @@ export function validateFactoryRepo(input: unknown, def: FactoryDef): Validated<
   const baseBranch = text(input, 'baseBranch', 'dev');
   if (baseBranch === null || baseBranch === '') return fail('baseBranch must not be blank');
   if (isMainRef(baseBranch)) return fail('main is never a base');
-  const parsed = ChecksSchema.safeParse(input.checks);
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0]!;
-    const path = ['checks', ...issue.path].join('.');
-    return fail(`${path} ${issue.code === 'invalid_type' && issue.input === undefined ? 'is required' : issue.message}`);
-  }
+  const parsed = normaliseChecks(input.checks);
+  if (!parsed.ok) return parsed;
+  const branches = input.protectedBranches;
+  if (branches !== undefined && branches !== null && !isBranchList(branches)) return fail('protectedBranches must be a list of branch names');
   const version = input.version ?? 1;
   if (typeof version !== 'number' || !Number.isInteger(version) || version < 0) return fail('version must be a whole number');
-  return { ok: true, value: { factoryId: def.factoryId, repoId, remote, baseBranch, checks: parsed.data, version } };
+  return {
+    ok: true,
+    value: {
+      factoryId: def.factoryId, repoId, remote, baseBranch, checks: parsed.value,
+      ...(isBranchList(branches) ? { protectedBranches: ensureMain(branches) } : {}), version,
+    },
+  };
 }
 
 /** Definitions held in memory. A definition that fails validation is left out and listed in `skipped()`. */

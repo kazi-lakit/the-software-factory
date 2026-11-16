@@ -55,6 +55,12 @@
       "description": "JSON text of the per-stage agent models (stage to opus, sonnet, haiku or fable)."
     },
     {
+      "name": "github",
+      "type": "String",
+      "isArray": false,
+      "description": "JSON text of the GitHub settings; empty = no GitHub."
+    },
+    {
       "name": "version",
       "type": "Int",
       "isArray": false,

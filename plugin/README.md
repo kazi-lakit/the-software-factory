@@ -21,14 +21,14 @@ Factory sessions are only for running the factory. Do not use them for other wor
 
 ### (B) User-scoped install: `/factory:run` from any folder
 
-You install it yourself, once, in one of two ways:
+`./setup.sh` (or `setup.cmd`) installs it for you, user-scoped, unless it is already installed (see the root README). To do it by hand, in one of two ways:
 
-- Inside a Claude Code session: run `/plugin marketplace add ~/scratchpad/selise/the-software-factory`, then `/plugin install factory@the-software-factory`. The second command opens the plugin's details; choose **user scope** there.
-- Or in a shell: `claude plugin marketplace add ~/scratchpad/selise/the-software-factory`, then `claude plugin install factory@the-software-factory`, which installs in user scope by default (`--scope user`).
+- Inside a Claude Code session: run `/plugin marketplace add <factory root>`, then `/plugin install factory@the-software-factory`. The second command opens the plugin's details; choose **user scope** there.
+- Or in a shell: `claude plugin marketplace add <factory root>`, then `claude plugin install factory@the-software-factory`, which installs in user scope by default (`--scope user`).
 
 Then run `/factory:run` from any folder, for example `~/scratchpad/selise`.
 
-- The plugin loads in place from `plugin/` in `~/scratchpad/selise/the-software-factory`. After `git pull`, a branch switch or edits, start a new session or run `/reload-plugins`. Every Claude session on this Mac runs the hooks from whatever branch is checked out there, so keep the checkout on a branch that has the user-scope guard. Before this change, the guard blocks writes and pushes in every session. A branch without `plugin/` makes the plugin fail to load.
+- The plugin loads in place from `plugin/` in your clone. After `git pull`, a branch switch or edits, start a new session or run `/reload-plugins`. Every Claude session on this Mac runs the hooks from whatever branch is checked out there, so keep the checkout on a branch that has the user-scope guard. Before this change, the guard blocks writes and pushes in every session. A branch without `plugin/` makes the plugin fail to load.
 - The factory root is `FACTORY_ROOT` from the shell that starts `claude`, or else the default `~/scratchpad/selise/the-software-factory`. If neither is a factory root (a folder with `core/package.json` and a `plugin/.claude-plugin/plugin.json` named `factory`), the skill stops with `factory: factory root not found or session env missing`.
 - The plugin loads in every session, but the guard acts only while a `/factory:run` step runs (this session's `runs/.sessions/<session id>.json` exists) and for the stage agents. Other work in the session is not touched. A session started in a factory folder is still guarded all the time, as in (A).
 - If a normal session is unexpectedly guarded and the deny reason ends with `(step file <path> exists)`, a step ended without cleaning up: remove that stale `runs/.sessions/<session>.json`.
@@ -47,9 +47,15 @@ The `check` step runs the repo's check commands in one Bash call, which the skil
 
 If the timeout kills a check, no report is written and the task stays at `check`, claimed by this session. Recover with `/factory:run T-n` in the same session, which keeps the same claimant and re-runs the step. A new session has a new claimant, so it can take the task only after the claim lapses (10 minutes). Nothing renews the claim during `check`; checks longer than the claim let another session take the task (planned for the next core plan).
 
+## Store
+
+The default store is `local` (this clone's `.factory/` plus `factories/<id>/factory.yaml`). Set `FACTORY_STORE=local|factory-app` to choose; `file` and `blocks` are still accepted for them. `FACTORY_STORE_LOCAL_PATH` (an absolute folder; empty means `<root>/.factory`) moves the store data only (`board.json` and its locks), not `factories/`. A factory whose YAML says `factory.source: local` always uses the local store when the command names it: the run skill passes the ticket's factory to `complete`, `check` and `ship` as `--factory`, and the renew hook passes the factory recorded in the session file. With `FACTORY_STORE=blocks` (or `factory-app`), `/factory:run` with no factory named sees only the Blocks factories: name the factory (`/factory:run <factory>`) or use `FACTORY_STORE=local`. See `docs/setup/factory-yaml.md`.
+
+`./factory init` always works on the local store. After "Add another factory" the wizard finishes; run `./factory init` again for more changes. The generated `./factory` and `factory.cmd` launchers are git-ignored.
+
 ## Run the factory (modes 2 and 3)
 
-A factory session needs a built core: run `cd core && npm run build` once (and after core changes), because `core/dist/` is not committed.
+A factory session needs a built core: `./setup.sh` builds it; to rebuild, run `cd core && npm run build` (and after core changes), because `core/dist/` is not committed.
 
 - Mode 3, one step by hand: `/factory:run`, or `/factory:run T-12` for one task, or `/factory:run <factory>` to take work from one factory only (one factory per run; the skill passes it to the CLI as `--factory "<factory>"`, and the runner's `--factory` is repeatable). With no argument every active factory is considered.
 - Mode 2, steady loop: `/loop 2m /factory:run --loop`, or `/loop 2m /factory:run <factory> --loop` for one factory.
@@ -86,6 +92,8 @@ Each check is `factory next --peek`: the same sync and pick as `next` (paused, `
 This needs the Blocks rules to let the factory core insert a task (`blocks/data/rules.json`, regenerated with `npm run -s blocks:resources`). You deploy them; until then `factory new` fails with a one-line error.
 
 If `factory new` fails, the skill shows the error and falls back to one pre-filled Board link: open it, check the form, click **Create task**, then **Mark ready**. The link goes to `https://dfrsgz-eseqz.slsblx.com` unless `FACTORY_BOARD_URL` is set in the shell that starts `claude`, and it works only once the Board page with the pre-fill change is deployed. The draft files are saved under `runs/.drafts/` in the factory folder (ignored by git).
+
+`factory sync [--watch]` first pulls GitHub changes into the GitHub-only factories (new issues, Status moves, `/approve` and `/changes` comments, PR reviews), then pushes every task to GitHub (the core also pulls before `factory next` and pushes the touched task after each step); `--watch` repeats every `--interval` seconds (default 5) until Ctrl-C. With `--store blocks` (connected mode) it instead pushes the connected factories' tasks and plans the Board's Sync requests. `factory sync --rebuild [--factory <id>]` restores an empty board from the factory's marked issues, then pushes; it runs once.
 
 ## Safety layers
 

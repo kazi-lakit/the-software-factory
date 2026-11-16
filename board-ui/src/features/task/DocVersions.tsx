@@ -1,6 +1,7 @@
 import { diffLines } from "diff";
 import { useId, useState } from "react";
 import type { Doc } from "@factory/core";
+import { Markdown } from "./Markdown";
 
 type Line = { kind: "added" | "removed" | "same"; text: string };
 
@@ -39,16 +40,27 @@ export function DocDiff({ after, before, label }: { after: Doc; before: Doc; lab
 /**
  * One doc kind's versions: a picker (current by default), the body, and a diff against another version.
  * `to` opens on a version and `from` opens the diff from that version (the stale-gate case).
+ * `compare="previous"` swaps the Compare select for a "Compare with v(N-1)" toggle button.
  */
-export function DocVersions({ docs, from, label, to }: { docs: readonly Doc[]; from?: number; label: string; to?: number }) {
+export function DocVersions({ compare: compareMode = "select", docs, from, label, to }: {
+  compare?: "select" | "previous";
+  docs: readonly Doc[];
+  from?: number;
+  label: string;
+  to?: number;
+}) {
   const id = useId();
   // undefined: follow the current version as new versions arrive.
   const [shown, setShown] = useState<number | undefined>(to);
-  const [compare, setCompare] = useState<number | undefined>(from);
+  const [compareFrom, setCompareFrom] = useState<number | undefined>(from);
+  const [comparePrevious, setComparePrevious] = useState(false);
   const current = docs[docs.length - 1];
   if (!current) return <p className="sf-empty">No {label.toLowerCase()} yet.</p>;
 
-  const shownDoc = docs.find((d) => d.version === (shown ?? current.version));
+  const shownVersion = shown ?? current.version;
+  const compare = compareMode === "previous" ? (comparePrevious && shownVersion > 1 ? shownVersion - 1 : undefined) : compareFrom;
+
+  const shownDoc = docs.find((d) => d.version === shownVersion);
   const compareDoc = compare === undefined ? undefined : docs.find((d) => d.version === compare);
 
   return (
@@ -58,21 +70,27 @@ export function DocVersions({ docs, from, label, to }: { docs: readonly Doc[]; f
         <select
           id={`${id}-version`}
           className="sf-select sf-mono"
-          value={String(shown ?? current.version)}
+          value={String(shownVersion)}
           onChange={(event) => setShown(Number(event.target.value))}
         >
           {docs.map((doc) => (
             <option key={doc.version} value={doc.version}>{`v${doc.version}${doc === current ? " (current)" : ""}`}</option>
           ))}
         </select>
-        {docs.length > 1 ? (
+        {compareMode === "previous" ? (
+          shownVersion > 1 ? (
+            <button type="button" className="sf-button" aria-pressed={comparePrevious} onClick={() => setComparePrevious((on) => !on)}>
+              Compare with v{shownVersion - 1}
+            </button>
+          ) : null
+        ) : docs.length > 1 ? (
           <>
             <label htmlFor={`${id}-compare`}>Compare with</label>
             <select
               id={`${id}-compare`}
               className="sf-select sf-mono"
               value={compare === undefined ? "" : String(compare)}
-              onChange={(event) => setCompare(event.target.value === "" ? undefined : Number(event.target.value))}
+              onChange={(event) => setCompareFrom(event.target.value === "" ? undefined : Number(event.target.value))}
             >
               <option value="">Nothing</option>
               {docs.map((doc) => (
@@ -90,7 +108,7 @@ export function DocVersions({ docs, from, label, to }: { docs: readonly Doc[]; f
       ) : compare !== undefined && !compareDoc ? (
         <p className="sf-empty">Loading v{compare}…</p>
       ) : (
-        <pre className="sf-doc-body">{shownDoc.body}</pre>
+        <Markdown body={shownDoc.body} />
       )}
     </div>
   );

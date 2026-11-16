@@ -1,9 +1,15 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DEFAULT_SETTINGS, ForbiddenError, type FactoryEvent, type StoredSettings } from "@factory/core";
+import { describeEvent } from "../../lib/describeEvent";
+import { formatWhenShort } from "../../lib/formatTime";
+import { setReadyProblem } from "../newTask/createdNotice";
+import { describeWriteError } from "./writeOutcome";
 import { clearAllUnsent } from "../../lib/unsent";
 import { factory } from "../../test/factories";
 import { fakeBoard, renderWithClient, resetFakeBoard, seedTask } from "../../test/fakeBoard";
 import { TopBarLeadContext, type Lead } from "../../app/topBarLead";
+import { atPhoneWidth, BOARD_CSS, renderedClasses, tooWide } from "../../test/phoneWidth";
 import { TaskView } from "./TaskView";
 
 vi.mock("../../lib/board", async () => ({ boardStore: (await import("../../test/fakeBoard")).proxyBoardStore }));
@@ -12,6 +18,18 @@ function renderTask(taskId: string) {
   const onNavigate = vi.fn();
   return { onNavigate, ...renderWithClient(<TaskView taskId={taskId} onNavigate={onNavigate} />) };
 }
+
+/** The dd next to a Details term. */
+const detail = (term: string) => within(screen.getByRole("region", { name: "Details" })).getByText(term).nextElementSibling as HTMLElement;
+const mainHeadings = (container: HTMLElement) =>
+  [...container.querySelectorAll(".sf-task-main h3")].map((h) => h.textContent);
+const tabNames = () => within(screen.getByRole("tablist", { name: "Task sections" })).getAllByRole("tab").map((t) => t.textContent);
+const follows = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+const expectNoDocRegions = () => {
+  for (const name of ["Plan", "Verify report", "Review report"]) expect(screen.queryByRole("region", { name })).toBeNull();
+};
+/** The body rows of a table (the header row left out). */
+const bodyRows = (table: HTMLElement) => within(table).getAllByRole("row").slice(1);
 
 beforeEach(() => {
   resetFakeBoard();
@@ -34,24 +52,24 @@ describe("TaskView", () => {
     await core.finishRun(run.runId, { costUsd: 1.5, result: "done", turns: 12 });
     renderTask(task.taskId);
 
-    expect(await screen.findByRole("heading", { level: 2, name: "Add paging" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Add paging" })).toBeInTheDocument();
     const headings = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    expect(headings).toEqual(["Description", "Spec", "Plan", "Verify report", "Review report", "Your decision: spec", "Runs", "History"]);
+    expect(headings).toEqual(["Details"]);
+    expect(tabNames()).toEqual(["Description", "Spec (1)", "Plan (0)", "Q&A", "Checks", "Review", "Runs (1)", "History"]);
 
     const header = screen.getByRole("region", { name: "Task details" });
-    expect(within(header).getByText(task.taskId)).toHaveClass("sf-mono");
-    const details = screen.getByRole("complementary", { name: "Details" });
+    const details = screen.getByRole("region", { name: "Details" });
     expect(within(details).getByText("factory/T-1-add-paging")).toHaveClass("sf-mono");
-    expect(within(details).getByText("$1.50")).toHaveClass("sf-mono");
-    expect(within(header).getByText("Spec review")).toBeInTheDocument();
-    const pr = within(header).getByRole("link", { name: /pull\/9/ });
+    expect(within(header).getByText("Spec review · waiting for you")).toBeInTheDocument();
+    const pr = within(details).getByRole("link", { name: /pull\/9/ });
     expect(pr).toHaveAttribute("target", "_blank");
     expect(pr).toHaveAttribute("rel", "noopener noreferrer");
     expect(screen.getByText("Page the list endpoint.")).toBeInTheDocument();
 
-    const runs = screen.getByRole("table", { name: "Runs" });
-    expect(within(runs).getByText("spec-agent")).toBeInTheDocument();
-    expect(within(runs).getByText("12")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Runs (1)" }));
+    const rows = bodyRows(screen.getByRole("table", { name: "Runs" }));
+    expect(rows).toHaveLength(1);
+    for (const text of ["Spec v1", "done", "12", "$1.50"]) expect(within(rows[0]!).getByText(text)).toBeInTheDocument();
   });
 
   it.each(["javascript:alert(1)", "https://github.com.evil.test/x", "http://github.com/x", "https://evil.test/https://github.com/x"])(
@@ -59,8 +77,9 @@ describe("TaskView", () => {
     async (prUrl) => {
       const task = await seedTask({}, "pr_open", { prUrl, stage: "ship" });
       renderTask(task.taskId);
-      const header = await screen.findByRole("region", { name: "Task details" });
-      expect(within(header).queryByRole("link")).not.toBeInTheDocument();
+      const details = await screen.findByRole("region", { name: "Details" });
+      expect(within(details).queryByRole("link")).not.toBeInTheDocument();
+      expect(detail("PR")).toHaveTextContent(/^Not yet$/);
     }
   );
 
@@ -69,7 +88,7 @@ describe("TaskView", () => {
     renderTask(task.taskId);
     fireEvent.click(await screen.findByRole("button", { name: "Cancel task" }));
     fireEvent.click(screen.getByRole("button", { name: "Yes, cancel it" }));
-    await waitFor(() => expect(screen.getByRole("heading", { level: 2, name: "Drop me" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("heading", { level: 1, name: "Drop me" })).toHaveFocus());
   });
 
   it("lists_the_history_newest_first", async () => {
@@ -80,8 +99,9 @@ describe("TaskView", () => {
       { action: "move", actor: "core", factoryId: "blocks", at: "2026-11-10T10:00:00.000Z", field: "status", from: "ready", reason: "claimed", taskId: task.taskId, to: "spec" }
     ]);
     renderTask(task.taskId);
-    const history = await screen.findByRole("list", { name: "History" });
-    const items = within(history).getAllByRole("listitem").map((li) => li.textContent ?? "");
+    fireEvent.click(await screen.findByRole("tab", { name: "History" }));
+    const history = await screen.findByRole("table", { name: "History" });
+    const items = bodyRows(history).map((row) => row.textContent ?? "");
     expect(items[0]).toContain("claimed");
     expect(items[1]).toContain("marked ready");
   });
@@ -90,12 +110,13 @@ describe("TaskView", () => {
     const open = await seedTask({ title: "Open" });
     const blocked = await seedTask({ title: "Stuck" }, "blocked", { question: "Which base?", stage: "plan" });
     const first = renderTask(open.taskId);
-    await screen.findByRole("heading", { level: 2, name: "Open" });
+    await screen.findByRole("heading", { level: 1, name: "Open" });
     expect(screen.queryByLabelText("Your answer")).not.toBeInTheDocument();
     first.unmount();
     renderTask(blocked.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "View question" }));
     expect(await screen.findByLabelText("Your answer")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Approve/ })).not.toBeInTheDocument();
   });
 
   it("refreshes_the_task_after_a_write", async () => {
@@ -115,80 +136,121 @@ describe("TaskView", () => {
 });
 
 describe("TaskView factory", () => {
-  it("shows_the_factory_name_next_to_the_repo", async () => {
+  it("details_show_the_factory_name", async () => {
     resetFakeBoard(factory("delta", ["api"], { name: "Delta team" }));
     const task = await seedTask({ factoryId: "delta", repo: "api" });
     renderTask(task.taskId);
-    const header = await screen.findByRole("region", { name: "Task details" });
-    await waitFor(() => expect(within(header).getByText("Factory").nextElementSibling).toHaveTextContent("Delta team"));
-    expect(header.querySelector(".sf-task-meta")).toHaveTextContent("api");
+    await screen.findByRole("region", { name: "Details" });
+    await waitFor(() => expect(detail("Factory")).toHaveTextContent("Delta team"));
+    expect(detail("Repo")).toHaveTextContent("api");
   });
 });
 
-const DAY = 86_400_000;
-const createEvent = (taskId: string, at: string) =>
-  ({ action: "create", actor: "you", factoryId: "blocks", at, field: null, from: null, reason: "", taskId, to: "inbox" }) as const;
-
-describe("TaskView page layout", () => {
-  it("title_h2_has_the_title_class_and_meta_line_under_it", async () => {
-    const task = await seedTask({ repo: "data", title: "Meta me" });
-    const { owner } = fakeBoard();
-    await owner.addEvents([createEvent(task.taskId, new Date(Date.now() - 2 * DAY - 60_000).toISOString())]);
-    renderTask(task.taskId);
-    const h2 = await screen.findByRole("heading", { level: 2, name: "Meta me" });
-    const meta = h2.nextElementSibling as HTMLElement;
-    expect(meta).toHaveClass("sf-task-meta");
-    expect(meta).toHaveTextContent("data");
-    expect(within(meta).getByText("dev")).toHaveClass("sf-mono");
-    await waitFor(() => expect(meta).toHaveTextContent("2d"));
+describe("TaskView header", () => {
+  it("breadcrumb_reads_board_slash_task_id_and_board_navigates_in_app", async () => {
+    const task = await seedTask({ title: "Crumbs" });
+    const { onNavigate } = renderTask(task.taskId);
+    const nav = await screen.findByRole("navigation", { name: "Breadcrumb" });
+    expect(nav.textContent).toMatch(/^Board\s*\/\s*T-\d+$/);
+    expect(nav.textContent).toContain(task.taskId);
+    const links = within(nav).getAllByRole("link");
+    expect(links).toHaveLength(1);
+    expect(links[0]).toHaveAccessibleName("Board");
+    expect(links[0]).toHaveAttribute("href", "/");
+    fireEvent.click(links[0]!);
+    expect(onNavigate).toHaveBeenCalledWith("/");
   });
 
-  it("meta_line_omits_age_without_a_create_event", async () => {
-    const task = await seedTask({ title: "No age" });
-    const { owner } = fakeBoard();
-    await owner.addEvents([{ ...createEvent(task.taskId, "not a date") }]);
+  it("chip_row_shows_id_status_and_repo_to_base", async () => {
+    const task = await seedTask({ repo: "data", title: "Chips" }, "build", { stage: "build" });
     renderTask(task.taskId);
-    const h2 = await screen.findByRole("heading", { level: 2, name: "No age" });
-    const meta = h2.nextElementSibling as HTMLElement;
-    expect(meta.textContent).not.toMatch(/NaN|undefined/);
-    expect(meta.textContent).not.toMatch(/·\s*$/);
+    const chips = await screen.findByRole("list", { name: "Task summary" });
+    const items = within(chips).getAllByRole("listitem");
+    expect(items.map((li) => li.textContent)).toEqual([task.taskId, "Build", "data → dev"]);
+    expect(items[0]).toHaveClass("sf-mono");
   });
 
-  it("details_lists_branch_cost_last_event", async () => {
-    const task = await seedTask({ title: "Details" }, "build", { branch: "factory/T-9-x", costUsd: 2.25, stage: "build" });
-    const { owner } = fakeBoard();
-    await owner.addEvents([
-      { action: "move", actor: "core", factoryId: "blocks", at: "2026-11-10T10:00:00.000Z", field: "status", from: "ready", reason: "", taskId: task.taskId, to: "spec" },
-      { action: "move", actor: "core", factoryId: "blocks", at: "2099-01-01T10:00:00.000Z", field: "status", from: "spec", reason: "", taskId: task.taskId, to: "plan" }
-    ]);
-    renderTask(task.taskId);
-    const details = await screen.findByRole("complementary", { name: "Details" });
-    expect(within(details).getByText("Branch").nextElementSibling).toHaveTextContent("factory/T-9-x");
-    expect(within(details).getByText("Cost").nextElementSibling).toHaveTextContent("$2.25");
-    const last = within(details).getByText("Last event").nextElementSibling as HTMLElement;
-    expect(last).toHaveTextContent("status: plan");
-    expect(last).toHaveTextContent(new Date("2099-01-01T10:00:00.000Z").toLocaleString());
+  it("status_chip_says_waiting_for_you_when_it_waits", async () => {
+    const waiting = await seedTask({ title: "Waits" }, "spec_review", { stage: "spec" });
+    const first = renderTask(waiting.taskId);
+    const chips = await screen.findByRole("list", { name: "Task summary" });
+    const status = within(chips).getAllByRole("listitem")[1]!;
+    expect(status).toHaveTextContent(/^Spec review · waiting for you$/);
+    expect(status).toHaveClass("sf-chip-waiting");
+    first.unmount();
+    const building = await seedTask({ title: "Builds" }, "build", { stage: "build" });
+    renderTask(building.taskId);
+    const other = within(await screen.findByRole("list", { name: "Task summary" })).getAllByRole("listitem")[1]!;
+    expect(other).toHaveTextContent(/^Build$/);
+    expect(other).not.toHaveClass("sf-chip-waiting");
   });
 
-  it("details_show_dashes_when_branch_cost_events_missing", async () => {
-    const task = await seedTask({ title: "Bare" });
+  it("title_is_an_h1_with_the_page_title_style", async () => {
+    const task = await seedTask({ title: "Big title" });
     renderTask(task.taskId);
-    const details = await screen.findByRole("complementary", { name: "Details" });
-    expect(within(details).getByText("Branch").nextElementSibling).toHaveTextContent("—");
-    expect(within(details).getByText("Last event").nextElementSibling).toHaveTextContent(/^—$|created in/);
+    const h1 = await screen.findByRole("heading", { level: 1, name: "Big title" });
+    expect(h1).toHaveClass("sf-page-title");
+    expect(h1).toHaveAttribute("tabindex", "-1");
+    expect(screen.queryByRole("heading", { level: 2 })).toBeNull();
   });
 
-  it("header_facts_no_longer_repeat_repo_base_branch_cost", async () => {
-    const task = await seedTask({ title: "Once" }, "build", { branch: "factory/T-9-x", costUsd: 2.25, stage: "build" });
+  it("edit_and_cancel_sit_on_the_title_row", async () => {
+    const task = await seedTask({ title: "Row" });
+    renderTask(task.taskId);
+    const h1 = await screen.findByRole("heading", { level: 1, name: "Row" });
+    const row = h1.parentElement as HTMLElement;
+    expect(row).toHaveClass("sf-task-title-row");
+    const edit = within(row).getByRole("button", { name: "Edit" });
+    expect(edit).toHaveClass("sf-button");
+    expect(edit).not.toHaveClass("sf-button-primary");
+    expect(edit).not.toHaveClass("sf-button-danger");
+    expect(within(row).getByRole("button", { name: "Cancel task" })).toHaveClass("sf-button-danger");
+  });
+
+  it("old_facts_and_meta_line_are_gone", async () => {
+    const task = await seedTask({ title: "Plain" }, "build", { attempt: 1, branch: "factory/T-9-x", costUsd: 2.25, stage: "build" });
+    const { container } = renderTask(task.taskId);
+    const header = await screen.findByRole("region", { name: "Task details" });
+    expect(container.querySelector(".sf-facts")).toBeNull();
+    expect(container.querySelector(".sf-task-meta")).toBeNull();
+    for (const term of ["Attempt", "Stage", "Last event", "Repo", "Base", "Branch", "Cost"]) expect(within(header).queryByText(term)).not.toBeInTheDocument();
+  });
+
+  it("stepper_labels_show_context_on_the_task_page", async () => {
+    const task = await seedTask({ title: "Steps" }, "spec_review", { stage: "spec" });
+    const { core } = fakeBoard();
+    await core.addDoc(task.taskId, "spec", "# Spec\nOne.", "spec-agent");
+    await core.addDoc(task.taskId, "spec", "# Spec\nTwo.", "spec-agent");
     renderTask(task.taskId);
     const header = await screen.findByRole("region", { name: "Task details" });
-    for (const term of ["Repo", "Base", "Branch", "Cost"]) expect(within(header).queryByText(term)).not.toBeInTheDocument();
+    const stepper = within(header).getByRole("img");
+    expect(stepper).toHaveTextContent("Spec · v2 waiting");
+    expect(stepper).toHaveTextContent("PR into dev");
+  });
+});
+
+describe("TaskView page layout", () => {
+  it("details_list_branch_and_cost", async () => {
+    const task = await seedTask({ title: "Details" }, "build", { branch: "factory/T-9-x", costUsd: 2.25, stage: "build" });
+    renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    expect(detail("Branch")).toHaveTextContent("factory/T-9-x");
+    expect(detail("Cost")).toHaveTextContent(/^\$2\.25/);
+    expect(detail("Cost")).toHaveClass("sf-mono");
+  });
+
+  it("details_show_a_dash_without_a_branch", async () => {
+    const task = await seedTask({ title: "Bare" });
+    renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    expect(detail("Branch")).toHaveTextContent("—");
   });
 
   it("no_document_still_shows_details", async () => {
     const task = await seedTask({ title: "No docs" });
     renderTask(task.taskId);
-    expect(await screen.findByRole("complementary", { name: "Details" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Details" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Spec (0)" }));
     expect(screen.getByText("No spec yet.")).toBeInTheDocument();
   });
 
@@ -202,7 +264,7 @@ describe("TaskView page layout", () => {
   it("build_task_shows_no_accent_step_and_no_decision_panel", async () => {
     const task = await seedTask({ title: "Building" }, "build", { stage: "build" });
     const { container } = renderTask(task.taskId);
-    await screen.findByRole("heading", { level: 2, name: "Building" });
+    await screen.findByRole("heading", { level: 1, name: "Building" });
     expect(container.querySelectorAll('.sf-step[data-state="waiting"]')).toHaveLength(0);
     expect(screen.queryByRole("heading", { name: /Your decision/ })).not.toBeInTheDocument();
   });
@@ -210,20 +272,21 @@ describe("TaskView page layout", () => {
   it("done_task_shows_six_done_steps", async () => {
     const task = await seedTask({ title: "Finished" }, "done", { stage: "ship" });
     const { container } = renderTask(task.taskId);
-    await screen.findByRole("heading", { level: 2, name: "Finished" });
+    await screen.findByRole("heading", { level: 1, name: "Finished" });
     expect(container.querySelectorAll('.sf-step[data-state="done"]')).toHaveLength(6);
   });
 
   it("cancelled_task_shows_no_waiting_step", async () => {
     const task = await seedTask({ title: "Dropped" }, "cancelled", { stage: "build" });
     const { container } = renderTask(task.taskId);
-    await screen.findByRole("heading", { level: 2, name: "Dropped" });
+    await screen.findByRole("heading", { level: 1, name: "Dropped" });
     expect(container.querySelectorAll('.sf-step[data-state="waiting"]')).toHaveLength(0);
   });
 
   it("blocked_task_with_question_shows_waiting_step_and_answer_panel", async () => {
     const task = await seedTask({ title: "Stuck" }, "blocked", { question: "Which base?", stage: "build" });
     const { container } = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "View question" }));
     expect(await screen.findByLabelText("Your answer")).toBeInTheDocument();
     expect(container.querySelectorAll('.sf-step[data-state="waiting"]')).toHaveLength(1);
   });
@@ -231,9 +294,262 @@ describe("TaskView page layout", () => {
   it.each([["spec_review", "spec", 0], ["plan_review", "plan", 1]] as const)("%s_waiting_step_is_the_gate_step", async (status, stage, index) => {
     const task = await seedTask({ title: "Gate" }, status, { stage });
     const { container } = renderTask(task.taskId);
-    await screen.findByRole("heading", { level: 2, name: "Gate" });
+    await screen.findByRole("heading", { level: 1, name: "Gate" });
     const steps = [...container.querySelectorAll(".sf-step")].map((el) => el.getAttribute("data-state"));
     expect(steps[index]).toBe("waiting");
+  });
+});
+
+describe("TaskView body", () => {
+  const settingsWith = (settings: StoredSettings) => vi.spyOn(fakeBoard().owner, "getSettings").mockResolvedValue(settings);
+
+  it("main_column_starts_with_the_decision_panel_at_a_gate", async () => {
+    const task = await seedTask({ title: "Decide" }, "spec_review", { stage: "spec" });
+    await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nOne.", "spec-agent");
+    const { container } = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "Review spec" }));
+    const panel = await screen.findByRole("region", { name: "Your decision: approve the spec" });
+    expect(container.querySelector(".sf-task-main")!.firstElementChild).toHaveClass("sf-task-more");
+    expect(screen.getByRole("tabpanel", { name: "Spec (1)" })).toContainElement(panel);
+    expect(panel).toHaveClass("sf-panel-decision");
+  });
+
+  it("spec_and_plan_tabs_are_present_at_a_gate", async () => {
+    const six = (spec: number, plan: number) => ["Description", `Spec (${spec})`, `Plan (${plan})`, "Q&A", "Checks", "Review", "Runs (0)", "History"];
+    const spec = await seedTask({ title: "Spec gate" }, "spec_review", { stage: "spec" });
+    await fakeBoard().core.addDoc(spec.taskId, "spec", "# Spec\nOne.", "spec-agent");
+    const first = renderTask(spec.taskId);
+    await screen.findByRole("heading", { level: 1, name: "Spec gate" });
+    expect(tabNames()).toEqual(six(1, 0));
+    expectNoDocRegions();
+    first.unmount();
+
+    const plan = await seedTask({ title: "Plan gate" }, "plan_review", { stage: "plan" });
+    await fakeBoard().core.addDoc(plan.taskId, "plan", "# Plan\nOne.", "planner");
+    const second = renderTask(plan.taskId);
+    await screen.findByRole("heading", { level: 1, name: "Plan gate" });
+    expect(tabNames()).toEqual(six(0, 1));
+    expectNoDocRegions();
+    second.unmount();
+
+    const created = await fakeBoard().owner.createTask({ baseBranch: "feature/x", description: "", factoryId: "blocks", repo: "data", title: "PR gate" });
+    await fakeBoard().core.updateTask(created.taskId, created.version, { stage: "ship", status: "pr_open" });
+    renderTask(created.taskId);
+    await screen.findByRole("heading", { level: 1, name: "PR gate" });
+    expect(tabNames()).toEqual(six(0, 0));
+    expectNoDocRegions();
+  });
+
+  it("non_gate_task_shows_the_six_tabs_with_history_selected", async () => {
+    const task = await seedTask({ title: "Building" }, "build", { stage: "build" });
+    const { container } = renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 1, name: "Building" });
+    expect(tabNames()).toEqual(["Description", "Spec (0)", "Plan (0)", "Q&A", "Checks", "Review", "Runs (0)", "History"]);
+    expect(screen.getByRole("tab", { name: "Description" })).toHaveAttribute("aria-selected", "true");
+    const main = mainHeadings(container);
+    for (const gone of ["Spec", "Plan", "Verify report", "Review report", "History"]) expect(main).not.toContain(gone);
+  });
+
+  it("blocked_task_main_column_starts_with_the_answer_panel", async () => {
+    const task = await seedTask({ title: "Stuck" }, "blocked", { question: "Open now?", stage: "plan" });
+    await fakeBoard().core.addEvents([
+      { action: "set", actor: "planner", at: "2026-11-01T10:00:00.000Z", factoryId: "blocks", field: "question", from: null, reason: "asked", taskId: task.taskId, to: "Earlier?" },
+      { action: "set", actor: "you", at: "2026-11-02T10:00:00.000Z", factoryId: "blocks", field: "answer", from: null, reason: "answered", taskId: task.taskId, to: "yes" }
+    ]);
+    const { container } = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "View question" }));
+    const panel = await screen.findByRole("region", { name: "Open now?" });
+    const main = container.querySelector(".sf-task-main") as HTMLElement;
+    const log = screen.getByRole("region", { name: "Questions and answers" });
+    expect(main.firstElementChild).toHaveClass("sf-task-more");
+    expect(screen.getByRole("tabpanel", { name: "Q&A" })).toContainElement(panel);
+    expect(follows(panel, log)).toBe(true);
+    expect(screen.queryByRole("button", { name: /^Approve/ })).toBeNull();
+  });
+
+  it("tabs_follow_the_answer_and_decision_panels", async () => {
+    const task = await seedTask({ title: "Decide" }, "spec_review", { stage: "spec" });
+    await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nOne.", "spec-agent");
+    renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "Review spec" }));
+    const panel = await screen.findByRole("region", { name: "Your decision: approve the spec" });
+    expect(follows(screen.getByRole("tablist", { name: "Task sections" }), panel)).toBe(true);
+  });
+
+  it("arrow_keys_move_between_task_tabs", async () => {
+    const task = await seedTask({ title: "Keys" });
+    renderTask(task.taskId);
+    const description = await screen.findByRole("tab", { name: "Description" });
+    fireEvent.keyDown(description, { key: "ArrowRight" });
+    const spec = screen.getByRole("tab", { name: "Spec (0)" });
+    expect(spec).toHaveAttribute("aria-selected", "true");
+    expect(spec).toHaveFocus();
+    fireEvent.keyDown(spec, { key: "Home" });
+    fireEvent.keyDown(description, { key: "ArrowLeft" });
+    const history = screen.getByRole("tab", { name: "History" });
+    expect(history).toHaveAttribute("aria-selected", "true");
+    expect(history).toHaveFocus();
+  });
+
+  it("checks_and_review_tabs_show_their_docs", async () => {
+    const task = await seedTask({ title: "Reports" }, "build", { stage: "build" });
+    const { core } = fakeBoard();
+    await core.addDoc(task.taskId, "verify", "## Checks\n\n- lint passed", "verifier");
+    await core.addDoc(task.taskId, "review", "## Review\n\nLooks good.", "reviewer");
+    renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("tab", { name: "Checks" }));
+    let panel = screen.getByRole("tabpanel", { name: "Checks" });
+    expect(within(panel).getByRole("heading", { level: 2, name: "Checks" })).toBeInTheDocument();
+    expect(within(panel).getByRole("listitem")).toHaveTextContent("lint passed");
+    fireEvent.click(screen.getByRole("tab", { name: "Review" }));
+    panel = screen.getByRole("tabpanel", { name: "Review" });
+    expect(within(panel).getByRole("heading", { level: 2, name: "Review" })).toBeInTheDocument();
+    expect(within(panel).getByText("Looks good.")).toBeInTheDocument();
+  });
+
+  it("spec_tab_renders_markdown_and_keeps_the_version_picker", async () => {
+    const task = await seedTask({ title: "Versions" }, "build", { stage: "build" });
+    const { core } = fakeBoard();
+    await core.addDoc(task.taskId, "spec", "## Goal\n\nOld scope.", "spec-agent");
+    await core.addDoc(task.taskId, "spec", "## Goal\n\nNew scope.", "spec-agent");
+    renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("tab", { name: "Spec (2)" }));
+    const panel = screen.getByRole("tabpanel", { name: "Spec (2)" });
+    expect(within(panel).getByRole("heading", { level: 2, name: "Goal" })).toBeInTheDocument();
+    expect(within(panel).getByLabelText("Spec version")).toHaveValue("2");
+    fireEvent.change(within(panel).getByLabelText("Spec version"), { target: { value: "1" } });
+    expect(within(panel).getByText("Old scope.")).toBeInTheDocument();
+    fireEvent.change(within(panel).getByLabelText("Spec version"), { target: { value: "2" } });
+    fireEvent.change(within(panel).getByLabelText("Compare with"), { target: { value: "1" } });
+    expect(within(panel).getByRole("region", { name: "Spec changes from v1 to v2" })).toBeInTheDocument();
+  });
+
+  it("side_column_has_details_and_description", async () => {
+    const task = await seedTask({ title: "Sides" });
+    const { container } = renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 1, name: "Sides" });
+    const side = container.querySelector(".sf-task-side") as HTMLElement;
+    const main = container.querySelector(".sf-task-main") as HTMLElement;
+    expect(side.tagName).toBe("ASIDE");
+    expect(main.compareDocumentPosition(side) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect([...side.querySelectorAll("h3")].map((h) => h.textContent)).toEqual(["Details"]);
+  });
+
+  it("description_panel_shows_the_text_or_no_description", async () => {
+    const task = await seedTask({ description: "Do the thing.", title: "Described" });
+    const first = renderTask(task.taskId);
+    const panel = await screen.findByRole("tabpanel", { name: "Description" });
+    expect(panel).toHaveTextContent("Do the thing.");
+    first.unmount();
+    const bare = await seedTask({ title: "Bare" });
+    renderTask(bare.taskId);
+    expect(await screen.findByRole("tabpanel", { name: "Description" })).toHaveTextContent("No description.");
+  });
+
+  it("details_list_repo_base_branch_factory_pr", async () => {
+    const task = await seedTask({ title: "Facts" });
+    renderTask(task.taskId);
+    const details = await screen.findByRole("region", { name: "Details" });
+    expect([...details.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Repo", "Base", "Branch", "Factory", "PR", "Attempts", "Cost"]);
+    expect(detail("Base")).toHaveClass("sf-mono");
+    expect(detail("Base")).toHaveTextContent(/^dev$/);
+    expect(detail("PR")).toHaveTextContent(/^Not yet$/);
+  });
+
+  it("waits_for_shows_only_with_dependencies", async () => {
+    const lone = await seedTask({ title: "Lone" });
+    const first = renderTask(lone.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    expect(screen.queryByText("Waits for")).toBeNull();
+    first.unmount();
+
+    const { core, owner } = fakeBoard();
+    const dep = await seedTask({ title: "Dep" }, "build", { stage: "build" });
+    const child = await owner.createTask({ dependsOn: [dep.taskId], description: "", factoryId: "blocks", repo: "data", title: "Child" });
+    await core.updateTask(child.taskId, child.version, { status: "ready" });
+    const { onNavigate } = renderTask(child.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    const waits = detail("Waits for");
+    const link = within(waits).getByRole("link", { name: dep.taskId });
+    await waitFor(() => expect(link.closest("li")).toHaveTextContent("Build"));
+    await waitFor(() => expect(within(waits).getByText(`Waiting on ${dep.taskId}`)).toBeInTheDocument());
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledWith(`/tasks/${dep.taskId}`);
+  });
+
+  it("attempts_reads_n_returns", async () => {
+    const task = await seedTask({ title: "Tries" }, "build", { attempt: 2, stage: "build" });
+    renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    expect(detail("Attempts")).toHaveTextContent(/^2 returns$/);
+  });
+
+  it("cost_shows_the_resolved_limit_once_settings_load", async () => {
+    const factorySettings = { ...DEFAULT_SETTINGS, maxCostPerTaskUsd: 8 };
+    const task = await seedTask({ repo: "data", title: "Costs" }, "build", { costUsd: 1.5, stage: "build" });
+
+    const spy = settingsWith({ factories: { blocks: { factory: factorySettings, repos: { data: { maxCostPerTaskUsd: 3 } } } } });
+    const first = renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    await waitFor(() => expect(detail("Cost")).toHaveTextContent(/^\$1\.50 of \$3\.00$/));
+    first.unmount();
+
+    spy.mockResolvedValue({ factories: { blocks: { factory: factorySettings, repos: {} } } });
+    const second = renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    await waitFor(() => expect(detail("Cost")).toHaveTextContent(/^\$1\.50 of \$8\.00$/));
+    second.unmount();
+
+    spy.mockResolvedValue({ factories: {} });
+    renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    await waitFor(() => expect(detail("Cost")).toHaveTextContent(/^\$1\.50 of \$5\.00$/));
+  });
+
+  it("cost_shows_the_amount_alone_while_settings_load_or_fail", async () => {
+    const task = await seedTask({ title: "Costs" }, "build", { costUsd: 1.5, stage: "build" });
+    const spy = vi.spyOn(fakeBoard().owner, "getSettings").mockReturnValue(new Promise(() => undefined));
+    const first = renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    expect(detail("Cost")).toHaveTextContent(/^\$1\.50$/);
+    first.unmount();
+
+    spy.mockRejectedValue(new Error("boom"));
+    renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    await waitFor(() => expect(spy).toHaveBeenCalledTimes(2));
+    expect(detail("Cost")).toHaveTextContent(/^\$1\.50$/);
+  });
+
+  it("last_event_row_is_gone", async () => {
+    const task = await seedTask({ title: "Events" });
+    renderTask(task.taskId);
+    const details = await screen.findByRole("region", { name: "Details" });
+    expect(within(details).queryByText("Last event")).toBeNull();
+  });
+
+  it("runs_tab_lists_every_run_in_start_order", async () => {
+    const task = await seedTask({ title: "Runs" }, "build", { stage: "build" });
+    const { core } = fakeBoard();
+    const first = await core.startRun({ agent: "spec-writer", mode: "sdk", step: "spec", taskId: task.taskId });
+    await core.finishRun(first.runId, { costUsd: 0.12, result: "done", turns: 14 });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await core.startRun({ agent: "spec-writer", mode: "sdk", step: "spec", taskId: task.taskId });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await core.startRun({ agent: "planner", mode: "sdk", step: "plan", taskId: task.taskId });
+    renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("tab", { name: "Runs (3)" }));
+    const rows = bodyRows(screen.getByRole("table", { name: "Runs" }));
+    const cells = rows.map((row) => within(row).getAllByRole("cell").map((c) => c.textContent));
+    expect(cells.map((c) => c[0])).toEqual(["Spec v1", "Spec v2", "Plan v1"]);
+    expect(cells.map((c) => c[1])).toEqual(["done", "running", "running"]);
+  });
+
+  it("runs_say_no_runs_yet", async () => {
+    const task = await seedTask({ title: "Idle" });
+    renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("tab", { name: "Runs (0)" }));
+    expect(screen.getByRole("tabpanel")).toHaveTextContent("No runs yet.");
   });
 });
 
@@ -243,7 +559,8 @@ describe("TaskView dependencies", () => {
     const dep = await seedTask({ title: "Dep" }, "build", { stage: "build" });
     const t = await owner.createTask({ dependsOn: [dep.taskId], description: "", factoryId: "blocks", repo: "data", title: "Child" });
     const { onNavigate } = renderTask(t.taskId);
-    const link = await screen.findByRole("link", { name: new RegExp(dep.taskId) });
+    const details = await screen.findByRole("region", { name: "Details" });
+    const link = within(details).getByRole("link", { name: new RegExp(dep.taskId) });
     expect(link).toHaveAttribute("href", `/tasks/${dep.taskId}`);
     await waitFor(() => expect(link.closest("li")).toHaveTextContent("Build"));
     fireEvent.click(link);
@@ -262,19 +579,37 @@ describe("TaskView questions and answers", () => {
     const task = await seedTask({ title: "Stuck" }, "blocked", { question: "Open now?", stage: "plan" });
     await fakeBoard().core.addEvents([qa(task.taskId, "question", LETTERED, 1), qa(task.taskId, "answer", "A. main: fits", 2), qa(task.taskId, "question", "Open now?", 3)]);
     renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("tab", { name: "Q&A" }));
     const log = await screen.findByRole("region", { name: "Questions and answers" });
     expect(within(log).getByText("Which branch?")).toBeInTheDocument();
     expect(within(log).getByText("A. main: fits")).toBeInTheDocument();
-    expect(within(log).getByText("Recommended")).toBeInTheDocument();
-    expect(within(log).queryByText("Open now?")).toBeNull();
+    expect(within(log).getAllByText("Recommended")).toHaveLength(1);
+    expect(within(log).getByText("Your answer")).toBeInTheDocument();
+    expect(log.querySelector("li.sf-qa-entry")).toHaveTextContent("Which branch?");
+    expect(log).toHaveTextContent("1 asked · 1 answered");
     const panel = screen.getByRole("region", { name: "Open now?" });
     expect(panel.compareDocumentPosition(log) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("how_questions_work_aside_shows_with_the_qa_panel", async () => {
+    const task = await seedTask({ title: "Moving" }, "plan", { stage: "plan" });
+    await fakeBoard().core.addEvents([qa(task.taskId, "question", "Continue?", 1), qa(task.taskId, "answer", "yes", 2)]);
+    const { container } = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("tab", { name: "Q&A" }));
+    await screen.findByRole("region", { name: "Questions and answers" });
+    const side = container.querySelector(".sf-task-side") as HTMLElement;
+    const aside = within(side).getByRole("region", { name: "How questions work" });
+    expect(aside).toHaveClass("sf-panel");
+    expect(aside.querySelector("p")?.textContent).toBe(
+      "An agent that can't go on asks one question, offers 2 to 4 answers and marks the one it recommends, with a reason. Pick one or write your own. Every question and answer stays on the task and in History."
+    );
   });
 
   it("non_blocked_task_with_past_answers_shows_the_log_without_a_panel", async () => {
     const task = await seedTask({ title: "Moving" }, "plan", { stage: "plan" });
     await fakeBoard().core.addEvents([qa(task.taskId, "question", "Continue?", 1), qa(task.taskId, "answer", "yes", 2)]);
     renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("tab", { name: "Q&A" }));
     expect(await screen.findByRole("region", { name: "Questions and answers" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Your answer")).toBeNull();
   });
@@ -282,15 +617,16 @@ describe("TaskView questions and answers", () => {
   it("no_qa_section_when_there_are_no_entries", async () => {
     const task = await seedTask({ title: "Quiet" });
     renderTask(task.taskId);
-    await screen.findByRole("heading", { level: 2, name: "Quiet" });
+    await screen.findByRole("heading", { level: 1, name: "Quiet" });
     expect(screen.queryByRole("region", { name: "Questions and answers" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "How questions work" })).toBeNull();
   });
 
   it("gate_changes_requested_answer_is_not_in_the_log", async () => {
     const task = await seedTask({ title: "Gate" }, "plan", { stage: "plan" });
     await fakeBoard().core.addEvents([qa(task.taskId, "answer", "please change X", 1, "spec changes requested")]);
     renderTask(task.taskId);
-    await screen.findByRole("heading", { level: 2, name: "Gate" });
+    await screen.findByRole("heading", { level: 1, name: "Gate" });
     expect(screen.queryByRole("region", { name: "Questions and answers" })).toBeNull();
     expect(screen.queryByText("please change X")).toBeNull();
   });
@@ -311,7 +647,7 @@ describe("TaskView questions and answers", () => {
     it("registers_Back_when_loaded_and_navigates_to_the_board", async () => {
       const task = await seedTask({ title: "Back me" });
       const { leads, onNavigate } = renderWithLead(task.taskId);
-      await screen.findByRole("heading", { level: 2, name: "Back me" });
+      await screen.findByRole("heading", { level: 1, name: "Back me" });
       const lead = leads[leads.length - 1];
       expect(lead?.label).toBe("Back");
       lead?.onClick();
@@ -343,5 +679,173 @@ describe("TaskView questions and answers", () => {
       unmount();
       expect(leads[leads.length - 1]).toBeNull();
     });
+  });
+});
+
+describe("TaskView after New task", () => {
+  it("shows_the_not_marked_ready_notice_once_after_create", async () => {
+    const task = await seedTask({ title: "Fresh" });
+    setReadyProblem(task.taskId, describeWriteError(new ForbiddenError("no")));
+    renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 1, name: "Fresh" });
+    const alerts = screen.getAllByRole("alert").map((a) => a.textContent ?? "");
+    expect(alerts.some((t) => t.includes("The task was created but not marked ready."))).toBe(true);
+    expect(alerts.some((t) => t.includes("Blocks refused this change for your account."))).toBe(true);
+    cleanup();
+    renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 1, name: "Fresh" });
+    expect(screen.queryByText("The task was created but not marked ready.")).not.toBeInTheDocument();
+  });
+});
+
+describe("TaskView phone markup", () => {
+  const more = (container: HTMLElement) => container.querySelector("details.sf-task-more") as HTMLDetailsElement;
+  const moreRow = (container: HTMLElement, term: string) =>
+    [...more(container).querySelectorAll("dt")].find((dt) => dt.textContent === term)?.nextElementSibling as HTMLElement | undefined;
+
+  it("shows_repo_to_base_under_the_title", async () => {
+    const task = await seedTask({ repo: "data", title: "Repo line" }, "build", { stage: "build" });
+    const { container } = renderTask(task.taskId);
+    await screen.findByRole("heading", { level: 1, name: "Repo line" });
+    const line = container.querySelector("p.sf-task-repo") as HTMLElement;
+    expect(line).toHaveClass("sf-mono");
+    expect(line).toHaveTextContent(/^data → dev$/);
+    expect(container.querySelector(".sf-task-title-row")?.nextElementSibling).toBe(line);
+    const chips = within(screen.getByRole("list", { name: "Task summary" })).getAllByRole("listitem");
+    expect(chips[2]).toHaveClass("sf-chip-repo");
+  });
+
+  it("details_and_history_is_a_closed_disclosure", async () => {
+    const prUrl = "https://github.com/SELISEdigitalplatforms/blocks-data/pull/9";
+    const task = await seedTask({ title: "More" }, "pr_open", { branch: "factory/T-1-more", costUsd: 1.5, prUrl, stage: "ship" });
+    const at = "2099-01-02T10:00:00.000Z";
+    const newest: FactoryEvent = { action: "move", actor: "core", at, factoryId: "blocks", field: "status", from: "review", reason: "pr opened", taskId: task.taskId, to: "pr_open" };
+    await fakeBoard().core.addEvents([newest]);
+    const { container } = renderTask(task.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    const details = more(container);
+    expect(details).not.toBeNull();
+    expect(details).not.toHaveAttribute("open");
+    const summary = details.querySelector("summary");
+    expect(summary).toHaveClass("sf-label");
+    expect(summary).toHaveTextContent(/^Details and history$/);
+    expect([...details.querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Branch", "Cost", "PR", "Last event"]);
+    expect(moreRow(container, "Branch")).toHaveTextContent(/^factory\/T-1-more$/);
+    await waitFor(() => expect(moreRow(container, "Cost")?.textContent).toBe(detail("Cost").textContent));
+    expect(within(details).getByRole("link", { name: /pull\/9/ })).toHaveAttribute("target", "_blank");
+    const last = moreRow(container, "Last event")!;
+    expect(last).toHaveTextContent(describeEvent(newest).text);
+    expect(last).toHaveTextContent(formatWhenShort(at));
+  });
+
+  it("details_and_history_lists_waits_for_with_its_badge", async () => {
+    const { core, owner } = fakeBoard();
+    const dep = await seedTask({ title: "Dep" }, "build", { stage: "build" });
+    const child = await owner.createTask({ dependsOn: [dep.taskId], description: "", factoryId: "blocks", repo: "data", title: "Child" });
+    await core.updateTask(child.taskId, child.version, { status: "ready" });
+    const { container, onNavigate } = renderTask(child.taskId);
+    await screen.findByRole("region", { name: "Details" });
+    expect([...more(container).querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Branch", "Cost", "Waits for", "Last event"]);
+    const waits = moreRow(container, "Waits for")!;
+    const link = within(waits).getByRole("link", { name: dep.taskId });
+    await waitFor(() => expect(link.closest("li")).toHaveTextContent("Build"));
+    await waitFor(() => expect(within(waits).getByText(`Waiting on ${dep.taskId}`)).toHaveClass("sf-badge"));
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledWith(`/tasks/${dep.taskId}`);
+  });
+
+  it("details_and_history_is_first_in_the_main_column", async () => {
+    const gated = await seedTask({ title: "Gated" }, "spec_review", { stage: "spec" });
+    await fakeBoard().core.addDoc(gated.taskId, "spec", "# Spec\nOne.", "spec-agent");
+    const first = renderTask(gated.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "Review spec" }));
+    await screen.findByRole("button", { name: "Approve spec v1" });
+    expect(first.container.querySelector(".sf-task-main")?.firstElementChild).toBe(more(first.container));
+    first.unmount();
+    const stuck = await seedTask({ title: "Stuck" }, "blocked", { question: "Open now?", stage: "plan" });
+    const { container } = renderTask(stuck.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "View question" }));
+    await screen.findByRole("region", { name: "Open now?" });
+    expect(container.querySelector(".sf-task-main")?.firstElementChild).toBe(more(container));
+  });
+
+  it("details_and_history_without_pr_or_events", async () => {
+    fakeBoard().ownerData.seed("FactoryTask", {
+      attempt: 0, baseBranch: "dev", costUsd: 0, description: "", gateOverrides: "{}", repo: "data", status: "inbox", taskId: "T-77", title: "Quiet row", version: 1
+    });
+    const { container } = renderTask("T-77");
+    await screen.findByRole("heading", { level: 1, name: "Quiet row" });
+    expect([...more(container).querySelectorAll("dt")].map((dt) => dt.textContent)).toEqual(["Branch", "Cost", "Last event"]);
+    expect(moreRow(container, "Branch")).toHaveTextContent(/^—$/);
+    expect(moreRow(container, "Last event")).toHaveTextContent(/^No history yet\.$/);
+  });
+
+  it("blocked_task_marks_the_main_column_and_shows_earlier", async () => {
+    const task = await seedTask({ title: "Stuck" }, "blocked", { question: "Open now?", stage: "plan" });
+    const ask = (to: string, at: string) => ({ action: "set" as const, actor: "spec-writer · sdk · run R-1", at, factoryId: "blocks", field: "question", from: null, reason: "asked", taskId: task.taskId, to });
+    await fakeBoard().core.addEvents([
+      ask("Which branch?", "2026-11-01T10:00:00.000Z"),
+      { action: "set", actor: "you", at: "2026-11-01T11:00:00.000Z", factoryId: "blocks", field: "answer", from: null, reason: "answered", taskId: task.taskId, to: "main" },
+      ask("Open now?", "2026-11-02T10:00:00.000Z")
+    ]);
+    const first = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "View question" }));
+    await screen.findByRole("region", { name: "Open now?" });
+    expect(first.container.querySelector(".sf-task-main")).toHaveClass("sf-task-answering");
+    const earlier = screen.getByRole("region", { name: "Questions and answers" });
+    expect(earlier).toHaveTextContent("Which branch?");
+    expect(earlier).toHaveTextContent("main");
+    first.unmount();
+
+    const other = await seedTask({ title: "Moving" }, "build", { stage: "build" });
+    const { container } = renderTask(other.taskId);
+    await screen.findByRole("heading", { level: 1, name: "Moving" });
+    expect(container.querySelector(".sf-task-main")).not.toHaveClass("sf-task-answering");
+    expect(container.querySelector("details.sf-qa-earlier")).toBeNull();
+  });
+});
+
+describe("TaskView at 360px", () => {
+  let restore: () => void;
+  beforeEach(() => {
+    restore = atPhoneWidth();
+  });
+  afterEach(() => restore());
+
+  it("task_page_fits_360_with_phone_markup", async () => {
+    const task = await seedTask({ title: "Phone gate" }, "spec_review", { stage: "spec" });
+    await fakeBoard().core.addDoc(task.taskId, "spec", "# Spec\nOne.", "spec-agent");
+    const { container } = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "Review spec" }));
+    const approve = await screen.findByRole("button", { name: "Approve spec v1" });
+    expect(container.querySelector(".sf-task-repo")).toHaveTextContent("data → dev");
+    const names = [...container.querySelectorAll(".sf-stepper-name")].map((el) => el.firstChild?.textContent);
+    expect(names).toEqual(["Spec", "Plan", "Build", "Verify", "Review", "PR"]);
+    const more = container.querySelector("details.sf-task-more") as HTMLElement;
+    expect(more).not.toHaveAttribute("open");
+    expect(more.querySelector("summary.sf-label")).toHaveTextContent("Details and history");
+    const bar = approve.closest(".sf-action-bar") as HTMLElement;
+    expect(bar).not.toBeNull();
+    expect(within(bar).getByRole("button", { name: "Request changes" })).toBeInTheDocument();
+    expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
+  });
+
+  it("question_panel_fits_360_with_phone_markup", async () => {
+    const question = "Which base?\nA. dev: matches (recommended)\nB. stg: later";
+    const task = await seedTask({ title: "Phone question" }, "blocked", { question, stage: "spec" });
+    const ask = (to: string, at: string) => ({ action: "set" as const, actor: "spec-writer · sdk · run R-1", at, factoryId: "blocks", field: "question", from: null, reason: "asked", taskId: task.taskId, to });
+    await fakeBoard().core.addEvents([
+      ask("Go on?", "2026-11-01T10:00:00.000Z"),
+      { action: "set", actor: "you", at: "2026-11-01T11:00:00.000Z", factoryId: "blocks", field: "answer", from: null, reason: "answered", taskId: task.taskId, to: "yes" },
+      ask(question, "2026-11-02T10:00:00.000Z")
+    ]);
+    const { container } = renderTask(task.taskId);
+    fireEvent.click(await screen.findByRole("button", { name: "View question" }));
+    expect(await screen.findByRole("heading", { level: 2, name: "A question for you" })).toBeInTheDocument();
+    expect(container.querySelector("p.sf-question-from")).toHaveTextContent(/^Spec writer · Phone question$/);
+    expect(container.querySelectorAll(".sf-radio-card").length).toBeGreaterThan(0);
+    expect(screen.getByRole("region", { name: "Questions and answers" })).toHaveTextContent("Go on?");
+    expect(screen.getByRole("button", { name: "Send answer" }).parentElement).toHaveClass("sf-action-bar");
+    expect(tooWide(BOARD_CSS, renderedClasses(container, BOARD_CSS))).toEqual([]);
   });
 });

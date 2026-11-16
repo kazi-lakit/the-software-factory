@@ -4,11 +4,14 @@ import type { FakeBlocksData } from "../../../core/src/blocks/fakeData";
 
 export type Factories = { defs: FactoryDef[]; repos: FactoryRepo[] };
 
-const checks = {
-  client: { cwd: "client", install: "i", lint: "l", test: "t", typecheck: "tc" },
-  e2e: "off",
-  server: { build: "b", cwd: "server", test: "t" }
-} as const;
+const checks = [
+  { name: "server.build", cwd: "server", run: "b" },
+  { name: "server.test", cwd: "server", run: "t", needs: "server.build" },
+  { name: "client.install", cwd: "client", run: "i" },
+  { name: "client.typecheck", cwd: "client", run: "tc", needs: "client.install" },
+  { name: "client.lint", cwd: "client", run: "l", needs: "client.install" },
+  { name: "client.test", cwd: "client", run: "t", needs: "client.install" }
+];
 
 export const defFixture = (factoryId: string, over: Partial<FactoryDef> = {}): FactoryDef => ({
   active: true, docsPath: "/docs", factoryId, gitEmail: "factory@example.com", gitName: "Factory", name: factoryId,
@@ -35,7 +38,8 @@ export function seedBlocksFactories(data: FakeBlocksData, factories: Factories):
   for (const d of factories.defs) {
     data.seed("FactoryDef", {
       active: d.active ? 1 : 0, agentModels: JSON.stringify(d.agentModels ?? {}), docsPath: d.docsPath, factoryId: d.factoryId, gitEmail: d.gitEmail, gitName: d.gitName, name: d.name,
-      ghUser: d.ghUser, protectedBranches: JSON.stringify(d.protectedBranches), version: d.version, writeId: ""
+      ghUser: d.ghUser, protectedBranches: JSON.stringify(d.protectedBranches), version: d.version, writeId: "",
+      ...(d.github ? { github: JSON.stringify(d.github) } : {})
     });
   }
   for (const r of factories.repos) {

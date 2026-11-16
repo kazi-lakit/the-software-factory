@@ -6,10 +6,13 @@ import { loadBlocksCredential, type BlocksCredential } from './blocks/credential
 import { SdkBlocksData } from './blocks/data.js';
 import { BlocksStore } from './blocks/store.js';
 import { shellExec } from './checks.js';
+import { localStoreDir } from './storeSelect.js';
 import { Engine } from './engine.js';
 import { LocalGitRepos } from './git.js';
 import { OctokitGitHub, type GitHub, type GitHubFor } from './github.js';
 import { FactoryConfig } from './factories.js';
+import { OctokitGitHubBoard, type GitHubBoard, type GitHubBoardFor, type ProjectInfo, type RepoRef } from './githubBoard.js';
+import type { ProjectRef } from './githubConfig.js';
 import { GhLoginMissingError, readGhToken, realExecFile, SecretMissingError, type ExecFile } from './secrets.js';
 import { FileStore, type BoardStore } from './store.js';
 import type { Mode } from './types.js';
@@ -44,15 +47,15 @@ export function findRoot(cwd: string = process.cwd(), env: NodeJS.ProcessEnv = p
   }
 }
 
-/** One GitHub client per gh login, each created on its first call, so commands that never touch GitHub read no token. A failed read is not cached. */
-class LazyGitHub implements GitHub {
-  private inner: Promise<GitHub> | undefined;
+/** Builds a gh login's client from its token on the first use (one read, a failed read is not cached); a missing login becomes GhLoginMissingError. */
+export class LoadOnce<T> {
+  private inner: Promise<T> | undefined;
   constructor(
     private readonly user: string,
     private readonly read: (user: string) => Promise<string>,
-    private readonly make: (token: string) => GitHub,
+    private readonly make: (token: string) => T,
   ) {}
-  private get gh(): Promise<GitHub> {
+  get(): Promise<T> {
     if (!this.inner) {
       const loading = this.read(this.user).then(
         (token) => this.make(token),
@@ -63,20 +66,48 @@ class LazyGitHub implements GitHub {
     }
     return this.inner;
   }
+  /** Forgets the client, so the next get() reads the token again. */
+  reset(): void {
+    this.inner = undefined;
+  }
+  /** Runs a call on the client; a 401 resets it (a new `gh auth login` takes effect) and the error is rethrown. */
+  async run<R>(fn: (client: T) => Promise<R>): Promise<R> {
+    const client = await this.get();
+    try {
+      return await fn(client);
+    } catch (e) {
+      if ((e as { status?: unknown } | null)?.status === 401) this.reset();
+      throw e;
+    }
+  }
+}
+
+/** One GitHub client per gh login, each created on its first call, so commands that never touch GitHub read no token. A failed read is not cached. */
+class LazyGitHub implements GitHub {
+  private readonly loader: LoadOnce<GitHub>;
+  constructor(user: string, read: (user: string) => Promise<string>, make: (token: string) => GitHub) {
+    this.loader = new LoadOnce(user, read, make);
+  }
+  private get gh(): Promise<GitHub> {
+    return this.loader.get();
+  }
   async ensureReady() {
     await this.gh;
   }
   async openPr(p: Parameters<GitHub['openPr']>[0]) {
-    return (await this.gh).openPr(p);
+    return this.loader.run((c) => c.openPr(p));
   }
   async findOpenPr(p: Parameters<GitHub['findOpenPr']>[0]) {
-    return (await this.gh).findOpenPr(p);
+    return this.loader.run((c) => c.findOpenPr(p));
   }
   async prState(url: string) {
-    return (await this.gh).prState(url);
+    return this.loader.run((c) => c.prState(url));
+  }
+  async prReviews(url: string) {
+    return this.loader.run((c) => c.prReviews(url));
   }
   async mergePr(url: string, base: string, protectedBranches?: readonly string[]) {
-    return (await this.gh).mergePr(url, base, protectedBranches);
+    return this.loader.run((c) => c.mergePr(url, base, protectedBranches));
   }
 }
 
@@ -91,6 +122,77 @@ export function lazyGitHubFor(
   return (user) => {
     let c = clients.get(user);
     if (!c) clients.set(user, (c = new LazyGitHub(user, readToken, make)));
+    return c;
+  };
+}
+
+/** The GitHubBoard of one gh login, created on its first call like LazyGitHub. */
+class LazyGitHubBoard implements GitHubBoard {
+  private readonly loader: LoadOnce<GitHubBoard>;
+  constructor(user: string, read: (user: string) => Promise<string>, make: (token: string) => GitHubBoard) {
+    this.loader = new LoadOnce(user, read, make);
+  }
+  private get b(): Promise<GitHubBoard> {
+    return this.loader.get();
+  }
+  async ensureReady() {
+    await this.b;
+  }
+  async tokenScopes() {
+    return this.loader.run((c) => c.tokenScopes());
+  }
+  async project(p: ProjectRef) {
+    return this.loader.run((c) => c.project(p));
+  }
+  async listItems(p: ProjectInfo) {
+    return this.loader.run((c) => c.listItems(p));
+  }
+  async createIssue(r: RepoRef, i: Parameters<GitHubBoard['createIssue']>[1]) {
+    return this.loader.run((c) => c.createIssue(r, i));
+  }
+  async updateIssue(r: RepoRef, number: number, patch: Parameters<GitHubBoard['updateIssue']>[2]) {
+    return this.loader.run((c) => c.updateIssue(r, number, patch));
+  }
+  async closeIssue(r: RepoRef, number: number, reason: 'completed' | 'not_planned') {
+    return this.loader.run((c) => c.closeIssue(r, number, reason));
+  }
+  async addLabels(r: RepoRef, number: number, labels: string[]) {
+    return this.loader.run((c) => c.addLabels(r, number, labels));
+  }
+  async addToProject(p: ProjectInfo, issueNodeId: string) {
+    return this.loader.run((c) => c.addToProject(p, issueNodeId));
+  }
+  async setStatus(p: ProjectInfo, itemId: string, option: string) {
+    return this.loader.run((c) => c.setStatus(p, itemId, option));
+  }
+  async listComments(r: RepoRef, number: number, since?: string) {
+    return this.loader.run((c) => c.listComments(r, number, since));
+  }
+  async addComment(r: RepoRef, number: number, body: string) {
+    return this.loader.run((c) => c.addComment(r, number, body));
+  }
+  async reactToComment(r: RepoRef, commentId: number, content: '+1') {
+    return this.loader.run((c) => c.reactToComment(r, commentId, content));
+  }
+  async labelExists(r: RepoRef, name: string) {
+    return this.loader.run((c) => c.labelExists(r, name));
+  }
+  async createLabel(r: RepoRef, name: string) {
+    return this.loader.run((c) => c.createLabel(r, name));
+  }
+}
+
+/** `GitHubBoardFor` over the gh CLI logins: lazy, and one client per login. */
+export function lazyGitHubBoardFor(
+  read?: (user: string) => Promise<string>,
+  make: (token: string) => GitHubBoard = (token) => new OctokitGitHubBoard(token),
+  exec: ExecFile = realExecFile,
+): GitHubBoardFor {
+  const readToken = read ?? ((user: string) => readGhToken(user, exec));
+  const clients = new Map<string, GitHubBoard>();
+  return (user) => {
+    let c = clients.get(user);
+    if (!c) clients.set(user, (c = new LazyGitHubBoard(user, readToken, make)));
     return c;
   };
 }
@@ -127,8 +229,16 @@ export class LazyBlocksStore implements BoardStore {
   listFactoryRepos(factoryId?: string) { return this.store.then((s) => s.listFactoryRepos(factoryId)); }
   saveFactoryDef(before: Parameters<BoardStore['saveFactoryDef']>[0], after: Parameters<BoardStore['saveFactoryDef']>[1]) { return this.store.then((s) => s.saveFactoryDef(before, after)); }
   saveFactoryRepo(before: Parameters<BoardStore['saveFactoryRepo']>[0], after: Parameters<BoardStore['saveFactoryRepo']>[1]) { return this.store.then((s) => s.saveFactoryRepo(before, after)); }
+  listGitHubLinks(factoryId?: string) { return this.store.then((s) => s.listGitHubLinks(factoryId)); }
+  getGitHubLink(taskId: string) { return this.store.then((s) => s.getGitHubLink(taskId)); }
+  restoreTask(t: Parameters<BoardStore['restoreTask']>[0]) { return this.store.then((s) => s.restoreTask(t)); }
+  saveGitHubLink(before: Parameters<BoardStore['saveGitHubLink']>[0], after: Parameters<BoardStore['saveGitHubLink']>[1]) { return this.store.then((s) => s.saveGitHubLink(before, after)); }
   retireLegacySettings() { return this.store.then((s) => s.retireLegacySettings()); }
   legacySettingsStatus() { return this.store.then((s) => s.legacySettingsStatus()); }
+  githubSchemaReady() { return this.store.then((s) => s.githubSchemaReady()); }
+  listSyncRequests(factoryId?: string) { return this.store.then((s) => s.listSyncRequests(factoryId)); }
+  requestSync(factoryId: string, requestedBy: string) { return this.store.then((s) => s.requestSync(factoryId, requestedBy)); }
+  saveSyncRequest(before: Parameters<BoardStore['saveSyncRequest']>[0], after: Parameters<BoardStore['saveSyncRequest']>[1]) { return this.store.then((s) => s.saveSyncRequest(before, after)); }
   listFactoryHealth() { return this.store.then((s) => s.listFactoryHealth()); }
   setFactoryHealth(h: Parameters<BoardStore['setFactoryHealth']>[0]) { return this.store.then((s) => s.setFactoryHealth(h)); }
   getSettings() { return this.store.then((s) => s.getSettings()); }
@@ -144,7 +254,7 @@ export class LazyBlocksStore implements BoardStore {
 }
 
 export async function wire(o: WireOptions): Promise<{ engine: Engine; store: BoardStore }> {
-  const store: BoardStore = o.store === 'blocks' ? new LazyBlocksStore(o.loadCredential) : new FileStore(join(o.root, '.factory', 'board.json'), { factoriesDir: join(o.root, 'factories'), ...(o.log ? { log: o.log } : {}) });
+  const store: BoardStore = o.store === 'blocks' ? new LazyBlocksStore(o.loadCredential) : new FileStore(join(localStoreDir(o.root), 'board.json'), { factoriesDir: join(o.root, 'factories'), ...(o.log ? { log: o.log } : {}) });
   const engine = new Engine({
     store,
     git: new LocalGitRepos(o.root),

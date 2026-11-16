@@ -10,6 +10,7 @@ export type Input =
   | { kind: 'shipped'; prUrl: string; merged: boolean }
   | { kind: 'pr'; state: 'merged' | 'closed' }
   | { kind: 'answered' }
+  | { kind: 'restart' }
   | { kind: 'limit'; reason: string };
 
 export interface Decision {
@@ -140,6 +141,10 @@ export function decide(task: Task, input: Input, gates: Record<Gate, boolean>): 
         throw new IllegalInputError(task, `limit on a ${task.status} task`);
       }
       return go('blocked', task.stage, 'limit reached', { blockedReason: input.reason });
+
+    case 'restart':
+      if (task.status !== 'blocked' || task.stage !== null) throw new IllegalInputError(task, 'restart');
+      return go('ready', null, 'restarted from ready', { attempt: 0, question: null, blockedReason: null, answer: null });
 
     case 'answered': {
       if (task.status !== 'blocked' || task.stage === null) throw new IllegalInputError(task, 'answered');

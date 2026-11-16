@@ -68,5 +68,19 @@
       "factoryId"
     ],
     "name": "factory_health_factoryid_unique"
+  },
+  {
+    "schemaName": "FactoryGitHubLink",
+    "fields": [
+      "taskId"
+    ],
+    "name": "factory_githublink_taskid_unique"
+  },
+  {
+    "schemaName": "FactorySyncRequest",
+    "fields": [
+      "requestId"
+    ],
+    "name": "factory_syncrequest_requestid_unique"
   }
 ]

@@ -19,6 +19,18 @@
       "description": "ISO time of the check."
     },
     {
+      "name": "watcherSeenAt",
+      "type": "String",
+      "isArray": false,
+      "description": "ISO time the watcher last reported in."
+    },
+    {
+      "name": "githubProblems",
+      "type": "String",
+      "isArray": false,
+      "description": "JSON text of the GitHub setup problems the watcher found."
+    },
+    {
       "name": "version",
       "type": "Int",
       "isArray": false,

@@ -37,6 +37,7 @@ export function loadRepoConfig(reposDir: string, repo: RepoId): RepoConfig {
     const issue = result.error.issues[0]!;
     const path = issue.path.join('.');
     if (path === 'repo') throw new RepoConfigError(`${name}: repo must be "${repo}"`);
+    if (path === 'checks') throw new RepoConfigError(`${name}: ${issue.message}`);
     const detail = issue.code === 'invalid_type' && issue.input === undefined ? 'is required' : issue.message;
     throw new RepoConfigError(`${name}: ${path || '(root)'} ${detail}`);
   }
